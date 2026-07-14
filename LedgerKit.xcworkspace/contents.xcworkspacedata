@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Workspace
+   version = "1.0">
+   <FileRef
+      location = "group:Playground.playground">
+   </FileRef>
+   <FileRef
+      location = "group:Projection/Projection.xcodeproj">
+   </FileRef>
+   <FileRef
+      location = "group:LedgerKitTestSupport">
+   </FileRef>
+   <FileRef
+      location = "group:LedgerKit">
+   </FileRef>
+   <FileSystemSynchronizedGroup
+      location = "group:Documentation"
+      name = "Documentation">
+   </FileSystemSynchronizedGroup>
+</Workspace>
