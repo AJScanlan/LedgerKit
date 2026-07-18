@@ -45,12 +45,11 @@ Two consequences worth internalizing:
 
 Each milestone lists the spec goals it satisfies (G1–G9), its exit criteria (what "done" means), and its beta exposure.
 
-### M0 — Reset the scaffolding & package skeleton
+### ~~M0 — Reset the scaffolding & package skeleton~~
 The current [ChatEvent.swift](../LedgerKit/Sources/LedgerKit/Data/Models/ChatEvent.swift) and [Message.swift](../LedgerKit/Sources/LedgerKit/Data/Models/Message.swift) are *pre-spec* stubs (linear `tokenAppended` events, a flat 3-case status with no branching/interruption/recoverability). They contradict §6 and must be replaced, not extended.
 
-- Delete the stub types; establish the source tree layout (`Core/`, `Reduce/`, `Store/`, `Session/`, `Projection/`).
-- Split the package into two products: `LedgerKit` and `LedgerKitTestSupport` (the Scripted model ships separately — spec §10.1, "the gateway drug").
-- Decide the persistence dependency (GRDB vs raw sqlite3) behind a small protocol — but don't wire it yet (§9: "decide at implementation, don't bikeshed now").
+~~- Delete the stub types; establish the source tree layout (`Core/`, `Reduce/`, `Store/`, `Session/`, `Projection/`).~~
+~~- Split the package into two products: `LedgerKit` and `LedgerKitTestSupport` (the Scripted model ships separately — spec §10.1, "the gateway drug").~~
 
 **Exit:** empty package builds under Swift 6 strict concurrency; two products resolve; stubs gone.
 **Beta risk:** none.
@@ -63,6 +62,7 @@ The event log and derived-state vocabulary. This is API surface *forever* (§6.1
 - Derived state: `Conversation`, `Message`, `MessageState` (5 cases), `Content` (struct, not `String` — §6.2 additive-headroom), `QuarantinedEvent`.
 - `GenerationError`, `Recoverability`, `RequiredAction` (§8) — note `Recoverability` is **not** `Codable` (derived, never persisted).
 - Tagged-JSON `Codable` conformances with a discriminator registry (ADR-001 territory — draft the ADR here even if it's ratified at M9).
+- Decide the persistence dependency (GRDB) behind a small protocol — but don't wire it yet (§9: "decide at implementation, don't bikeshed now").
 
 **Satisfies:** foundation for G1–G9.
 **Exit:** every type round-trips through `Codable`; `MessageState`/`Recoverability` deliberately have no persistence path; a `swift build` is clean.
