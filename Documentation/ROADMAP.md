@@ -49,6 +49,7 @@ Each milestone lists the spec goals it satisfies (G1–G9), its exit criteria (w
 The current [ChatEvent.swift](../LedgerKit/Sources/LedgerKit/Data/Models/ChatEvent.swift) and [Message.swift](../LedgerKit/Sources/LedgerKit/Data/Models/Message.swift) are *pre-spec* stubs (linear `tokenAppended` events, a flat 3-case status with no branching/interruption/recoverability). They contradict §6 and must be replaced, not extended.
 
 ~~- Delete the stub types; establish the source tree layout (`Core/`, `Reduce/`, `Store/`, `Session/`, `Projection/`).~~
+
 ~~- Split the package into two products: `LedgerKit` and `LedgerKitTestSupport` (the Scripted model ships separately — spec §10.1, "the gateway drug").~~
 
 **Exit:** empty package builds under Swift 6 strict concurrency; two products resolve; stubs gone.
@@ -58,10 +59,13 @@ The current [ChatEvent.swift](../LedgerKit/Sources/LedgerKit/Data/Models/ChatEve
 The event log and derived-state vocabulary. This is API surface *forever* (§6.1) — get the shapes right, names are bikesheddable.
 
 ~~- `EventID` (UUIDv7 generator — ours, Foundation only mints v4, §6.1), `ConversationID`, `MessageID`, `GenerationID`, `Int64` sequence.~~
+
 ~~- `LedgerEvent` + the ten-kind `Payload` enum, `Outcome`, `ToolRecord`, `StopInfo`, `ModelDescriptor` (§6.1).~~
+
 ~~- Derived state: `Conversation`, `Message`, `MessageState` (5 cases), `Content` (struct, not `String` — §6.2 additive-headroom), `QuarantinedEvent`.~~ *(plus `MessageTree`'s read API: optional subscript, `children(of:)`, exclusive `siblings(of:)` with virtual-root support, `Conversation.activeMessages`)*
+
 ~~- `GenerationError`, `Recoverability`, `RequiredAction` (§8) — note `Recoverability` is **not** `Codable` (derived, never persisted).~~
-- Tagged-JSON `Codable` conformances with a discriminator registry (ADR-001 territory — draft the ADR here even if it's ratified at M9).
+~~- Tagged-JSON `Codable` conformances with a discriminator registry (ADR-001 territory — draft the ADR here even if it's ratified at M9).~~ *(conformances landed; ADR-001 drafted with R-1–R-4 recorded, D-1–D-3 open for M9)*
 - Decide the persistence dependency (GRDB) behind a small protocol — but don't wire it yet (§9: "decide at implementation, don't bikeshed now").
 
 **Satisfies:** foundation for G1–G9.

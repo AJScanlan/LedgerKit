@@ -1,9 +1,11 @@
 # ADR-001 — Tagged-JSON event encoding & the discriminator registry
 
-**Status:** Draft · opened 2026-07-18 at M1 · ratifies at M9
+**Status:** Draft · opened 2026-07-18 at M1 · updated 2026-07-19 (M1 wire types landed) · ratifies at M9
 **Spec:** §6.1 (envelope/payload, tolerant terminals, gaps), §6.6 (quarantine table), §9
 (persistence & versioning), §10 (test corpus), §13 DoD-5
-**Code:** not yet written — `Core/` payload types land later in M1
+**Code:** `Core/LedgerEvent.swift`, `Core/Outcome.swift`, `Core/GenerationError.swift`,
+`Core/ToolRecord.swift`, `Core/WireCoding.swift` · pinned by
+`Tests/LedgerKitTests/WireFormatTests.swift`
 
 > **Scope note.** §6.6 says its table "is owned by ADR-001." This ADR owns the *decision
 > and reasoning*; the normative twelve rows stay in §6.6 as the single copy. Reproducing
@@ -40,64 +42,135 @@ it, quarantining an unfamiliar outcome would manufacture a forged `.interrupted`
 v0.2 log's new error case would re-render historical *failures* as *crashes* on v0.1
 readers.
 
-## Open — to decide before M9
+## Ratified at M1 (2026-07-19) — decisions now in code
 
-### OQ-1. Named keys, not positional encoding *(proposed: named)*
+### R-1. Flat tagged objects; `kind` is a reserved key
 
-Three payload cases pair two values of the **same** type:
+The discriminator is a `"kind"` field **beside** the payload fields, at every tagged level
+(`Payload`, `Outcome`, `GenerationError`):
 
-```swift
-case userMessageAppended(MessageID, content: String, parent: MessageID?)
-case generationStarted(GenerationID, MessageID, parent: MessageID?, model: ModelDescriptor)
-case messageEdited(original: MessageID, replacement: MessageID, content: String)
+```json
+{"kind":"generationEnded","generationID":"…","outcome":{"kind":"failed","error":{"kind":"rateLimited","retryAfter":30000}}}
 ```
 
-Positional encoding makes a transposition a silent, well-formed decode into the wrong
-identity — surfacing far downstream as §6.6 row 8/9/11 residue rather than as a decode
-error. Named keys make it a key mismatch, and make hostile fixtures self-documenting.
+Chosen over single-key nesting (`{"generationEnded":{…}}`) and a `kind`+`data` wrapper.
+Rationale: fixtures double as living documentation (§10.2), and the flat form reads best;
+discriminator extraction for quarantine diagnostics and the tolerant-terminal probe is a
+trivial keyed read. **Registry rule this creates: no payload field may ever be named
+`kind`.** The closed event set makes this easy to police; the registry check (D-3) should
+enforce it.
+
+### R-2. Named keys, not positional *(was draft OQ-1 — accepted as proposed)*
+
+Three payload cases pair two values of the **same** type
+(`userMessageAppended`, `generationStarted`, `messageEdited`). Positional encoding makes a
+transposition a silent, well-formed decode into the wrong identity — surfacing far
+downstream as §6.6 row 8/9/11 residue rather than as a decode error. Named keys make it a
+key mismatch, and make hostile fixtures self-documenting.
 
 This also subsumes the wire-interchangeability cost accepted in ADR-002 §4: all four
 identifiers encode to indistinguishable bare strings, so *no* identifier-level typing can
 protect same-typed pairs. Named keys protect all of them at zero wire cost.
 
+**Consequence:** the field keys are wire contract alongside the tags — `messageID`,
+`parent`, `original`, `replacement`, etc. are as permanent as the kinds themselves.
+
 **Cost:** larger blobs than a positional array. Judged worth it — these are chat logs, and
 SQLite compresses poorly-entropic key repetition well enough.
 
-### OQ-2. The frozen corpus asserts **encoded bytes**, not decode equality *(proposed)*
+### R-3. Tags mirror Swift case names; the `Kind` enums are the registry's code form *(was draft OQ-3)*
+
+Case-name tags (`"generationStarted"`, not `"gen_start"`) — readable in fixtures and
+diffs. The draft's rename concern (a Swift rename burning a tag forever) is mitigated by
+the implementation shape: each codec declares a private `Kind: String` enum whose **raw
+values are the wire**; a future Swift case rename keeps the old raw value and burns
+nothing.
+
+Current registry inventory (frozen; additions append here):
+
+| Level | Tags |
+|---|---|
+| `Payload.kind` | `conversationCreated` `userMessageAppended` `instructionsChanged` `generationStarted` `deltaAppended` `toolInvocationRecorded` `generationEnded` `messageEdited` `activePathChanged` `titleChanged` |
+| `Outcome.kind` | `completed` `failed` `cancelled` |
+| `GenerationError.kind` | `modelUnavailable` `contextWindowExceeded` `guardrailViolation` `rateLimited` `providerFailure` `transport` `unrecognized` |
+| `ModelUnavailability` (raw string) | `deviceNotEligible` `appleIntelligenceNotEnabled` `modelNotReady` |
+| `TransportFailure` (raw string) | `timeout` `connectivity` `tls` |
+| `ToolRecord.Status` (raw string) | `succeeded` `failed` |
+
+### R-4. Scalar wire forms are pinned in the types, not encoder configuration
+
+- **Durations** (`ToolRecord.duration`, `rateLimited.retryAfter`): integer
+  **milliseconds** (`Int64`). Integer-exact for sub-second tool timings and Retry-After
+  delta-seconds alike.
+- **Timestamps**: ISO 8601 with fractional seconds (`2026-07-18T09:30:00.000Z`),
+  hand-coded in `Record`; decode also accepts the fraction-less form. Millisecond
+  precision — ample for a display/audit-only field the reducer never reads.
+- **Optionals**: nil = **absent key**, never `null` — the additive-evolution posture;
+  asserted by test.
+- **Identifiers**: bare UUID strings (ADR-002).
+
+All four are implemented in the types' own `Codable` conformances so that no
+`JSONEncoder`/`JSONDecoder` strategy can move the format.
+
+## Consequence discovered at implementation: tolerant decode is **lossy**
+
+Decoding a log written by a future LedgerKit is not injective: an unknown outcome
+`{"kind":"resolvedOffline",…}` decodes to
+`.failed(.unrecognized(description: "undecodable outcome: resolvedOffline"))`, and
+re-encoding that value writes the *degraded* bytes. Decode∘encode is identity;
+**encode∘decode is not** — by design, wherever the tolerant-terminal rule fires.
+
+Rule this imposes: **degraded values exist only in memory. Any log transport — export,
+log-shipping (v0.3 sync doc), migration tooling — must move original bytes, never
+decode-and-re-encode.** Append-only storage makes this moot inside the store today; the
+rule exists so no future feature violates it casually. (This is the general
+tolerant-reader lesson: bytes are the truth, decoded values are a view.)
+
+Related: the sentinel strings involved (`"undecodable outcome: "`, `"<missing>"`,
+`"<unreadable>"`, and §8's `"driver:"` prefix) are **diagnostic, non-contractual** —
+matching on them outside log triage is unsupported, and they may change wording without
+notice. Declared here so Hyrum's Law doesn't ossify them by usage.
+
+## Open — to decide before M9
+
+*(Renumbered from the draft's OQ-1…5 to avoid colliding with the spec's beta-tracking
+OQ1–9, §14.)*
+
+### D-1. The frozen corpus asserts **encoded bytes** under a **canonical encoder** *(was OQ-2)*
 
 Round-trip tests catch an *asymmetric* encoder/decoder bug. They cannot catch a
 *symmetric* one: if encoder and decoder are consistently transposed, round-trip passes
 while the on-disk format is silently wrong — and that format is then permanent. Only a
 fixture asserting literal encoded bytes catches it.
 
-M1's exit criterion ("every type round-trips through `Codable`") is therefore necessary
-but not sufficient; §10's version-frozen corpus is what closes the gap, and it must
-compare bytes.
+Byte assertion requires deterministic bytes, so this decision now includes its
+prerequisite: a **canonical encoder configuration** — `outputFormatting = [.sortedKeys]`
+at minimum (decide slash-escaping alongside) — which the M4 store must share, or the
+corpus asserts bytes the store doesn't produce. `WireFormatTests` pins one exact JSON
+string under sorted keys as the down payment; the version-frozen corpus (§10.2, M3)
+generalizes it.
 
-### OQ-3. The registry's actual tag strings
-
-Blocked on the `Payload` enum landing. Open sub-questions: do tags mirror Swift case names
-(`"generationStarted"`) or get stable short codes (`"gen_start"`)? Case names are
-readable in fixtures and diffs; short codes decouple the wire from Swift renames. Given
-tags can never be reused, a rename would otherwise burn a tag permanently.
-
-### OQ-4. Where the schema version physically lives
+### D-2. Where the schema version physically lives *(was OQ-4)*
 
 §9 says every row carries one. Column, envelope field, or both? Interacts with the
-`sequence`/`conversationID` split above — one is key-only, the other deliberately
-duplicated, so there is precedent in both directions.
+`sequence`/`conversationID` split — one is key-only, the other deliberately duplicated,
+so there is precedent in both directions. Decide at M4 with the table schema.
 
-### OQ-5. Registry enforcement
+### D-3. Registry enforcement *(was OQ-5)*
 
-Is "tags are never reused" a convention, a test over a checked-in manifest, or a compile
--time construct? A test reading a frozen `tags.json` is the cheap version and would fail
-loudly on an accidental reuse.
+Is "tags are never reused" a convention, a test over a checked-in manifest, or a
+compile-time construct? A test reading a frozen `tags.json` (mirroring the R-3 inventory,
+plus the R-1 reserved-`kind` rule and R-2's field keys) is the cheap version and fails
+loudly on accidental reuse. Now that the registry exists in code, this fits naturally into
+M3's version-frozen-corpus scaffolding rather than waiting for M9.
 
 ## Consequences
 
 - Every new payload kind is a permanent registry entry (§6.1: "ten payload kinds; resist
-  adding more").
+  adding more") — and so is every field key (R-2) and every tag at every level (R-3).
 - Forward compatibility degrades rather than fails: unfamiliar events quarantine, the
   conversation still loads, and unfamiliar *outcomes* become generic failures.
+- Tolerated-but-degraded values must never be re-serialized as log data; logs transport
+  as bytes.
 - The version-frozen corpus is load-bearing infrastructure, not a nicety — it is the only
   instrument that detects a symmetric encoding error.
