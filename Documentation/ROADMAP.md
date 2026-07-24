@@ -55,7 +55,8 @@ The current [ChatEvent.swift](../LedgerKit/Sources/LedgerKit/Data/Models/ChatEve
 **Exit:** empty package builds under Swift 6 strict concurrency; two products resolve; stubs gone.
 **Beta risk:** none.
 
-### M1 — Core types (pure, wire format)
+### ~~M1 — Core types (pure, wire format)~~
+
 The event log and derived-state vocabulary. This is API surface *forever* (§6.1) — get the shapes right, names are bikesheddable.
 
 ~~- `EventID` (UUIDv7 generator — ours, Foundation only mints v4, §6.1), `ConversationID`, `MessageID`, `GenerationID`, `Int64` sequence.~~
@@ -65,8 +66,10 @@ The event log and derived-state vocabulary. This is API surface *forever* (§6.1
 ~~- Derived state: `Conversation`, `Message`, `MessageState` (5 cases), `Content` (struct, not `String` — §6.2 additive-headroom), `QuarantinedEvent`.~~ *(plus `MessageTree`'s read API: optional subscript, `children(of:)`, exclusive `siblings(of:)` with virtual-root support, `Conversation.activeMessages`)*
 
 ~~- `GenerationError`, `Recoverability`, `RequiredAction` (§8) — note `Recoverability` is **not** `Codable` (derived, never persisted).~~
+
 ~~- Tagged-JSON `Codable` conformances with a discriminator registry (ADR-001 territory — draft the ADR here even if it's ratified at M9).~~ *(conformances landed; ADR-001 drafted with R-1–R-4 recorded, D-1–D-3 open for M9)*
-- Decide the persistence dependency (GRDB) behind a small protocol — but don't wire it yet (§9: "decide at implementation, don't bikeshed now").
+
+~~- Decide the persistence dependency (GRDB) behind a small protocol — but don't wire it yet (§9: "decide at implementation, don't bikeshed now").~~
 
 **Satisfies:** foundation for G1–G9.
 **Exit:** every type round-trips through `Codable`; `MessageState`/`Recoverability` deliberately have no persistence path; a `swift build` is clean.
