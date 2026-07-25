@@ -1,6 +1,6 @@
 # LedgerKit v0.1 — Build Roadmap
 
-**Companion to:** [ledgerkit-v0_1-spec-rev4.md](./ledgerkit-v0_1-spec-rev4.md)
+**Companion to:** [SPEC.md](./SPEC.md) (rev 4)
 **Target:** tagged `0.1.0` before iOS 27 GA (~Sept 2026). Estimate from spec §12: **4–6 weeks part-time**, assuming the ⚠️ beta verifications hold.
 **Sequencing strategy:** *pure core first* — build and fully test everything platform-agnostic (§6) before touching the beta-coupled session seam (§7).
 
@@ -27,7 +27,7 @@ GenerationDriver (§7)  ◄──── ALL beta risk (⚠️ / OQ1–9) lives h
         │
 Observable projection + overlay_live (§6.2, §7.4, §11)
         │
-Scroll demo app (§13 DoD-1/2)
+Projection demo app (§13 DoD-1/2)
         │
 README + ADR-001 + tag (§13 DoD-3/4/5)
 ```
@@ -46,7 +46,7 @@ Two consequences worth internalizing:
 Each milestone lists the spec goals it satisfies (G1–G9), its exit criteria (what "done" means), and its beta exposure.
 
 ### ~~M0 — Reset the scaffolding & package skeleton~~
-The current [ChatEvent.swift](../LedgerKit/Sources/LedgerKit/Data/Models/ChatEvent.swift) and [Message.swift](../LedgerKit/Sources/LedgerKit/Data/Models/Message.swift) are *pre-spec* stubs (linear `tokenAppended` events, a flat 3-case status with no branching/interruption/recoverability). They contradict §6 and must be replaced, not extended.
+The pre-spec `Data/Models/` stubs — `ChatEvent.swift` (linear `tokenAppended` events) and a `Message.swift` with a flat 3-case status, no branching/interruption/recoverability — contradicted §6 and were deleted rather than extended. Both files are gone; the paths no longer resolve.
 
 ~~- Delete the stub types; establish the source tree layout (`Core/`, `Reduce/`, `Store/`, `Session/`, `Projection/`).~~
 
@@ -69,10 +69,12 @@ The event log and derived-state vocabulary. This is API surface *forever* (§6.1
 
 ~~- Tagged-JSON `Codable` conformances with a discriminator registry (ADR-001 territory — draft the ADR here even if it's ratified at M9).~~ *(conformances landed; ADR-001 drafted with R-1–R-4 recorded, D-1–D-3 open for M9)*
 
-~~- Decide the persistence dependency (GRDB) behind a small protocol — but don't wire it yet (§9: "decide at implementation, don't bikeshed now").~~
+~~- Decide the persistence dependency (GRDB) behind a small protocol — but don't wire it yet (§9: "decide at implementation, don't bikeshed now").~~ *(seam landed as `Store/Persistence.swift` — six verbs, `PersistenceConfiguration`, `Snapshot`, `ConversationSummary`; ADR-003 drafted, ratifies at M4 when wired)*
+
+*(Also landed, unplanned: **ADR-002** — identifier design, accepted; four distinct types over a closed `LedgerIdentifier` protocol, UUIDv7 for all four. M9's "ADR-001" DoD-5 item is now three ADRs — see [ADR/README.md](./ADR/README.md).)*
 
 **Satisfies:** foundation for G1–G9.
-**Exit:** every type round-trips through `Codable`; `MessageState`/`Recoverability` deliberately have no persistence path; a `swift build` is clean.
+**Exit:** every type round-trips through `Codable`; `MessageState`/`Recoverability` deliberately have no persistence path; a `swift build` is clean. ✅ *38 tests green.*
 **Beta risk:** low — `StopInfo`/`ModelDescriptor`/`GenerationError` field names are ⚠️ (OQ5, OQ8, §7.7) but the *shapes* are stable; pin field names at M6.
 
 ### M2 — The reducer: `fold → classify` (the heart)
@@ -83,10 +85,16 @@ Pure functions over `Sendable` values, `nonisolated`, no clocks, no I/O (§6.3, 
 - `reduce ≡ classify ∘ fold` convenience.
 - Implement all of I1–I7: determinism, totality/quarantine, single-termination, generation-scoped bounds, interruption synthesis (I5 — the entire crash-recovery mechanism), tree/virtual-root integrity, identity.
 - The §6.6 quarantine table, row-for-row, **plus** the deliberate non-rules: tolerant-terminal (§6.1 row 3), role-adjacency headroom, gap diagnostics (one per contiguous gap), cascades.
+- **Two-stage decode** so quarantine diagnostics can name the event. §6.6 row 1 (undecodable *envelope*) is `eventID: nil`; row 2 (unknown *payload* kind) is meant to carry identity — but M1's `Record.init(from:)` decodes the payload with a plain `try`, so an unknown discriminator throws the whole record away, envelope included. Decode the envelope first, then the payload, or every row-2+ diagnostic silently degrades to sequence-only.
 
 **Satisfies:** G1, G2, G4 (interruption logic), G5 (classification).
 **Exit:** reducer compiles and passes hand-written unit tests for each invariant; no `fold` path can trap (I2).
 **Beta risk:** none — this is pure Swift.
+
+> **Pending spec amendments (M1 audit, 2026-07-24).** Three M2 decisions are not yet settled by rev 4 and should not be improvised in code — the spec wins, so amend it first:
+> 1. **`FoldedState`'s shape.** "`Conversation` minus `Recoverability`" understates the type-level consequence: `Recoverability` lives *inside* `MessageState.failed`, so the folded layer needs its own state enum — one that is `Codable` (snapshots persist it) where `MessageState` deliberately is not, and that carries an **`open(partial:)`** case for the mid-generation snapshots §9 requires. That case is neither `.streaming` (projection-only) nor `.interrupted` (finalization-time, I5), and rev 4 never names it.
+> 2. **The finalize step.** I5 calls `.interrupted` "a finalization-time classification," but §6.3's named pipeline (`fold → classify → overlay`) has no such step. Whether interruption synthesis is its own layer or part of `classify` decides where P3's `resume(snapshot, suffix)` seam sits.
+> 3. **Duplicate `MessageID` via `userMessageAppended`.** §6.6 covers ID collision for `generationStarted` (row 8) and `messageEdited` (row 11) but not this one, so the "single inventory" has a hole the hostile-fixture suite would inherit.
 
 ### M3 — Test corpus + `ScriptedLanguageModel` (the differentiation)
 Spec §10 is explicit that "how do you test an FM app?" is the marketing wedge. This milestone is co-equal with M2 and can interleave with it.
@@ -109,6 +117,7 @@ Three tables, append-only truth (§9).
 - `conversations` — index projection (id, created_at, title, last_event_at), maintained on **non-delta** appends only (§9 — no ~4 Hz churn).
 - Atomicity: multi-event operations commit in one transaction (§9).
 - **P1–P3** property tests (§10.6): fold/tail equivalence, overlay correctness scaffolding, and snapshot equivalence `resume(snapshot, suffix) == fold(fullLog)` *including diagnostics*.
+- ⚠️ **Stamp timestamps at wire precision.** The wire form is millisecond ISO 8601 (ADR-001), but `Date` carries finer precision, so a raw `Date()` does **not** survive a round-trip equality-intact. P1 and P3 compare an in-memory tail against a re-decoded log, so an unrounded stamp makes them fail on timestamp jitter — or, worse, pressures the assertions into fudging equality. Canonicalize at *birth* (truncate when the store stamps), not at encode: canonicalize-at-encode gives every event two identities depending on whether it has been to disk, which is the exact bug class P3 exists to catch.
 
 **Satisfies:** G1 (atomic persistence), G9 (index), snapshot fast-path.
 **Exit:** cold-open of a 10k-event conversation replays ≤ one generation's suffix; P1 & P3 green; index is a table read, not N reductions.
@@ -154,8 +163,10 @@ The `@MainActor @Observable` read side (§6.2, §7.4, §11).
 **Exit:** P2 green; streaming renders smoothly in a preview driven by `ScriptedLanguageModel`; recovery = overlay vanishing, no recovery pass.
 **Beta risk:** none (pure projection over reducer output).
 
-### M8 — Scroll demo app (the hero)
-The [Scroll](../Scroll) Xcode app. DoD-1 and DoD-2.
+### M8 — `Projection` demo app (the hero)
+The [Projection](../Projection) Xcode app (built from `LedgerKit.xcworkspace`, scheme `Projection`; earlier drafts of this roadmap called it "Scroll"). DoD-1 and DoD-2.
+
+> Not to be confused with [LedgerKit/Sources/LedgerKit/Projection/](../LedgerKit/Sources/LedgerKit/Projection/) — the library's internal observable-projection layer, which is M7.
 
 - Chat UI driving the exhaustive `switch message.state` (§11) — the code-aesthetics showpiece.
 - **Kill-and-relaunch:** kill mid-stream → relaunch → `.interrupted` with partial text; Regenerate works; the interrupted partial survives as its own branch, reachable via the branch switcher (**DoD-1**, the README hero GIF).
@@ -169,7 +180,7 @@ The [Scroll](../Scroll) Xcode app. DoD-1 and DoD-2.
 DoD-3/4/5.
 
 - README: 60-second quickstart, the recoverability table, the exhaustive-switch example, and the **"why not just persist `session.transcript`?"** section (§2 incumbent argument, the five-way failure — **DoD-4**).
-- **ADR-001** ratified (§9, §6.1): tagged-JSON encoding, discriminator registry (tags never reused, removed tags reserved), unknown-discriminator→quarantine + tolerant-terminal exception, gap-diagnostic rule, version-frozen corpus, upcasters named as the evolution idiom.
+- **ADR-001** ratified (§9, §6.1): tagged-JSON encoding, discriminator registry (tags never reused, removed tags reserved), unknown-discriminator→quarantine + tolerant-terminal exception, gap-diagnostic rule, version-frozen corpus, upcasters named as the evolution idiom. Its open items D-1–D-3 close here. *(ADR-002 was accepted at M1 and ADR-003 ratifies at M4, so DoD-5's "ADR-001 committed" reads as the ADR set being settled.)*
 - Full CI green: crash-fuzz (suffix + interior-gap), cancellation chaos, hostile-fixture quarantine (§6.6 row-for-row + non-rules + cascade), **P1–P3** (**DoD-3**).
 - Tag `0.1.0`; pre-1.0 SemVer caveats (**DoD-5**).
 
@@ -181,7 +192,7 @@ DoD-3/4/5.
 
 ## Beta-verification track (runs parallel from M6 on)
 
-Today is 2026-07-14; GA is ~Sept. Treat OQ1–9 (spec §14) as a recurring per-beta checklist, not a one-time gate. Keep an OQ tracker; each is "one spike evening, likely recurring":
+GA is ~Sept 2026. Treat OQ1–9 (spec §14) as a recurring per-beta checklist, not a one-time gate. Keep an OQ tracker; each is "one spike evening, likely recurring":
 
 | OQ | What to pin | Blocks |
 |----|-------------|--------|
