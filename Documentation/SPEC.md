@@ -162,6 +162,10 @@ public struct Conversation: Sendable {
 public struct Message: Sendable, Identifiable {
     public var id: MessageID
     public var role: Role                        // user / assistant
+    public var generationID: GenerationID?       // assistant only — I7's 1:1 binding, surfaced
+                                                 // (rev 5). The folded layer *requires* it to
+                                                 // route deltas after a snapshot resume, so
+                                                 // projecting it costs nothing and aids audit.
     public var parent: MessageID?                // nil ⇒ root-level (child of the virtual root)
     public var children: [MessageID]             // sibling order = sequence order (§6.4)
     public var state: MessageState               // user messages: always .complete
@@ -181,7 +185,11 @@ public struct Message: Sendable, Identifiable {
 public struct QuarantinedEvent: Sendable {
     public var sequence: Int64
     public var eventID: EventID?                // nil if the row was undecodable
-    public var reason: String
+    public var reason: QuarantineReason         // closed enum, one case per §6.6 row (rev 5).
+                                                // CustomStringConvertible renders the log prose,
+                                                // so the inventory is compiler-checked and
+                                                // fixtures assert cases, never sentinel strings
+                                                // (which ADR-001 declares non-contractual).
 }
 
 public enum MessageState: Sendable {
@@ -304,6 +312,8 @@ The single inventory of conditions the reducer skips. Disposition for every row 
 `instructionsChanged` and `titleChanged` carry no references and are always valid after genesis.
 
 **Diagnostic identity (rev 5).** `QuarantinedEvent.eventID` is `nil` for exactly two things: row 1, where no identity survived, and gap diagnostics, where no row exists to have one. **Every other row carries the offending event's `EventID`** — including row 2, which is the one that takes deliberate effort. A single all-or-nothing record decode throws away the envelope along with the unrecognized payload, collapsing row 2 into row 1's diagnostic quality; the decoder must therefore recover the envelope independently of the payload, envelope first, payload second. This is not a nicety: row 2 is the forward-compatibility row, so it is precisely the diagnostic a developer reads when a newer LedgerKit wrote the log, and "sequence 4,102 was unreadable" is a materially worse answer than the same sentence with an event ID in it.
+
+**Corollary for the reducer's input.** Rows 1 and 2 are decode failures, so they cannot arise *inside* the fold — it receives decoded events. The fold's input element must therefore be able to represent an unreadable row rather than omit it: a loader that silently drops one turns a row-1/2 condition into a **gap** diagnostic, which is a different and false claim (a gap says the fact is missing; an undecodable row says the fact is present and unintelligible). Reduction consumes a row that is *either* a decoded event *or* a readable key with unreadable contents.
 
 **Deliberate non-rules, recorded so the inventory stays complete (rev 4):** Role adjacency — a `generationStarted` with an assistant parent, or consecutive user-authored siblings — does **not** quarantine; it is wire headroom under store enforcement (§6.1, §6.5). Sequence **gaps** are absences, not skipped events: one diagnostic per contiguous gap, reduction continues (§6.1). And **cascades are expected, not pathological**: a quarantined `generationStarted` (row 8) orphans that generation's deltas, tool records, and terminal, which then quarantine individually under rows 9–10 — a fixture asserts the cascade's exact residue rather than pretending it can't happen (§10). Duplicate **`EventID`** across two rows likewise does **not** quarantine (rev 5): `sequence` is the sole identity reduction depends on (§6.1), and `EventID` earns its keep in debugging, index locality and future log-shipping — none of which the reducer consults. A collision is a generator defect worth finding, not contained loss worth skipping an otherwise-valid fact over.
 
@@ -642,4 +652,5 @@ Rev 5 is a **clarifying** revision, opened by the M1 completion audit (2026-07-2
 - **Tolerant-terminal widened to match its own rationale (§6.6 row 3, §6.1).** §6.1 always described the rule broadly ("a hostile garbage outcome, *or* an `Outcome`/`GenerationError` case added by a future LedgerKit"); row 3 described it narrowly, as unknown-discriminator only. Row 3 now covers every way a nested outcome can fail to decode — unknown tag, unknown nested error tag, corrupt body, absent field — with `<missing>` / `<unreadable>` as the diagnostic tags where none is legible. The one cost is now owned in §6.1: because the rule keys on *failing to decode* rather than on *being unfamiliar*, a corrupt `completed` body re-renders as a failure. Correct trade — terminal-ness is the only property I5 depends on, and the narrow rule would have re-opened the forgery hole for every corruption that is not a clean unknown tag.
 - **Diagnostic identity stated (§6.6).** `QuarantinedEvent.eventID` is `nil` for row 1 and gap diagnostics only; every other row carries the event's identity. Row 2 is the one that takes deliberate effort — an all-or-nothing record decode discards the envelope along with the unrecognized payload, silently degrading the forward-compatibility diagnostic to sequence-only. The envelope must therefore decode independently of the payload. Rev 4 implied the requirement in `QuarantinedEvent`'s doc and stated it nowhere.
 - **Duplicate `EventID` recorded as a non-rule (§6.6).** Rev 4 added the non-rules paragraph so the inventory would "stay honest"; this was the remaining unaddressed condition. It does not quarantine: `sequence` is the only identity reduction consults, so a collision is a generator defect to find, not contained loss to skip a valid fact over.
+- **Smaller.** `Message` gains `generationID` (assistant only) — I7 already made the binding 1:1, and the folded layer *needs* it to route deltas after a snapshot resume, so the map is not reconstructible from a snapshot without it; projecting it publicly costs nothing and helps audit. `QuarantinedEvent.reason` becomes the closed `QuarantineReason` enum rather than a bare `String`, so §6.6's "single inventory" claim is compiler-checked and fixtures assert cases instead of prose ADR-001 declares non-contractual; the rendered string survives as `CustomStringConvertible`. §6.6 gains the input corollary: reduction consumes rows that may be undecodable, because rows 1–2 cannot originate inside a fold over already-decoded events.
 - rev 3 → rev 4 map: see Appendix B.

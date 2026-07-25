@@ -46,16 +46,32 @@ public struct Conversation: Sendable, Identifiable, Equatable {
 
 /// One skipped event's residue (SPEC §6.6, I2): reduction continued as if the
 /// event were absent, and this records why.
-public struct QuarantinedEvent: Sendable, Equatable {
+///
+/// `Codable` for the snapshot path only — snapshots must persist accumulated
+/// diagnostics or reduced state would depend on snapshot timing (SPEC §9, P3).
+public struct QuarantinedEvent: Sendable, Equatable, Codable {
     public var sequence: Int64
-    /// `nil` if the row was undecodable at the envelope level, or for a
-    /// sequence-gap diagnostic (one per contiguous gap, SPEC §6.1).
+    /// `nil` if the row was undecodable at the envelope level (§6.6 row 1), or
+    /// for a sequence-gap diagnostic (one per contiguous gap, SPEC §6.1). Every
+    /// other row carries identity — see §6.6 "Diagnostic identity."
     public var eventID: EventID?
-    public var reason: String
+    /// Typed rather than a bare `String`, so §6.6's inventory is
+    /// compiler-checked and fixtures assert cases instead of prose ADR-001
+    /// declares non-contractual. The rendered sentence is `description`.
+    public var reason: QuarantineReason
 
-    public init(sequence: Int64, eventID: EventID? = nil, reason: String) {
+    public init(sequence: Int64, eventID: EventID? = nil, reason: QuarantineReason) {
         self.sequence = sequence
         self.eventID = eventID
         self.reason = reason
+    }
+}
+
+extension QuarantinedEvent: CustomStringConvertible {
+    /// One log line. Leads with sequence because that is the only identity a
+    /// row-1 diagnostic has.
+    public var description: String {
+        let identity = eventID.map { " (\($0))" } ?? ""
+        return "seq \(sequence)\(identity): \(reason)"
     }
 }

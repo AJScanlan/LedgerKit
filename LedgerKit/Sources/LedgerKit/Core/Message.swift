@@ -6,6 +6,12 @@ import Foundation
 public struct Message: Sendable, Identifiable, Equatable {
     public var id: MessageID
     public var role: Role
+    /// Assistant only — I7 binds this 1:1 with `id`.
+    ///
+    /// Surfaced publicly because the folded layer requires it regardless (it is
+    /// how a snapshot resume rebuilds the generation→message routing map), so
+    /// projecting it costs nothing and makes a log dump legible by eye.
+    public var generationID: GenerationID?
     /// `nil` ⇒ root-level (child of the virtual root, I6).
     public var parent: MessageID?
     /// Sibling order = sequence order (SPEC §6.4).
@@ -29,6 +35,7 @@ public struct Message: Sendable, Identifiable, Equatable {
     public init(
         id: MessageID,
         role: Role,
+        generationID: GenerationID? = nil,
         parent: MessageID? = nil,
         children: [MessageID] = [],
         state: MessageState,
@@ -40,6 +47,7 @@ public struct Message: Sendable, Identifiable, Equatable {
     ) {
         self.id = id
         self.role = role
+        self.generationID = generationID
         self.parent = parent
         self.children = children
         self.state = state
@@ -53,7 +61,11 @@ public struct Message: Sendable, Identifiable, Equatable {
 
 /// Who authored a message. User messages arrive via `userMessageAppended`;
 /// assistant messages exist only as the product of a generation (SPEC §6.1).
-public enum Role: Sendable, Hashable {
+///
+/// `Codable` for the snapshot path only. Role is never on the event wire — it is
+/// *derived* from which event introduced the node — so this conformance carries
+/// none of `LedgerEvent.Payload`'s permanence: snapshots are discard-on-mismatch.
+public enum Role: String, Sendable, Hashable, Codable {
     case user
     case assistant
 }
@@ -75,7 +87,10 @@ public enum MessageState: Sendable, Equatable {
 /// Completed assistant content. A struct, not a bare `String`, on purpose:
 /// v0.2's structured partials (N8) extend it additively without turning
 /// `MessageState` into a moving target (SPEC §6.2).
-public struct Content: Sendable, Equatable {
+///
+/// `Codable` for the snapshot path only (`FoldedMessageState.complete`), which is
+/// why N8 can widen it freely — a stale snapshot is discarded, never migrated.
+public struct Content: Sendable, Equatable, Codable {
     public var text: String
 
     public init(text: String) {
