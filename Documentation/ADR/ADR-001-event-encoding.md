@@ -112,6 +112,76 @@ Current registry inventory (frozen; additions append here):
 All four are implemented in the types' own `Codable` conformances so that no
 `JSONEncoder`/`JSONDecoder` strategy can move the format.
 
+### R-5. Timestamps are canonicalized at **birth**, not at encode *(ratified 2026-07-25, M1 audit)*
+
+R-4 pins the wire form at millisecond precision, but `Date` is a `Double` of seconds and
+`Date()` carries more. So the encoding is **lossy for values minted from the system clock** —
+measured, not assumed:
+
+```
+raw    1784979047.371011
+wire   "2026-07-25T11:30:47.371Z"
+back   1784979047.371          →  equal: false, delta 1.1e-05
+```
+
+`LedgerEvent.Record` is `Equatable`, and P1/P3 (§10.6) compare an in-memory tail or fold against
+a re-decoded log. An unrounded stamp therefore makes the two most load-bearing property tests in
+the package fail on ~10 µs of clock jitter — or, far worse, pressures them into an
+approximate-equality helper, which would mask exactly the class of bug P3 exists to catch.
+
+**Decision: the store truncates to wire precision when it stamps.** Every `Record` is born at
+millisecond precision, so `decode ∘ encode` is the identity for timestamps and equality is exact
+at every layer above.
+
+**Rejected: canonicalize inside `encode(to:)`.** It looks equivalent and is not — it gives every
+event two identities depending on whether it has yet been to disk, so `Record`'s `Equatable`
+conformance would quietly disagree with its own persistence. Canonicalization belongs at the one
+moment a timestamp enters the system, which is also the only moment it is ambiguous.
+
+**Implementation: round-to-nearest on the integer millisecond count.**
+
+```swift
+let milliseconds = (stamp.timeIntervalSince1970 * 1000).rounded()
+return Date(timeIntervalSince1970: milliseconds / 1000)
+```
+
+This lands on the `Double` nearest `ms/1000`, which is exactly the value parsing that millisecond
+string returns — so the round-trip closes.
+
+**Rejected, and worth recording because it is the tempting answer:** defining canonical as
+`parse(format(x))` — "whatever reading my own output yields" — which *appears* idempotent by
+construction. It is not. The formatter emits a decimal whose nearest `Double` sits slightly
+**below** it about half the time, so re-formatting sheds another millisecond, and roughly half of
+all inputs never reach a fixed point. Measured: 99,776 of 200,000 random dates were
+non-idempotent. This was implemented, shipped into the working tree, and caught by the sweep test
+below — which is the argument for the sweep. A single hand-picked fixture passed.
+
+**⚠️ Load-bearing dependency: `ISO8601DateFormatter` rounds; `Date.ISO8601FormatStyle`
+truncates.** The modern format style is a `Sendable` value type and therefore the more natural
+choice under strict concurrency — and substituting it moves ~74% of timestamps one millisecond
+earlier (74,349 of 100,000 measured) *and* breaks `canonical(_:)`, whose stability assumes
+rounding. That is precisely the silent format drift R-4 exists to prevent, so the two APIs are not
+interchangeable here. `WireFormatTests` pins the behaviour with a value whose nearest `Double`
+falls low (`…011.652` must encode `.652Z`, not `.651Z`), which fails loudly if anyone swaps them.
+
+**Cost of keeping the reference-type formatter:** it must be cached, which costs a
+`nonisolated(unsafe)` static. Constructing an `ISO8601DateFormatter` measures ~120 µs, so a
+10k-event cold open (§9) would otherwise spend ~1.2 s allocating formatters it immediately
+discards — 75× the cached cost. The opt-out is narrow and defensible: both instances are
+configured once and never mutated, Foundation's date formatters are documented thread-safe for
+formatting and parsing, and this is a private cache inside an internal helper rather than a
+`Sendable` conformance on public API, which is what tenet 6 actually prohibits.
+
+**Scope.** Timestamps are the only field minted from a high-precision ambient clock, so they are
+the only field needing this. Durations truncate too (R-4), but they arrive from §8's normalization
+already coarse — a `Retry-After` is whole seconds, a tool duration is measured in ms — so there is
+no jitter to canonicalize.
+
+**Tested** in `WireFormatTests` ("Timestamp canonicalization"), over a 2,000-date sweep rather
+than a fixture, in both directions: canonical stamps round-trip equal and are idempotent; a raw
+sub-millisecond `Date` provably does not round-trip, which is why the rule exists. The store's
+stamping site lands at M5.
+
 ## Consequence discovered at implementation: tolerant decode is **lossy**
 
 Decoding a log written by a future LedgerKit is not injective: an unknown outcome
@@ -126,8 +196,9 @@ decode-and-re-encode.** Append-only storage makes this moot inside the store tod
 rule exists so no future feature violates it casually. (This is the general
 tolerant-reader lesson: bytes are the truth, decoded values are a view.)
 
-Related: the sentinel strings involved (`"undecodable outcome: "`, `"<missing>"`,
-`"<unreadable>"`, and §8's `"driver:"` prefix) are **diagnostic, non-contractual** —
+Related: the sentinel strings involved (`"undecodable outcome: "` for an unreadable `Outcome`,
+`"undecodable error: "` for a readable `Outcome` whose nested `GenerationError` was not,
+`"<missing>"`, `"<unreadable>"`, and §8's `"driver:"` prefix) are **diagnostic, non-contractual** —
 matching on them outside log triage is unsupported, and they may change wording without
 notice. Declared here so Hyrum's Law doesn't ossify them by usage.
 

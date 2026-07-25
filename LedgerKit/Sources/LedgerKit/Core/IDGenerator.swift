@@ -9,8 +9,9 @@ import Foundation
 /// every fixture unreproducible.
 ///
 /// - Note: There is deliberately no `EventID()`-style ambient initializer. The
-///   only way to mint an identifier is through a generator someone had to hand
-///   you, which means test code cannot accidentally inherit production
+///   identifier types do expose `init(_ uuid: UUID)` — decoding and fixtures
+///   need it — but nothing in LedgerKit *mints* a value without a generator
+///   someone had to hand it, so no code path can quietly inherit production
 ///   randomness. The store owns one generator and mints inside its append
 ///   transaction (SPEC §6.1).
 public struct IDGenerator<RNG: RandomNumberGenerator & Sendable>: Sendable {
@@ -34,42 +35,15 @@ public struct IDGenerator<RNG: RandomNumberGenerator & Sendable>: Sendable {
     public mutating func messageID() -> MessageID { MessageID(mintV7()) }
     public mutating func generationID() -> GenerationID { GenerationID(mintV7()) }
 
-    // MARK: - Minting strategies
+    // MARK: - Minting
 
     /// Time-sortable. Costs a clock read; embeds creation time to the millisecond.
+    ///
+    /// All four identifiers share this one path — ADR-002 §2 extends §6.1's
+    /// `EventID`-only v7 requirement to every identifier for uniformity, so
+    /// there is deliberately no second strategy to choose between.
     private mutating func mintV7() -> UUID {
         uuidV7.next(milliseconds: now(), using: &rng)
-    }
-
-    /// 122 random bits from the injected source — deterministic under a seeded
-    /// `RNG`, but carrying no time information. Built by hand rather than via
-    /// `UUID()`, which would read ambient system randomness and break fixtures.
-    private mutating func mintV4() -> UUID {
-        let a = rng.next()
-        let b = rng.next()
-
-        return UUID(
-            uuid: (
-                UInt8(truncatingIfNeeded: a >> 56),
-                UInt8(truncatingIfNeeded: a >> 48),
-                UInt8(truncatingIfNeeded: a >> 40),
-                UInt8(truncatingIfNeeded: a >> 32),
-                UInt8(truncatingIfNeeded: a >> 24),
-                UInt8(truncatingIfNeeded: a >> 16),
-                // ver (0100) + 4 random bits.
-                0x40 | UInt8(truncatingIfNeeded: a >> 8) & 0x0F,
-                UInt8(truncatingIfNeeded: a),
-                // var (10) + 6 random bits.
-                0x80 | UInt8(truncatingIfNeeded: b >> 56) & 0x3F,
-                UInt8(truncatingIfNeeded: b >> 48),
-                UInt8(truncatingIfNeeded: b >> 40),
-                UInt8(truncatingIfNeeded: b >> 32),
-                UInt8(truncatingIfNeeded: b >> 24),
-                UInt8(truncatingIfNeeded: b >> 16),
-                UInt8(truncatingIfNeeded: b >> 8),
-                UInt8(truncatingIfNeeded: b)
-            )
-        )
     }
 }
 

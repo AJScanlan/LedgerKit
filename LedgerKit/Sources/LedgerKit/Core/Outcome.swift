@@ -121,11 +121,16 @@ extension Outcome: Codable {
         case .failed:
             // Tolerant nested decode (SPEC §6.6 row 3): an unfamiliar error
             // written by a future LedgerKit stays a *failure* on this reader.
+            //
+            // "undecodable error" names the inner layer, distinct from
+            // `Payload`'s "undecodable outcome" for a whole unreadable
+            // Outcome — the tag being reported here is a GenerationError
+            // discriminator, and conflating the two costs a triage step.
             do {
                 self = .failed(try container.decode(GenerationError.self, forKey: .error))
             } catch {
                 let tag = (try? container.decode(TagProbe.self, forKey: .error))?.kind ?? "<unreadable>"
-                self = .failed(.unrecognized(description: "undecodable outcome: \(tag)"))
+                self = .failed(.unrecognized(description: "undecodable error: \(tag)"))
             }
         case .cancelled:
             self = .cancelled

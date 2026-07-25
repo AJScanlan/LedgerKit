@@ -1,20 +1,22 @@
 // swift-tools-version: 6.3
-// The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
 
+// Platforms track LedgerKit's floor: M3 makes this package depend on it, and a
+// lower floor here would fail to resolve. Bump both together at M6.
 let package = Package(
     name: "LedgerKitTestSupport",
+    platforms: [
+        .iOS(.v26),
+        .macOS(.v26),
+    ],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "LedgerKitTestSupport",
             targets: ["LedgerKitTestSupport"]
         ),
     ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
         .target(
             name: "LedgerKitTestSupport"
         ),

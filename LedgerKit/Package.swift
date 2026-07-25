@@ -1,8 +1,10 @@
 // swift-tools-version: 6.3
-// The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
 
+// Platform floor is 26, not the 27 the spec targets (SPEC header): M1–M5 are pure
+// Swift and must stay verifiable on any Mac with no Apple Intelligence
+// eligibility. Bump to 27 at M6, when `Session/` first touches Foundation Models.
 let package = Package(
     name: "LedgerKit",
     platforms: [
@@ -10,15 +12,12 @@ let package = Package(
         .macOS(.v26),
     ],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "LedgerKit",
             targets: ["LedgerKit"]
         ),
     ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
         .target(
             name: "LedgerKit"
         ),

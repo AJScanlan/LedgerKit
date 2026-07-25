@@ -1,8 +1,4 @@
-import Testing
-@testable import LedgerKitTestSupport
-
-@Test func example() async throws {
-    // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-    // Swift Testing Documentation
-    // https://developer.apple.com/documentation/testing
-}
+// Tests for `ScriptedLanguageModel` land at M3 alongside the double itself.
+//
+// The script-playback logic is beta-independent and testable here; the
+// `LanguageModel` conformance it binds to is OQ3, re-verified per beta at M6.

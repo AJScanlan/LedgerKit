@@ -26,13 +26,56 @@ extension Duration {
 /// display/audit-only field (SPEC §6.1: the reducer never reads timestamps).
 /// Decoding also accepts the fraction-less form.
 enum WireDate {
+    /// - Important: `ISO8601DateFormatter` **rounds** the fractional seconds to
+    ///   the nearest millisecond. `Date.ISO8601FormatStyle` — the modern,
+    ///   `Sendable` alternative — **truncates** instead, and substituting it
+    ///   shifts roughly three quarters of all timestamps one millisecond
+    ///   earlier (measured over 100k random dates). That is a silent wire-format
+    ///   change of exactly the kind ADR-001 R-4 exists to prevent, and it also
+    ///   breaks `canonical(_:)` below, whose stability depends on rounding. Do
+    ///   not swap these two APIs.
+    ///
+    /// `nonisolated(unsafe)` rather than a fresh formatter per call: constructing
+    /// an `ISO8601DateFormatter` costs ~120 µs, so a 10k-event cold open (§9)
+    /// would spend ~1.2 s allocating formatters it immediately discards — 75×
+    /// slower than reusing one, measured. The opt-out is sound because both
+    /// instances are configured here and never mutated again, and Foundation's
+    /// date formatters are documented thread-safe for formatting and parsing.
+    /// Note this is not a `Sendable` conformance on a public type — tenet 6's
+    /// actual prohibition — but a private cache inside an internal helper.
+    nonisolated(unsafe) private static let fractional = formatter(fractionalSeconds: true)
+    nonisolated(unsafe) private static let plain = formatter(fractionalSeconds: false)
+
     static func string(from date: Date) -> String {
-        formatter(fractionalSeconds: true).string(from: date)
+        fractional.string(from: date)
     }
 
     static func date(from string: String) -> Date? {
-        formatter(fractionalSeconds: true).date(from: string)
-            ?? formatter(fractionalSeconds: false).date(from: string)
+        fractional.date(from: string) ?? plain.date(from: string)
+    }
+
+    /// Rounds `stamp` to the millisecond the wire format can actually carry.
+    ///
+    /// The store calls this when it *stamps* an event, never at encode time
+    /// (ADR-001 R-5): the wire form holds milliseconds but `Date` is a `Double`
+    /// of seconds, so a raw `Date()` does not survive its own encoding. Since
+    /// `LedgerEvent.Record` is `Equatable` and P1/P3 compare in-memory events
+    /// against re-decoded ones (SPEC §10.6), an unrounded stamp would fail those
+    /// property tests on microseconds of clock jitter. Canonicalizing at birth
+    /// keeps equality exact at every layer above.
+    ///
+    /// Round-to-nearest on the integer millisecond count, and deliberately *not*
+    /// a round-trip through the wire string: `parse(format(x))` looks like it
+    /// would be idempotent by construction and is not, because the formatter's
+    /// output is a decimal the nearest `Double` sits slightly below about half
+    /// the time — so re-formatting sheds another millisecond, and roughly half
+    /// of all values never reach a fixed point at all. Integer rounding lands on
+    /// the `Double` nearest `ms/1000`, which is precisely the value parsing that
+    /// millisecond string returns, so the round-trip closes exactly. Verified by
+    /// test over the system clock rather than argued from representation.
+    static func canonical(_ stamp: Date) -> Date {
+        let milliseconds = (stamp.timeIntervalSince1970 * 1000).rounded()
+        return Date(timeIntervalSince1970: milliseconds / 1000)
     }
 
     private static func formatter(fractionalSeconds: Bool) -> ISO8601DateFormatter {

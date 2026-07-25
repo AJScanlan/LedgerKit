@@ -1,6 +1,6 @@
 # LedgerKit v0.1 — Build Roadmap
 
-**Companion to:** [SPEC.md](./SPEC.md) (rev 4)
+**Companion to:** [SPEC.md](./SPEC.md) (rev 5)
 **Target:** tagged `0.1.0` before iOS 27 GA (~Sept 2026). Estimate from spec §12: **4–6 weeks part-time**, assuming the ⚠️ beta verifications hold.
 **Sequencing strategy:** *pure core first* — build and fully test everything platform-agnostic (§6) before touching the beta-coupled session seam (§7).
 
@@ -80,9 +80,10 @@ The event log and derived-state vocabulary. This is API surface *forever* (§6.1
 ### M2 — The reducer: `fold → classify` (the heart)
 Pure functions over `Sendable` values, `nonisolated`, no clocks, no I/O (§6.3, §11 isolation sketch).
 
-- `fold(log) -> FoldedState` — the pure reduction. `FoldedState` = `Conversation` minus `Recoverability`, and is *exactly* the snapshot schema (§9), so name it deliberately.
-- `classify(folded, mapping) -> Conversation` — applies the `(GenerationError) -> Recoverability` mapping; ships the default table (§8) with per-case override.
+- `fold(log) -> FoldedState` — the pure reduction, and *exactly* the snapshot schema (§9). Its own four-case `FoldedMessageState` (§6.3, rev 5), **not** `MessageState`: `Codable` where the public enum deliberately is not, with `.open(partial:)` for started-and-unterminated generations and no `.interrupted` case at all — a snapshot that could hold `.interrupted` is one that can forge a crash. `Content` and `QuarantinedEvent` need `Codable` for this path; both currently lack it.
+- `classify(folded, mapping) -> Conversation` — **finalizes and classifies**: `.open ⇒ .interrupted` (I5) plus the `(GenerationError) -> Recoverability` mapping; ships the default table (§8) with per-case override.
 - `reduce ≡ classify ∘ fold` convenience.
+- **Decide `FoldedState`'s visibility.** Internal is the stronger default — consumers only ever hold `Conversation`, and internal is what makes §6.3's "the folded layer's `Codable` commits to nothing" true by construction rather than by promise. Public `fold`/`classify` would put the snapshot schema in the API surface.
 - Implement all of I1–I7: determinism, totality/quarantine, single-termination, generation-scoped bounds, interruption synthesis (I5 — the entire crash-recovery mechanism), tree/virtual-root integrity, identity.
 - The §6.6 quarantine table, row-for-row, **plus** the deliberate non-rules: tolerant-terminal (§6.1 row 3), role-adjacency headroom, gap diagnostics (one per contiguous gap), cascades.
 - **Two-stage decode** so quarantine diagnostics can name the event. §6.6 row 1 (undecodable *envelope*) is `eventID: nil`; row 2 (unknown *payload* kind) is meant to carry identity — but M1's `Record.init(from:)` decodes the payload with a plain `try`, so an unknown discriminator throws the whole record away, envelope included. Decode the envelope first, then the payload, or every row-2+ diagnostic silently degrades to sequence-only.
@@ -91,17 +92,14 @@ Pure functions over `Sendable` values, `nonisolated`, no clocks, no I/O (§6.3, 
 **Exit:** reducer compiles and passes hand-written unit tests for each invariant; no `fold` path can trap (I2).
 **Beta risk:** none — this is pure Swift.
 
-> **Pending spec amendments (M1 audit, 2026-07-24).** Three M2 decisions are not yet settled by rev 4 and should not be improvised in code — the spec wins, so amend it first:
-> 1. **`FoldedState`'s shape.** "`Conversation` minus `Recoverability`" understates the type-level consequence: `Recoverability` lives *inside* `MessageState.failed`, so the folded layer needs its own state enum — one that is `Codable` (snapshots persist it) where `MessageState` deliberately is not, and that carries an **`open(partial:)`** case for the mid-generation snapshots §9 requires. That case is neither `.streaming` (projection-only) nor `.interrupted` (finalization-time, I5), and rev 4 never names it.
-> 2. **The finalize step.** I5 calls `.interrupted` "a finalization-time classification," but §6.3's named pipeline (`fold → classify → overlay`) has no such step. Whether interruption synthesis is its own layer or part of `classify` decides where P3's `resume(snapshot, suffix)` seam sits.
-> 3. **Duplicate `MessageID` via `userMessageAppended`.** §6.6 covers ID collision for `generationStarted` (row 8) and `messageEdited` (row 11) but not this one, so the "single inventory" has a hole the hostile-fixture suite would inherit.
+> **M1 audit → spec rev 5 (2026-07-25).** The three M2 decisions this milestone was missing are now settled in the spec, not here: the folded layer's own enum and the `.open` state (§6.3), finalization living inside `classify` (§6.3, I1), and `MessageID` allocate-once closing the §6.6 row-6 hole (I7). Rev 5 is clarifying only — nothing above reverses a rev 4 semantic. See SPEC Appendix C.
 
 ### M3 — Test corpus + `ScriptedLanguageModel` (the differentiation)
 Spec §10 is explicit that "how do you test an FM app?" is the marketing wedge. This milestone is co-equal with M2 and can interleave with it.
 
 - `ScriptedLanguageModel` in `LedgerKitTestSupport` (§10.1) — conforms to Apple's `LanguageModel` (model+executor). **The conformance surface is OQ3** — stub it behind an internal protocol now, bind to the real thing at M6. The *scripting* logic (emit snapshot / wait / throw / complete) is beta-independent.
 - **Golden logs** (§10.2): fixture log → expected reduced state, snapshot-tested; doubles as living docs.
-- **Hostile fixtures** (§10.2): the §6.6 table row-for-row, each asserting exact `diagnostics` residue; the tolerant-terminal *non*-quarantine; role-adjacency non-rules; the cascade fixture; mid-log gap fixture; root-message-edit-as-sibling.
+- **Hostile fixtures** (§10.2): the §6.6 table row-for-row, each asserting exact `diagnostics` residue; the tolerant-terminal *non*-quarantine; role-adjacency non-rules; the cascade fixture; mid-log gap fixture; root-message-edit-as-sibling. Rev-5 additions: `MessageID` collision at all **three** introduction sites (rows 6, 8, 11 — name them as one rule, not three coincidences); row 3's four shapes (unknown outcome tag, unknown nested error tag, corrupt body, absent field — the last two land `<unreadable>` / `<missing>`); duplicate `EventID` reducing *without* residue; and every non-row-1 diagnostic asserting a populated `eventID`, which is what keeps the two-stage decode honest.
 - **Crash-point fuzzing** (§10.3): truncate every fixture at every prefix + interior-gap variant; assert valid state, correct `.interrupted` (I5), no traps (I2). Spec calls this "the single highest-value suite."
 - **Version-frozen corpus** scaffolding (§10.2) — freeze released-version fixtures in CI forever.
 

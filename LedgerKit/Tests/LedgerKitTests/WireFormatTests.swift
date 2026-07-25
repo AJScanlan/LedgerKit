@@ -191,6 +191,69 @@ struct EnvelopeTests {
     }
 }
 
+// MARK: - Timestamp canonicalization (ADR-001 R-5)
+
+@Suite("Timestamp canonicalization")
+struct TimestampCanonicalizationTests {
+    /// Sub-millisecond precision, fixed rather than `Date()` so the test is
+    /// deterministic instead of merely overwhelmingly likely.
+    private static let subMillisecond = Date(timeIntervalSince1970: 1_784_979_047.371011)
+
+    private func record(stamped timestamp: Date) -> LedgerEvent.Record {
+        LedgerEvent.Record(
+            id: Fix.eventID,
+            conversationID: Fix.conversationID,
+            timestamp: timestamp,
+            payload: .titleChanged(nil)
+        )
+    }
+
+    /// Enough to catch a ~50%-failure-rate bug with certainty rather than by
+    /// luck — the shipped-then-reverted string round-trip implementation passed
+    /// on a single hand-picked date and failed on half of all others.
+    private static let sweep = 2_000
+
+    @Test("a raw high-precision Date does NOT survive its own encoding — this is why R-5 exists")
+    func rawDateLosesPrecision() throws {
+        let original = record(stamped: Self.subMillisecond)
+        #expect(try roundTrip(original) != original)
+    }
+
+    @Test("the wire form ROUNDS to nearest millisecond — substituting a truncating formatter regresses it")
+    func wireFormRoundsRatherThanTruncates() {
+        // The nearest Double to 1712037011.652 sits just below it, so a
+        // truncating formatter emits ".651Z". `Date.ISO8601FormatStyle` does
+        // exactly that; `ISO8601DateFormatter` rounds. canonical(_:) depends on
+        // the rounding, so this test is the guard against swapping them.
+        let stamp = Date(timeIntervalSince1970: 1_712_037_011.652)
+        #expect(WireDate.string(from: stamp) == "2024-04-02T05:50:11.652Z")
+    }
+
+    @Test("canonical stamps round-trip exactly, across the whole clock range")
+    func canonicalStampsRoundTrip() throws {
+        for _ in 0..<Self.sweep {
+            let raw = Date(timeIntervalSince1970: .random(in: 1_700_000_000..<1_900_000_000))
+            let original = record(stamped: WireDate.canonical(raw))
+            #expect(try roundTrip(original) == original)
+        }
+    }
+
+    @Test("canonical is idempotent — a canonical stamp is already at a fixed point")
+    func canonicalIsIdempotent() {
+        for _ in 0..<Self.sweep {
+            let once = WireDate.canonical(Date(timeIntervalSince1970: .random(in: 1_700_000_000..<1_900_000_000)))
+            #expect(WireDate.canonical(once) == once)
+        }
+    }
+
+    @Test("canonicalizing the system clock is stable — the store's actual stamping path")
+    func liveClockCanonicalizes() throws {
+        let stamped = record(stamped: WireDate.canonical(Date()))
+        #expect(try roundTrip(stamped) == stamped)
+        #expect(WireDate.canonical(Self.subMillisecond) != Self.subMillisecond, "must actually round")
+    }
+}
+
 // MARK: - Terminal tolerance (§6.6 row 3) vs. strictness everywhere else
 
 @Suite("Terminal decode tolerance")
@@ -206,14 +269,31 @@ struct TerminalToleranceTests {
         ))
     }
 
-    @Test("unknown nested GenerationError discriminator degrades with its own tag")
+    @Test("unknown nested GenerationError discriminator degrades, naming the inner layer")
     func unknownErrorKind() throws {
         let payload = try decodePayload(
             #"{"kind":"generationEnded","generationID":"01980E5A-0000-7000-8000-00000000000E","outcome":{"kind":"failed","error":{"kind":"quotaExhausted"}}}"#
         )
+        // "error", not "outcome": the Outcome decoded fine as `failed`; it is
+        // the nested GenerationError that was unreadable (§6.6 row 3).
         #expect(payload == .generationEnded(
             Fix.generationID,
-            .failed(.unrecognized(description: "undecodable outcome: quotaExhausted"))
+            .failed(.unrecognized(description: "undecodable error: quotaExhausted"))
+        ))
+    }
+
+    @Test("a corrupt body under a KNOWN outcome tag still lands as a terminal")
+    func corruptCompletedBody() throws {
+        // Row 3 keys on the outcome failing to decode, not on its tag being
+        // unfamiliar — so a `completed` missing its stopInfo degrades too. The
+        // owned cost (§6.1): a generation that DID complete re-renders as a
+        // failure. Terminal-ness is what I5 depends on, and it survives.
+        let payload = try decodePayload(
+            #"{"kind":"generationEnded","generationID":"01980E5A-0000-7000-8000-00000000000E","outcome":{"kind":"completed"}}"#
+        )
+        #expect(payload == .generationEnded(
+            Fix.generationID,
+            .failed(.unrecognized(description: "undecodable outcome: completed"))
         ))
     }
 

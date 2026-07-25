@@ -4,7 +4,7 @@ Durable conversation-state engine for Foundation Models apps on Apple platforms 
 
 ## Two source-of-truth documents
 
-- **`Documentation/SPEC.md`** — the **contract** (currently rev 4). Semantics defined here are binding; type names in it are illustrative ("bikesheddable; semantics not").
+- **`Documentation/SPEC.md`** — the **contract** (currently rev 5). Semantics defined here are binding; type names in it are illustrative ("bikesheddable; semantics not").
 - **`Documentation/ROADMAP.md`** — the **build order** (milestones M0–M9).
 - **On any conflict, the spec wins and the roadmap is stale — fix the roadmap.** (The roadmap states this rule itself.)
 
