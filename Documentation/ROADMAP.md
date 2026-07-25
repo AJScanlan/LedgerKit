@@ -77,7 +77,7 @@ The event log and derived-state vocabulary. This is API surface *forever* (§6.1
 **Exit:** every type round-trips through `Codable`; `MessageState`/`Recoverability` deliberately have no persistence path; a `swift build` is clean. ✅ *38 tests green.*
 **Beta risk:** low — `StopInfo`/`ModelDescriptor`/`GenerationError` field names are ⚠️ (OQ5, OQ8, §7.7) but the *shapes* are stable; pin field names at M6.
 
-### M2 — The reducer: `fold → classify` (the heart)
+### ~~M2 — The reducer: `fold → classify` (the heart)~~
 Pure functions over `Sendable` values, `nonisolated`, no clocks, no I/O (§6.3, §11 isolation sketch).
 
 - ~~`fold(log) -> FoldedState` — the pure reduction, and *exactly* the snapshot schema (§9). Its own four-case `FoldedMessageState` (§6.3, rev 5), **not** `MessageState`: `Codable` where the public enum deliberately is not, with `.open(partial:)` for started-and-unterminated generations and no `.interrupted` case at all — a snapshot that could hold `.interrupted` is one that can forge a crash.~~ **M2.1 done** — `Reduce/{QuarantineReason,LoadedEvent,FoldedState,Folder,Fold}.swift`, 112 tests green. `Content`, `Role` and `QuarantinedEvent` gained `Codable`; `FoldedState` also gained a stored **`hasGenesis`**, which is *not* derivable (a nil-title genesis with no messages is indistinguishable from no genesis) and without which resuming a snapshot of a genesis-less log diverges from replay — caught by the P3 split sweep over the hostile fixture.
