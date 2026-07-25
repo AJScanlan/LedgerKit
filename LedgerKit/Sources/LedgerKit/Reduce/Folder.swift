@@ -78,30 +78,43 @@ struct Folder {
         self.expectedSequence = sequence + 1
         self.endpoint = state.activePath.last
 
-        var generationMessages: [GenerationID: MessageID] = [:]
-        var partials: [GenerationID: String] = [:]
-        for id in state.rootChildren { Self.collect(id, in: state, into: &generationMessages, and: &partials) }
-        self.generationMessages = generationMessages
-        self.partials = partials
+        (self.generationMessages, self.partials) = Self.reconstructRouting(from: state)
     }
 
-    /// Walks the tree in sibling order rebuilding the routing map and partial
-    /// buffers. Recurses over `children` arrays, **not** over `state.messages`,
-    /// so reconstruction never depends on dictionary order (see the I1 hazard).
-    private static func collect(
-        _ id: MessageID,
-        in state: FoldedState,
-        into generationMessages: inout [GenerationID: MessageID],
-        and partials: inout [GenerationID: String]
-    ) {
-        guard let message = state.messages[id] else { return }
-        if let generation = message.generationID {
-            generationMessages[generation] = id
-            if case .open(let partial) = message.state { partials[generation] = partial }
+    /// Rebuilds the routing map and partial buffers by walking the tree in
+    /// sibling order — over `children` arrays, **not** over `state.messages`, so
+    /// reconstruction never depends on dictionary order (see the I1 hazard).
+    ///
+    /// Iterative with an explicit stack rather than recursive. In a linear
+    /// conversation — the ordinary shape — tree depth *is* message count, so
+    /// recursion here would consume stack proportional to conversation length and
+    /// could overflow on a pathological log. I2 promises the reducer never traps,
+    /// and overflowing the stack is trapping.
+    ///
+    /// `visited` bounds the walk. A cycle is unreachable through the fold, which
+    /// validates that a parent exists before inserting a child — but this
+    /// consumes a *snapshot*, which is bytes on disk, and a decodable-but-corrupt
+    /// one must terminate rather than spin forever.
+    private static func reconstructRouting(
+        from state: FoldedState
+    ) -> ([GenerationID: MessageID], [GenerationID: String]) {
+        var generationMessages: [GenerationID: MessageID] = [:]
+        var partials: [GenerationID: String] = [:]
+        var visited: Set<MessageID> = []
+        // Reversed so `popLast` yields siblings in order: depth-first, sibling
+        // order preserved, identical to the recursive traversal it replaces.
+        var stack = Array(state.rootChildren.reversed())
+
+        while let id = stack.popLast() {
+            guard visited.insert(id).inserted, let message = state.messages[id] else { continue }
+            if let generation = message.generationID {
+                generationMessages[generation] = id
+                if case .open(let partial) = message.state { partials[generation] = partial }
+            }
+            stack.append(contentsOf: message.children.reversed())
         }
-        for child in message.children {
-            collect(child, in: state, into: &generationMessages, and: &partials)
-        }
+
+        return (generationMessages, partials)
     }
 
     // MARK: - Applying

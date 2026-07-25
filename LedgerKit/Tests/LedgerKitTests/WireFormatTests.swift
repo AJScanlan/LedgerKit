@@ -4,7 +4,7 @@ import Testing
 
 // MARK: - Fixtures
 
-private enum Fix {
+private enum Wire {
     static let eventID = EventID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000A")!)
     static let conversationID = ConversationID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000B")!)
     static let messageID = MessageID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000C")!)
@@ -81,12 +81,12 @@ private func decodePayload(_ json: String) throws -> LedgerEvent.Payload {
 
 @Suite("Wire round-trips")
 struct WireRoundTripTests {
-    @Test("every payload kind", arguments: Fix.allKinds)
+    @Test("every payload kind", arguments: Wire.allKinds)
     func payloadRoundTrips(_ payload: LedgerEvent.Payload) throws {
         #expect(try roundTrip(payload) == payload)
     }
 
-    @Test("nil optionals are omitted and restored", arguments: Fix.nilVariants)
+    @Test("nil optionals are omitted and restored", arguments: Wire.nilVariants)
     func nilVariantRoundTrips(_ payload: LedgerEvent.Payload) throws {
         let data = try JSONEncoder().encode(payload)
         let json = String(decoding: data, as: UTF8.self)
@@ -94,24 +94,24 @@ struct WireRoundTripTests {
         #expect(try roundTrip(payload) == payload)
     }
 
-    @Test("every GenerationError case", arguments: Fix.allErrors)
+    @Test("every GenerationError case", arguments: Wire.allErrors)
     func errorRoundTrips(_ error: GenerationError) throws {
         #expect(try roundTrip(error) == error)
     }
 
     @Test("all Outcome cases")
     func outcomeRoundTrips() throws {
-        for outcome: Outcome in [.completed(Fix.stopInfo), .completed(StopInfo()), .failed(.guardrailViolation), .cancelled] {
+        for outcome: Outcome in [.completed(Wire.stopInfo), .completed(StopInfo()), .failed(.guardrailViolation), .cancelled] {
             #expect(try roundTrip(outcome) == outcome)
         }
     }
 
     @Test("ToolRecord duration is integer milliseconds on the wire")
     func toolRecordDuration() throws {
-        let data = try JSONEncoder().encode(Fix.toolRecord)
+        let data = try JSONEncoder().encode(Wire.toolRecord)
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["duration"] as? Int == 847)
-        #expect(try roundTrip(Fix.toolRecord) == Fix.toolRecord)
+        #expect(try roundTrip(Wire.toolRecord) == Wire.toolRecord)
     }
 
     @Test("retryAfter is integer milliseconds on the wire")
@@ -126,7 +126,7 @@ struct WireRoundTripTests {
         let payload = try decodePayload(
             #"{"kind":"deltaAppended","generationID":"01980E5A-0000-7000-8000-00000000000E","text":"hi","mood":"jaunty"}"#
         )
-        #expect(payload == .deltaAppended(Fix.generationID, text: "hi"))
+        #expect(payload == .deltaAppended(Wire.generationID, text: "hi"))
     }
 }
 
@@ -142,10 +142,10 @@ struct EnvelopeTests {
 
     private var record: LedgerEvent.Record {
         LedgerEvent.Record(
-            id: Fix.eventID,
-            conversationID: Fix.conversationID,
+            id: Wire.eventID,
+            conversationID: Wire.conversationID,
             timestamp: Self.timestamp,
-            payload: .userMessageAppended(Fix.messageID, content: "Explain valley folds", parent: nil)
+            payload: .userMessageAppended(Wire.messageID, content: "Explain valley folds", parent: nil)
         )
     }
 
@@ -173,8 +173,8 @@ struct EnvelopeTests {
     func eventAssembly() {
         let event = LedgerEvent(record: record, sequence: 42)
         #expect(event.sequence == 42)
-        #expect(event.id == Fix.eventID)
-        #expect(event.conversationID == Fix.conversationID)
+        #expect(event.id == Wire.eventID)
+        #expect(event.conversationID == Wire.conversationID)
         #expect(event.record == record)
     }
 
@@ -201,8 +201,8 @@ struct TimestampCanonicalizationTests {
 
     private func record(stamped timestamp: Date) -> LedgerEvent.Record {
         LedgerEvent.Record(
-            id: Fix.eventID,
-            conversationID: Fix.conversationID,
+            id: Wire.eventID,
+            conversationID: Wire.conversationID,
             timestamp: timestamp,
             payload: .titleChanged(nil)
         )
@@ -264,7 +264,7 @@ struct TerminalToleranceTests {
             #"{"kind":"generationEnded","generationID":"01980E5A-0000-7000-8000-00000000000E","outcome":{"kind":"resolvedOffline","note":"from the future"}}"#
         )
         #expect(payload == .generationEnded(
-            Fix.generationID,
+            Wire.generationID,
             .failed(.unrecognized(description: "undecodable outcome: resolvedOffline"))
         ))
     }
@@ -277,7 +277,7 @@ struct TerminalToleranceTests {
         // "error", not "outcome": the Outcome decoded fine as `failed`; it is
         // the nested GenerationError that was unreadable (§6.6 row 3).
         #expect(payload == .generationEnded(
-            Fix.generationID,
+            Wire.generationID,
             .failed(.unrecognized(description: "undecodable error: quotaExhausted"))
         ))
     }
@@ -292,7 +292,7 @@ struct TerminalToleranceTests {
             #"{"kind":"generationEnded","generationID":"01980E5A-0000-7000-8000-00000000000E","outcome":{"kind":"completed"}}"#
         )
         #expect(payload == .generationEnded(
-            Fix.generationID,
+            Wire.generationID,
             .failed(.unrecognized(description: "undecodable outcome: completed"))
         ))
     }
@@ -303,7 +303,7 @@ struct TerminalToleranceTests {
             #"{"kind":"generationEnded","generationID":"01980E5A-0000-7000-8000-00000000000E","outcome":42}"#
         )
         #expect(payload == .generationEnded(
-            Fix.generationID,
+            Wire.generationID,
             .failed(.unrecognized(description: "undecodable outcome: <unreadable>"))
         ))
     }
@@ -314,7 +314,7 @@ struct TerminalToleranceTests {
             #"{"kind":"generationEnded","generationID":"01980E5A-0000-7000-8000-00000000000E"}"#
         )
         #expect(payload == .generationEnded(
-            Fix.generationID,
+            Wire.generationID,
             .failed(.unrecognized(description: "undecodable outcome: <missing>"))
         ))
     }
@@ -357,7 +357,7 @@ struct NoPersistencePathTests {
     @Test("LedgerEvent itself is not Codable — only Record is the wire blob (§9)")
     func ledgerEventNotCodable() {
         let record = LedgerEvent.Record(
-            id: Fix.eventID, conversationID: Fix.conversationID,
+            id: Wire.eventID, conversationID: Wire.conversationID,
             timestamp: Date(timeIntervalSince1970: 0), payload: .titleChanged(nil)
         )
         let value: Any = LedgerEvent(record: record, sequence: 1)
