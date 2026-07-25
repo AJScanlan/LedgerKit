@@ -72,6 +72,193 @@ struct CorpusFixture {
 
 enum Corpus {
 
+    // MARK: Golden — logs a healthy store produces (SPEC §10.2)
+    //
+    // Every one of these must reduce with empty residue, and together they are
+    // the sweeps' only exposure to healthy state: before Phase 1 the corpus held
+    // `rich` and `hostile` alone, so every mutation sweep started from a log that
+    // was already damaged. A reducer bug that only manifests on clean input —
+    // the likeliest kind, since clean input is what ships — had nothing to fail.
+
+    /// The 95% path: one user message, one generation, completed.
+    static var ordinaryTurn: CorpusFixture {
+        var log = Log()
+        log.append(.conversationCreated(title: "Valley folds 101"))
+        log.append(.userMessageAppended(Fix.userA, content: "Explain valley folds", parent: nil))
+        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(Fix.genA, text: "A valley fold "))
+        log.append(.deltaAppended(Fix.genA, text: "brings the paper down."))
+        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+
+        return CorpusFixture(
+            name: "ordinaryTurn",
+            kind: .golden,
+            summary: "the 95% path — user message, generation, completed",
+            log: log,
+            residue: []
+        )
+    }
+
+    /// Two completed turns and a third user message with no generation yet —
+    /// the state a conversation sits in between `send` and the first delta.
+    static var multiTurn: CorpusFixture {
+        var log = Log()
+        log.append(.conversationCreated(title: "Origami"))
+        log.append(.userMessageAppended(Fix.userA, content: "q1", parent: nil))
+        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(Fix.genA, text: "a1"))
+        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+        log.append(.userMessageAppended(Fix.userB, content: "q2", parent: Fix.assistantA))
+        log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.userB, model: Fix.model))
+        log.append(.deltaAppended(Fix.genB, text: "a2"))
+        log.append(.generationEnded(Fix.genB, .completed(Fix.stopInfo)))
+        log.append(.userMessageAppended(Fix.userC, content: "q3", parent: Fix.assistantB))
+
+        return CorpusFixture(
+            name: "multiTurn",
+            kind: .golden,
+            summary: "two completed turns plus a trailing user message with no generation",
+            log: log,
+            residue: []
+        )
+    }
+
+    /// Edit-as-branch: the replacement is a sibling of the original under the
+    /// same parent, and the store's paired path event moves onto it (§6.4).
+    static var editBranch: CorpusFixture {
+        var log = Log()
+        log.append(.conversationCreated(title: "Origami"))
+        log.append(.userMessageAppended(Fix.userA, content: "q1", parent: nil))
+        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(Fix.genA, text: "a1"))
+        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+        log.append(.userMessageAppended(Fix.userB, content: "q2", parent: Fix.assistantA))
+        log.append(.messageEdited(original: Fix.userB, replacement: Fix.edited, content: "q2, revised"))
+        log.append(.activePathChanged(endpoint: Fix.edited))
+
+        return CorpusFixture(
+            name: "editBranch",
+            kind: .golden,
+            summary: "edit-as-branch — sibling under the same parent, path moved onto it",
+            log: log,
+            residue: []
+        )
+    }
+
+    /// Editing the *first* message, which rev 2 accidentally forbade: the
+    /// replacement is a root-level sibling under the virtual root, no special
+    /// case anywhere (I6).
+    static var rootEdit: CorpusFixture {
+        var log = Log()
+        log.append(.conversationCreated(title: nil))
+        log.append(.userMessageAppended(Fix.userA, content: "Explain valley folds", parent: nil))
+        log.append(.messageEdited(original: Fix.userA, replacement: Fix.edited, content: "Explain mountain folds"))
+        log.append(.activePathChanged(endpoint: Fix.edited))
+
+        return CorpusFixture(
+            name: "rootEdit",
+            kind: .golden,
+            summary: "editing the first message yields a root-level sibling (I6, no special case)",
+            log: log,
+            residue: []
+        )
+    }
+
+    /// **DoD-1's shape.** A generation dies without a terminal, and the user
+    /// regenerates: the abandoned partial survives as its own branch, reachable
+    /// via the branch switcher, and the new generation completes beside it.
+    ///
+    /// Legal with zero residue even though two generations overlap — single
+    /// flight is a *store* rule; the log and reducer tolerate concurrency (§6.5).
+    static var regenerateAfterInterruption: CorpusFixture {
+        var log = Log()
+        log.append(.conversationCreated(title: "Origami"))
+        log.append(.userMessageAppended(Fix.userA, content: "Explain valley folds", parent: nil))
+        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(Fix.genA, text: "A valley fol"))
+        log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.userA, model: Fix.model))
+        log.append(.activePathChanged(endpoint: Fix.assistantB))
+        log.append(.deltaAppended(Fix.genB, text: "A valley fold brings the paper down."))
+        log.append(.generationEnded(Fix.genB, .completed(Fix.stopInfo)))
+
+        return CorpusFixture(
+            name: "regenerateAfterInterruption",
+            kind: .golden,
+            summary: "DoD-1 — an interrupted partial survives as a sibling branch beside the regeneration",
+            log: log,
+            residue: []
+        )
+    }
+
+    /// Metadata and the audit trail: instructions set, title set then cleared,
+    /// tool records inside the generation's bounds under both recording
+    /// policies' shapes (§7.6).
+    static var toolsAndMetadata: CorpusFixture {
+        var log = Log()
+        log.append(.conversationCreated(title: nil))
+        log.append(.instructionsChanged("You are an origami tutor."))
+        log.append(.titleChanged("Valley folds 101"))
+        log.append(.userMessageAppended(Fix.userA, content: "Look it up", parent: nil))
+        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.toolInvocationRecorded(
+            Fix.genA,
+            ToolRecord(name: "search", status: .succeeded, duration: .milliseconds(120))
+        ))
+        log.append(.deltaAppended(Fix.genA, text: "Found it: "))
+        log.append(.toolInvocationRecorded(
+            Fix.genA,
+            ToolRecord(name: "fetch", status: .failed, duration: .milliseconds(35), argumentsJSON: #"{"url":"…"}"#)
+        ))
+        log.append(.deltaAppended(Fix.genA, text: "a valley fold."))
+        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+        log.append(.titleChanged(nil))
+
+        return CorpusFixture(
+            name: "toolsAndMetadata",
+            kind: .golden,
+            summary: "instructions, title set then cleared, in-bounds tool records",
+            log: log,
+            residue: []
+        )
+    }
+
+    /// No rows at all. Degenerate, and cheap to keep honest: a conversation
+    /// exists before its genesis is written, and every sweep should survive it.
+    static var empty: CorpusFixture {
+        CorpusFixture(
+            name: "empty",
+            kind: .golden,
+            summary: "a log with no rows — the state before genesis",
+            log: Log(),
+            residue: []
+        )
+    }
+
+    // MARK: Hostile — §6.6 exercised
+
+    /// A gap that swallowed the terminal. The single most important interaction
+    /// in the corpus: I5 reads "no terminal exists anywhere in the log," and a
+    /// hole is one of the two ways that becomes true (process death is the
+    /// other). Reduction continues past the hole, one diagnostic is raised, and
+    /// the generation is honestly `.open` — you truly do not know how it ended.
+    static var gapSwallowedTerminal: CorpusFixture {
+        var log = Log()
+        log.append(.conversationCreated(title: "Origami"))                                              // 1
+        log.append(.userMessageAppended(Fix.userA, content: "q", parent: nil))                          // 2
+        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 3
+        log.append(.deltaAppended(Fix.genA, text: "half an answer"))                                    // 4
+        log.skip(1)                                                                                     // 5 — the terminal
+        log.append(.titleChanged("after the hole"))                                                     // 6
+
+        return CorpusFixture(
+            name: "gapSwallowedTerminal",
+            kind: .hostile,
+            summary: "an interior gap swallows the terminal — I5 through absence",
+            log: log,
+            residue: [ExpectedDiagnostic(5, .sequenceGap(missing: 5...5))]
+        )
+    }
+
     /// Every structural feature at once: a completed generation, a user message
     /// beneath it, an edit-as-sibling, an explicit branch switch, a still-open
     /// generation, an undecodable row, and an interior gap.
@@ -162,9 +349,18 @@ enum Corpus {
 
     /// The whole corpus. Every sweep iterates this; nothing iterates a subset
     /// without a stated reason.
-    static var all: [CorpusFixture] { [rich, hostile] }
-
-    static var golden: [CorpusFixture] { all.filter { $0.kind == .golden } }
-
-    static var hostileFixtures: [CorpusFixture] { all.filter { $0.kind == .hostile } }
+    static var all: [CorpusFixture] {
+        [
+            ordinaryTurn,
+            multiTurn,
+            editBranch,
+            rootEdit,
+            regenerateAfterInterruption,
+            toolsAndMetadata,
+            empty,
+            gapSwallowedTerminal,
+            rich,
+            hostile,
+        ]
+    }
 }

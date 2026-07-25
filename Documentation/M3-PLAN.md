@@ -116,6 +116,32 @@ Planned as a standalone `invariantProblems(in: Conversation)`; landed as
   pins that classification touches *states only* — every other field is
   pass-through, which is what keeps I1's second half honest.
 
+### D8 — The corpus holds logs worth *sweeping*; unit tests name *rules* *(Phase 1)*
+Phase 1 originally said "split §6.6 rows 4–12 into per-row fixtures." The Phase 0
+audit killed that: rows 4, 5, 7, 8, 10, 11 and 12 already have focused unit tests
+in `FolderTests.swift` asserting exact reasons, so per-row corpus fixtures would
+have been duplication whose only new coverage was sweeping three-row logs that
+explore no state space `hostile` doesn't already cover.
+
+The operating principle instead: **a fixture earns a place in `Corpus` if
+mutating it explores something new; a rule earns a unit test if nothing names
+it.** Consequences, both acted on in Phase 1:
+
+- The corpus gained *golden* fixtures, which it had none of — every sweep had
+  been starting from an already-damaged log, so a reducer bug that only
+  manifests on clean input (the likeliest kind, since clean input is what ships)
+  had nothing to fail.
+- The five audit gaps became focused tests in `QuarantineRuleTests.swift`, named
+  after the rule rather than the row, because three of them are *relationships*
+  between rules (one rule at three sites; rows 9 vs 10; what must not
+  quarantine) that no per-row fixture could have expressed.
+
+One thing the per-row plan would have bought is not lost: residue is asserted in
+both dimensions (sequence *and* reason) everywhere the corpus reaches, via
+`ExpectedDiagnostic`. The older unit tests still assert `reasons` only; upgrading
+them is a low-value mechanical sweep, deliberately not done — their logs are 2–4
+rows, so the row being blamed is unambiguous.
+
 ### D6 — Fuzz generators never violate the ordering precondition
 §6.6 (rev 5): reduction *requires* ascending sequence and does not verify it;
 only deltas and tool records are non-idempotent under replay. Truncation and
@@ -182,50 +208,78 @@ Phases 1–2 are the critical path (they gate M4). Phase 4 is independent of
 **Goal:** §6.6 as executable fixtures with **exact residue** assertions —
 every diagnostic's case *and* sequence *and* (non-row-1) populated `eventID`.
 
-Golden fixtures (§10.2 — each also gets a pinned-literal expectation, the
-cross-process I1 defense from `determinismGolden`):
+**Reshaped by the Phase 0 audit — see D8.** Per-row hostile fixtures were
+dropped as duplication; the work is the five real gaps plus the golden fixtures
+the sweeps had no access to.
 
-- [ ] Ordinary turn; multi-turn linear conversation.
-- [ ] Edit-as-branch (incl. **root-message edit** — the rev-2 regression made
-      a fixture); regenerate-as-sibling; branch switch; interrupted partial
-      surviving as its own branch (the DoD-1 shape).
-- [ ] Each terminal kind: completed (with `StopInfo`), failed (each
-      `GenerationError` family), cancelled, and open→`.interrupted`.
-- [ ] Instructions / title set, cleared (`nil`), last-write-wins.
-- [ ] Tool records within bounds (`.metadataOnly`-shaped and `.full`-shaped).
+Golden fixtures added to `Corpus` (the audit's most surprising finding: *both*
+existing fixtures were hostile, so no sweep had ever seen a healthy log):
 
-Hostile fixtures — one per §6.6 row where the audit found gaps, each asserting
-exact `diagnostics` residue and untouched targets (I2):
+- [x] `ordinaryTurn`, `multiTurn` (two turns + a trailing user message with no
+      generation — the state between `send` and the first delta).
+- [x] `editBranch`, `rootEdit` (the rev-2 regression, made a fixture),
+      `regenerateAfterInterruption` (**DoD-1's shape**: interrupted partial
+      survives as a sibling branch, reachable via `siblings(of:)`).
+- [x] `toolsAndMetadata` (instructions, title set→cleared, in-bounds tool
+      records in both `.metadataOnly` and `.full` shapes), `empty`.
+- [x] Pinned-literal orderings for the goldens (`goldenOrderings`), the
+      cross-process I1 defense.
 
-- [ ] Rows 4–12 individually (much exists inside `hostileLog`; split into
-      per-row fixtures so failures name the row, keep `hostileLog` as the
-      integration-style composite).
-- [ ] **`MessageID` allocate-once at all three sites** (rows 6, 8, 11) —
-      asserted as *one rule at three sites*: same reason case
-      (`.messageIDAlreadyUsed`), three introduction events, including the
-      nastiest shape: `userMessageAppended` reusing an in-flight assistant
-      message's ID (the rev-5 back-door scenario).
-- [ ] Cascade fixture: quarantined `generationStarted` orphaning delta + tool
-      record + terminal; exact three-diagnostic residue (rows 9, 9, 9 — the
-      orphaned terminal is row 9, not 10; rev 5).
-- [ ] Row 9 vs row 10 partition: terminal-for-never-started vs second terminal.
-- [ ] Mid-log gap fixtures: one contiguous gap = one diagnostic; two gaps = two;
-      gap swallowing a terminal ⇒ `.interrupted` (I5 through absence).
-- [ ] Non-rules, asserted as **zero residue**: tolerant terminal (fold-level:
-      a `generationEnded` carrying `.failed(.unrecognized("undecodable outcome: …"))`
-      still terminates the generation); assistant-parent `generationStarted`;
-      consecutive user siblings; **duplicate `EventID`** across two rows.
-- [ ] Diagnostic identity: a sweep asserting every non-row-1, non-gap
-      diagnostic in every corpus fixture carries a populated `eventID`.
+Gap-closing tests (`QuarantineRuleTests.swift`, three suites):
 
-**Exit:** every §6.6 row and non-rule maps to a named fixture in §5's table;
-suites green.
+- [x] **I7 allocate-once as one rule at three sites** — same reason case
+      asserted across all three introduction events, plus permanence (an ID
+      stays used after its generation terminated).
+- [x] **Row 9 vs row 10 partition** in one log, plus first-terminal-wins
+      (§7.5's benign cancel/completion race).
+- [x] **Duplicate `EventID`** reduces with zero residue; both facts apply.
+- [x] **Gap swallowing a terminal** ⇒ `.open` → `.interrupted`, reduction
+      continues past the hole (`gapSwallowedTerminal` fixture + assertion).
+- [x] **`TODO(human)` #1 — tolerant terminal at the fold** (`NonRuleTests`).
+      The audit's most valuable gap: `WireFormatTests` pins the *decoder's*
+      half, and nothing asserted what the fold does with the result.
+- [x] **`TODO(human)` #2 — the allocate-once back door** (`AllocateOnceTests`).
+      Rev 5's motivating scenario: a user append naming an in-flight assistant
+      message's ID.
+
+Harness additions: `Log.appendDecoded(_:)` (composes the real decoder with the
+real fold — the only honest way to reach row 3), `Log.append(reusingEventID:)`
+and `Log.eventID(at:)` (the `EventID` collision non-rule).
+
+**Status:** ✅ **done 2026-07-26 — 160 tests green.** Both handoffs filled
+correctly on the first pass. Review found one imprecision (handoff #2's
+explanatory comment cited §6.1's `messageEdited` role rule — row 11 — where the
+firing rule is row 6's *allocation* check; the values were right) and two
+defects in the scaffolding itself, both since removed:
+
+- `firstTerminalWins` duplicated `FolderTests.duplicateTerminal` — a D8
+  violation committed while writing D8. Deleted, with a comment at the site
+  saying where the coverage lives instead.
+- `Corpus.golden` / `Corpus.hostileFixtures` were never referenced. Deleted;
+  Phase 2 can reintroduce a filter when a sweep genuinely needs one.
+
+**Follow-up carried into Phase 2:** the `TODO(human)` contract blocks and their
+`guard … else { Issue.record }` scaffolding are now dead — both values are
+non-nil literals, so the guard cannot fire, and a `TODO` marker in green code
+reads as unfinished work. Collapse to plain assertions, keeping the derivation
+comments (which are the durable part).
+
+**Exit:** ✅ the two `TODO(human)` branches filled and green.
 **Review gate:** read the residue assertions together — they are the spec's
 normative table, restated executably; drift here is spec drift.
 
-> *Learn-by-doing option (offered, not imposed):* the cascade fixture or the
-> three-site allocate-once family are the densest spec-reasoning pieces —
-> good `TODO(human)` candidates with tests pre-written to fail.
+#### The two learn-by-doing handoffs
+
+Both follow the CLAUDE.md pattern: scaffolding written, the dense spec-reasoning
+branch left as `TODO(human)` with a precise contract, and a test that fails with
+a legible message until it is filled. Each asks for two values plus one
+one-sentence comment explaining *why the rule exists* — the sentence is the part
+that does not survive being copied from a failure message.
+
+| # | File | What to derive | Spec |
+|---|---|---|---|
+| 1 | `QuarantineRuleTests.swift` → `tolerantTerminalTerminatesTheGeneration` | Residue and the terminal `FoldedMessageState` for a `generationEnded` whose outcome kind is from the future; then why quarantining it would forge a crash | §6.6 row 3, §6.1 tolerant-terminal, I5 |
+| 2 | `QuarantineRuleTests.swift` → `inFlightAssistantIDCannotBeReused` | Residue (case + sequence, and why not `unknownParent`/`additionalRootMessage`) and the surviving in-flight state | §6.6 row 6, I7, Appendix C bullet 1 |
 
 ---
 
@@ -425,10 +479,13 @@ their assertions exist already and mostly move rather than get written.
 | D5 | On-disk schema `(sequence, raw JSON)`; rows 1–2 defer to M4 | **Accepted** · applies Phase 3 |
 | D6 | Fuzz generators remove-only; never reorder/duplicate | **Accepted** · applies Phase 2 |
 | D7 | Classify predicate bridges both layers | **Landed Phase 0** (deviation, reasoned above) |
+| D8 | Corpus = logs worth sweeping; unit tests = rules. No per-row duplication | **Landed Phase 1** (deviation, reasoned above) |
 
 ## 7. Status log
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
 | 2026-07-25 | Plan drafted | 143 | D1–D6 approved by Alexander |
-| 2026-07-25 | **Phase 0 done** | **151** | Harness + registry + audit; D7 recorded; awaiting review |
+| 2026-07-25 | **Phase 0 done** | **151** | Harness + registry + audit; D7 recorded; reviewed and approved |
+| 2026-07-25 | **Phase 1 scaffolded** | **161 (159 green)** | 8 fixtures + 8 rule tests; D8 recorded; 2 `TODO(human)` open |
+| 2026-07-26 | **Phase 1 done** | **160** | Handoffs filled; review cleanups applied (1 duplicate test + 2 dead accessors removed) |

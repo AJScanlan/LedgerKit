@@ -61,6 +61,58 @@ struct CorpusTests {
         #expect(state.title == "Origami, revised")
     }
 
+    @Test("DoD-1: the interrupted partial survives as its own branch, beside the regeneration")
+    func interruptedPartialSurvivesAsBranch() {
+        // The demo's hero shape, asserted at the reducer where it actually
+        // happens: no recovery pass, no dirty flag — the second generation is
+        // just another child of the same user message, and the first one's
+        // missing terminal speaks for itself.
+        let conversation = Corpus.regenerateAfterInterruption.log.reduced()
+
+        #expect(conversation.messages[Fix.userA]?.children == [Fix.assistantA, Fix.assistantB])
+        #expect(conversation.messages[Fix.assistantA]?.state == .interrupted(partial: "A valley fol"))
+        #expect(
+            conversation.messages[Fix.assistantB]?.state
+                == .complete(Content(text: "A valley fold brings the paper down."))
+        )
+        #expect(conversation.activePath == [Fix.userA, Fix.assistantB], "the visible thread is the regeneration")
+        #expect(
+            conversation.messages.siblings(of: Fix.assistantB).map(\.id) == [Fix.assistantA],
+            "the branch switcher can reach the abandoned partial"
+        )
+    }
+
+    @Test("I5 through absence: a gap that swallowed the terminal still interrupts")
+    func gapSwallowedTerminalInterrupts() {
+        // I5 says "no terminal event anywhere in the log", not "the log ends
+        // here" — so a hole in the middle produces the same honest answer as
+        // process death, and reduction continues past it.
+        let fixture = Corpus.gapSwallowedTerminal
+        #expect(fixture.log.folded().messages[Fix.assistantA]?.state == .open(partial: "half an answer"))
+        #expect(fixture.log.reduced().messages[Fix.assistantA]?.state == .interrupted(partial: "half an answer"))
+        #expect(fixture.log.reduced().title == "after the hole", "reduction continued past the hole")
+    }
+
+    @Test("I1: the golden fixtures' orderings are pinned to literals too")
+    func goldenOrderings() {
+        let multi = Corpus.multiTurn.log.folded()
+        #expect(multi.rootChildren == [Fix.userA])
+        #expect(multi.activePath == [Fix.userA, Fix.assistantA, Fix.userB, Fix.assistantB, Fix.userC])
+
+        let edit = Corpus.editBranch.log.folded()
+        #expect(edit.messages[Fix.assistantA]?.children == [Fix.userB, Fix.edited])
+        #expect(edit.activePath == [Fix.userA, Fix.assistantA, Fix.edited])
+
+        let root = Corpus.rootEdit.log.folded()
+        #expect(root.rootChildren == [Fix.userA, Fix.edited], "the virtual root has two children")
+        #expect(root.activePath == [Fix.edited])
+
+        let tools = Corpus.toolsAndMetadata.log.folded()
+        #expect(tools.messages[Fix.assistantA]?.toolRecords.map(\.name) == ["search", "fetch"])
+        #expect(tools.instructions == "You are an origami tutor.")
+        #expect(tools.title == nil, "titleChanged(nil) clears")
+    }
+
     @Test("hostile: reduction survives every row it violates, and the survivors are intact")
     func hostileSurvivors() {
         // I2's containment posture, stated positively: the residue above says

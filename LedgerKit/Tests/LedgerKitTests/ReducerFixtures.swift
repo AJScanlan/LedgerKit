@@ -77,18 +77,41 @@ struct Log {
     var lastSequence: Int64 { nextSequence - 1 }
 
     @discardableResult
-    mutating func append(_ payload: LedgerEvent.Payload, from stream: ConversationID? = nil) -> Int64 {
+    mutating func append(
+        _ payload: LedgerEvent.Payload,
+        from stream: ConversationID? = nil,
+        reusingEventID: EventID? = nil
+    ) -> Int64 {
         let sequence = nextSequence
         nextSequence += 1
         nextEventNumber += 1
         let record = LedgerEvent.Record(
-            id: EventID(uuid(nextEventNumber)),
+            id: reusingEventID ?? EventID(uuid(nextEventNumber)),
             conversationID: stream ?? conversation,
             timestamp: Log.base.addingTimeInterval(Double(sequence)),
             payload: payload
         )
         rows.append(.decoded(LedgerEvent(record: record, sequence: sequence)))
         return sequence
+    }
+
+    /// Appends the payload a *decoder* produces for this raw wire JSON.
+    ///
+    /// The only way to reach the tolerant-terminal rule (§6.6 row 3) from a
+    /// fold: that rule lives in `Payload.init(from:)`, so a hand-constructed
+    /// `.generationEnded(…, .failed(.unrecognized(…)))` would assert what the
+    /// test itself typed rather than what the decoder decided. Composing the
+    /// real decoder with the real fold is the whole point.
+    @discardableResult
+    mutating func appendDecoded(_ payloadJSON: String) throws -> Int64 {
+        let payload = try JSONDecoder().decode(LedgerEvent.Payload.self, from: Data(payloadJSON.utf8))
+        return append(payload)
+    }
+
+    /// The `EventID` minted for the row at `sequence`, for fixtures that need
+    /// two rows to collide (the duplicate-`EventID` non-rule, §6.6).
+    func eventID(at sequence: Int64) -> EventID? {
+        rows.first { $0.sequence == sequence }?.eventID
     }
 
     /// Leaves `count` sequence numbers unused — an interior gap (§6.1).
