@@ -41,7 +41,7 @@ public struct Conversation: Sendable, Identifiable, Equatable {
         self.activePath = activePath
         self.diagnostics = diagnostics
     }
-    
+
 }
 
 /// One skipped event's residue (SPEC §6.6, I2): reduction continued as if the

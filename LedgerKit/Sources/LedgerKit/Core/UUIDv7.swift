@@ -27,7 +27,7 @@ import Foundation
 /// must supply their own isolation. The store mints IDs inside its append
 /// transaction, so the `ConversationStore` actor already provides it.
 struct UUIDv7Generator: Sendable {
-    
+
     /// Largest value `rand_a` can hold — it is 12 bits, not 16.
     private static let counterCeiling: UInt16 = 0x0FFF
 

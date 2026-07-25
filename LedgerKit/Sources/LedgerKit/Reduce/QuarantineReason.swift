@@ -28,7 +28,10 @@
 /// safe precisely because the snapshot format is discard-on-mismatch and
 /// disposable — the opposite of `LedgerEvent.Payload`, whose encoding is
 /// permanent and therefore hand-pinned (ADR-001).
-public enum QuarantineReason: Sendable, Equatable, Codable {
+///
+/// `Hashable` so residue can be grouped or deduplicated — a log with a 10k-row
+/// cascade is more legible as counts per reason than as a flat list.
+public enum QuarantineReason: Sendable, Hashable, Codable {
 
     // MARK: Decode-level (rows 1–2)
 

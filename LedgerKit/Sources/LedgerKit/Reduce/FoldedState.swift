@@ -32,6 +32,17 @@ struct FoldedState: Sendable, Equatable, Codable {
     /// would depend on snapshot timing and P3 would fail (§9, §10.6).
     var diagnostics: [QuarantinedEvent]
 
+    /// Whether `conversationCreated` has been seen (§6.6 row 5).
+    ///
+    /// Stored rather than derived because it genuinely is not derivable: a
+    /// genesis carrying a nil title with no messages yet is indistinguishable
+    /// from no genesis at all. Without it, resuming a snapshot of a
+    /// *genesis-less* log — which the hostile corpus contains, and which P3
+    /// snapshots at randomized points — would start accepting events that a
+    /// replay from sequence 1 quarantines as `beforeGenesis`. P3 demands exact
+    /// equivalence including diagnostics, so the flag is the price of that.
+    var hasGenesis: Bool
+
     init(
         id: ConversationID,
         title: String? = nil,
@@ -39,7 +50,8 @@ struct FoldedState: Sendable, Equatable, Codable {
         messages: [MessageID: FoldedMessage] = [:],
         rootChildren: [MessageID] = [],
         activePath: [MessageID] = [],
-        diagnostics: [QuarantinedEvent] = []
+        diagnostics: [QuarantinedEvent] = [],
+        hasGenesis: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -48,6 +60,7 @@ struct FoldedState: Sendable, Equatable, Codable {
         self.rootChildren = rootChildren
         self.activePath = activePath
         self.diagnostics = diagnostics
+        self.hasGenesis = hasGenesis
     }
 
     /// The starting point for a fold from genesis.
