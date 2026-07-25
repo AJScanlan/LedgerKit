@@ -97,6 +97,25 @@ exercise it. This is not deferral by laziness: freezing row-1/2 fixtures before
 the production loader exists would freeze against a test-side reimplementation,
 which is the drift ADR-003 rule 2 exists to prevent.
 
+### D7 — The classify-level predicate takes the `FoldedState` too *(Phase 0)*
+Planned as a standalone `invariantProblems(in: Conversation)`; landed as
+`invariantProblems(in:foldedFrom:)`. Forced, then preferred:
+
+- **Forced:** `MessageTree` keeps its `nodes` dictionary `private`, which
+  `@testable` cannot reach (private is file-scoped; `@testable` only elevates
+  `internal`). The only other enumeration is a walk from `rootChildren` — which
+  is structurally unable to notice a node that fell *out* of the tree, the exact
+  failure the M2 audit chose a dictionary over a tree walk to keep detectable.
+  Adding an internal `allNodes` to production code purely for tests was the
+  alternative, and it would have handed the sweeps an unordered dictionary — the
+  I1 hazard CLAUDE.md warns about — for less checking power.
+- **Preferred:** it asserts the rev-5 three-name correspondence directly
+  (`.complete`/`.failed`/`.cancelled` unchanged, `.open ⇒ .interrupted`,
+  `.streaming` unreachable), so I5's finalization is verified against every log a
+  sweep can build rather than the handful with hand-written expectations. It also
+  pins that classification touches *states only* — every other field is
+  pass-through, which is what keeps I1's second half honest.
+
 ### D6 — Fuzz generators never violate the ordering precondition
 §6.6 (rev 5): reduction *requires* ascending sequence and does not verify it;
 only deltas and tool records are non-idempotent under replay. Truncation and
@@ -113,31 +132,48 @@ Phases 1–2 are the critical path (they gate M4). Phase 4 is independent of
 
 ---
 
-### Phase 0 — Shared harness + coverage audit *(small; no new semantics)*
+### Phase 0 — Shared harness + coverage audit ✅ *done 2026-07-25 (143 → 151 tests)*
 
 **Goal:** one place for predicates and fixtures; an honest gap list so Phases
 1–2 add exactly what's missing and no duplicate coverage.
 
-- [ ] Promote `invariantProblems(in: FoldedState)` out of `FolderTests.swift`
-      (currently `private`) into the shared harness (e.g.
-      `Tests/LedgerKitTests/InvariantChecks.swift`, internal — beware the
-      CLAUDE.md note about same-named private types colliding).
-- [ ] Add the classify-level predicate sibling
-      (`invariantProblems(in: Conversation)`): no `.streaming` ever (fold/classify
-      can't produce it), user messages always `.complete`, every `.interrupted`
-      corresponds to an open generation, `Recoverability` present on exactly the
-      `.failed` cases, diagnostics in sequence order.
-- [ ] Introduce the `Corpus` registry type (name → fixture + expectations);
-      migrate `richLog` / `hostileLog` into it as the first two entries.
-- [ ] **Audit:** table of §6.6 rows 1–12 + every non-rule + every rev-5 roadmap
-      addition ↔ existing test (file:line) ↔ gap. Record it in §5 below.
-      Known already-covered examples: row 3's four shapes at the `Outcome`
-      decode level (`WireFormatTests` 261–318), most rows via `hostileLog`,
-      P3 down payment, ordering non-rule (`FolderOrderingTests`).
-- [ ] Baseline: `swift test --package-path LedgerKit` green before and after.
+- [x] Promote `invariantProblems(in: FoldedState)` out of `FolderTests.swift`
+      into `Tests/LedgerKitTests/InvariantChecks.swift` (internal). **Widened
+      while moving** with checks that were universal all along: role-scoped
+      fields (a user message carrying `generationID`/`model`/`stopInfo`/tool
+      records, or not `.complete`), `stopInfo` only on `.complete` (§7.7),
+      `.open` carrying no `terminalTimestamp` (I5), and §6.6's **diagnostic
+      identity** rule — stated one-directionally, because "row 1 ⇒ nil eventID"
+      is the *loader's* contract while "gap ⇒ nil" is the fold's.
+- [x] Classify-level predicate — see **D7**, it became a *bridging* predicate.
+- [x] `Corpus` registry (`Corpus.swift`), with `rich` and `hostile` migrated in
+      and their residue pinned as data.
+- [x] **Audit** recorded in §5.
+- [x] Suites green before (143) and after (151).
 
-**Exit:** suites green with zero coverage lost; audit table filled in.
-**Review gate:** agree the gap list *is* the Phase 1 work list.
+**Landed beyond the checklist, deliberately:**
+
+- **Three files, not one.** `Corpus.swift` (fixtures + pinned data),
+  `CorpusTests.swift` (each fixture's own expectations), `CorpusSweepTests.swift`
+  (generic predicates over `Corpus.all`). Phase 1 grows the middle file and
+  Phase 2 the last; `FolderTests.swift` (896 → 671 lines) goes back to being
+  unit tests of the fold.
+- **Residue assertions are now exact and ordered, in both dimensions.**
+  `hostileRowCoverage` asserted `Set.contains` per row, which passes even when a
+  diagnostic blames the wrong sequence, duplicates, or brings friends. Replaced
+  by `ExpectedDiagnostic(sequence, reason)` lists on the fixture. This is a
+  genuine coverage upgrade, not a move — and the hand-traced hostile expectation
+  matched the reducer on first run.
+- **Meta-tests for the predicates** (`InvariantCheckTests.swift`, 5 tests).
+  Phase 2's entire value rests on `invariantProblems` being able to *fail*; a
+  vacuous predicate would make the fuzz suite an expensive `#expect(true)` and
+  nothing else in the package would notice. Each check is fed a hand-built
+  violating state — hand-built on purpose, since several conditions are ones the
+  fold is *believed* incapable of producing, and folding a log to test them would
+  only re-test that belief.
+
+**Exit:** ✅ suites green, zero coverage lost, audit table filled.
+**Review gate:** agree the §5 gap list *is* the Phase 1 work list.
 
 ---
 
@@ -320,19 +356,79 @@ surface and should survive the M6 binding unchanged.
 3. **P1 timestamp canonicalization:** corpus fixtures are born with canonical
    (millisecond) timestamps; M4's store stamping must match (roadmap ⚠️).
 
-## 5. Coverage traceability (filled during Phase 0, maintained after)
+## 5. Coverage traceability (Phase 0 audit, 2026-07-25; maintained after)
 
-| §6.6 row / non-rule / invariant | Existing coverage (file:line) | M3 fixture / suite | Status |
+Baseline at audit: **151 tests green** (143 before Phase 0). `FolderTests.swift`
+line numbers are stable — Phase 0 only removed its tail.
+
+### §6.6 quarantine rows
+
+| Row | Condition | Existing coverage | Gap → phase |
 |---|---|---|---|
-| *(fill at Phase 0 audit)* | | | |
+| 1 | Undecodable envelope | `FolderTests:97` `undecodableEnvelope`; hostile seq 16 | on-disk form → **P3**/M4 |
+| 2 | Unknown payload kind | `FolderTests:87` `undecodableIsNotAGap` (asserts eventID); rich seq 12, hostile seq 17 | on-disk form → **P3**/M4 |
+| 3 | Undecodable outcome — **non**-quarantine | `WireFormatTests:261–318`, all four shapes + `<missing>`/`<unreadable>` | **decode-level only — no test proves a tolerant terminal *terminates the generation* in the fold** → **P1** |
+| 4 | Foreign `conversationID` | `FolderTests:49` `foreignConversation`, `:58` `foreignOutranksGenesis`; hostile seq 22 | — |
+| 5 | Before genesis / second genesis | `FolderTests:30`, `:40`; hostile seq 1, 3 | — |
+| 6 | User append: unknown parent / ID reuse | `FolderTests:231` `unknownParent`, `:240` `duplicateMessageID` | back-door shape (reuse an **in-flight assistant** ID) → **P1** |
+| 7 | Second bare nil-parent append | `FolderTests:221` `secondRootMessage`; hostile seq 5 | — |
+| 8 | Start: gen-ID reuse / bound msg-ID / unknown parent | `FolderTests:440`, `:449`, `:457`, `:467`, `:474`; hostile seq 6 | — |
+| 9 | Delta/tool/**terminal** unknown gen; out-of-bounds | `FolderTests:571`, `:581`, `:601` (delta), `:618` cascade (all three kinds); hostile seq 7, 8, 12 | standalone row-9-vs-10 partition test → **P1** |
+| 10 | Second terminal | `FolderTests:591`; `FolderOrderingTests:185`; hostile seq 13 | — |
+| 11 | Edit: assistant / unknown / replacement collision | `FolderTests:608`, `:314`, `:321`; hostile seq 14 | — |
+| 12 | Path endpoint never existed | `FolderTests:336`; `ClassifyTests:104`; hostile seq 15 | — |
+
+### Non-rules (must reduce **without** residue)
+
+| Non-rule | Existing coverage | Gap → phase |
+|---|---|---|
+| Tolerant terminal | `WireFormatTests:261–318` | fold-level end-to-end → **P1** |
+| Role adjacency (assistant parent, consecutive user siblings, nil-parent start) | `FolderTests:252`, `:421`, `:431` | — |
+| Sequence gaps (one per contiguous gap) | `FolderTests:65`, `:77`, `:87` | **gap that swallows a terminal ⇒ `.interrupted`** → **P1** |
+| Cascade (start orphans delta + tool + terminal) | `FolderTests:618`, exact residue | — |
+| Duplicate `EventID` reduces without residue | **none** | → **P1** |
+| Row ordering is a precondition | `FolderOrderingTests:133–204` (6 tests) | — |
+
+### Invariants and sweeps
+
+| Item | Existing coverage | Gap → phase |
+|---|---|---|
+| I1 literal goldens (cross-process) | `CorpusTests:47` `richGolden` | per-fixture goldens → **P1** |
+| I1 repeat / mapping half | `CorpusSweepTests:18`; `ClassifyDeterminismTests` | — |
+| I2 totality over prefixes | `CorpusSweepTests:29` — **now both layers, corpus-wide** | interior-gap + compound → **P2** |
+| I3 / I4 | rows 9, 10 above | — |
+| I5 synthesis | `ClassifyTests:17`; now universal via the bridge predicate | partial-content sweep → **P2** |
+| I6 virtual root / clamping | `CorpusSweepTests:54`; `FolderTests:304` root edit | — |
+| I7 allocate-once at 3 sites | rows 6, 8, 11 above | assert as **one rule** → **P1** |
+| Diagnostic identity (eventID populated) | **universal** in `invariantProblems` (Phase 0) | — |
+| P3 snapshot equivalence | `CorpusSweepTests:75`, every split of every fixture | widen with corpus → **P2** |
+| Crash-fuzz interior gaps | **none** | → **P2** |
+| Version-frozen corpus | **none** | → **P3** |
+| `ScriptedLanguageModel` | **none** | → **P4** |
+
+### Golden shapes already covered (no new fixture needed unless pinned as a file)
+
+Ordinary turn, multi-turn linear, edit-as-sibling, **root-message** edit,
+regenerate-as-sibling, branch switch, all four terminal kinds, zero-token
+failure, instructions/title set–clear–LWW, in-bounds tool records, empty log.
+Phase 1 promotes these into named `Corpus` entries so the sweeps reach them;
+their assertions exist already and mostly move rather than get written.
 
 ## 6. Decision log
 
 | # | Decision | Status |
 |---|---|---|
-| D1 | Corpus registry in `LedgerKitTests`; sweeps iterate it | Proposed |
-| D2 | No third-party test deps; own `ConversationDump` format | Proposed |
-| D3 | TestSupport does not depend on LedgerKit (topology one-way door) | Proposed |
-| D4 | OQ3: engine now, internal seam, M6 adapter | Proposed (matches roadmap) |
-| D5 | On-disk schema `(sequence, raw JSON)`; rows 1–2 defer to M4 | Proposed |
-| D6 | Fuzz generators remove-only; never reorder/duplicate | Proposed (per §6.6 rev 5) |
+| D1 | Corpus registry in `LedgerKitTests`; sweeps iterate it | **Accepted** · landed Phase 0 |
+| D2 | No third-party test deps; own `ConversationDump` format | **Accepted** · applies Phase 3 |
+| D3 | TestSupport does not depend on LedgerKit (topology one-way door) | **Accepted** · applies Phase 4 |
+| D4 | OQ3: engine now, internal seam, M6 adapter | **Accepted** · applies Phase 4 |
+| D5 | On-disk schema `(sequence, raw JSON)`; rows 1–2 defer to M4 | **Accepted** · applies Phase 3 |
+| D6 | Fuzz generators remove-only; never reorder/duplicate | **Accepted** · applies Phase 2 |
+| D7 | Classify predicate bridges both layers | **Landed Phase 0** (deviation, reasoned above) |
+
+## 7. Status log
+
+| Date | Phase | Tests | Note |
+|---|---|---|---|
+| 2026-07-25 | Plan drafted | 143 | D1–D6 approved by Alexander |
+| 2026-07-25 | **Phase 0 done** | **151** | Harness + registry + audit; D7 recorded; awaiting review |
