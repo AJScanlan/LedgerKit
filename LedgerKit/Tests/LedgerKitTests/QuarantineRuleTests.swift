@@ -70,40 +70,19 @@ struct AllocateOnceTests {
 
         let state = log.folded()
 
-        // TODO(human) — derive both from the spec BEFORE running this test.
-        //
-        //   1. Which `QuarantineReason` case, at which sequence? Say why it is
-        //      that case and not `unknownParent` (userA exists) or
-        //      `additionalRootMessage` (the parent is not nil) — two rules that
-        //      also govern `userMessageAppended` and do not fire here.
-        //   2. I2's containment posture: after the event is skipped, what are
-        //      assistantA's `role`, `state` and `generationID`? Write the state
-        //      exactly, partial included.
-        //
-        // Then, in the `survivedAs` comment below, answer in one sentence: what
-        // would rev 4 have produced at this site (it was silent here), and which
-        // sentence of §6.1's role rule does that violate?
         // Row 6's ID check: `generationStarted` already allocated assistantA, and
         // I7 makes allocation permanent. The rule that fires is about *allocation*,
         // not role — `oneRuleThreeSites` above raises the same reason for a reused
         // user ID. Not `unknownParent`: userA exists. Not `additionalRootMessage`:
         // the parent is non-nil.
-        let expectedResidue: [ExpectedDiagnostic]? = [.init(5, .messageIDAlreadyUsed(Fix.assistantA))]
-        let expectedState: FoldedMessageState? = .open(partial: "half an answer")
+        #expect(state.residue == [ExpectedDiagnostic(5, .messageIDAlreadyUsed(Fix.assistantA))])
 
-        guard let expectedResidue, let expectedState else {
-            Issue.record("TODO(human): derive the residue and the surviving state from §6.6 row 6 + I7")
-            return
-        }
-
-        #expect(state.residue == expectedResidue)
-
-        // survivedAs: rev 4 was silent at this site, so the append would have been
-        // accepted and rewritten the in-flight node in place — user-authored
-        // assistant content by the back door, violating §6.1's "assistant messages
-        // exist only as the product of a generation."
+        // Rev 4 was silent at this site, so the append would have been accepted
+        // and rewritten the in-flight node in place — user-authored assistant
+        // content by the back door, violating §6.1's "assistant messages exist
+        // only as the product of a generation."
         let survivor = state.messages[Fix.assistantA]
-        #expect(survivor?.state == expectedState)
+        #expect(survivor?.state == .open(partial: "half an answer"))
         #expect(survivor?.role == .assistant, "the in-flight node must not have become user-authored")
         #expect(survivor?.generationID == Fix.genA, "and it must still be routable for the rest of the stream")
     }
@@ -137,41 +116,27 @@ struct NonRuleTests {
 
         let state = log.folded()
 
-        // TODO(human) — derive both from the spec BEFORE running this test.
-        //
-        // The decoder's half is already pinned: `WireFormatTests` proves this
-        // JSON decodes to `.generationEnded(genA, .failed(.unrecognized(…)))`.
-        // What the *fold* then does with it is the audit's most valuable gap —
-        // nothing in the package asserts it today.
-        //
-        //   1. §6.6 row 3's disposition column is the only one that does not say
-        //      "quarantine". What does that make `expectedResidue`?
-        //   2. §6.1, "Interruption is not an outcome — and terminals are
-        //      decode-tolerant": which `FoldedMessageState` does assistantA end
-        //      in, with what partial and what exact `description` string? (The
-        //      string is ADR-001-non-contractual as *prose*, but here it is data
-        //      inside the case you are asserting, so it must match.)
-        //   3. The reason the rule exists, for the comment below: if row 3
-        //      quarantined instead, what would a v0.2 log's new error case
-        //      render as on a v0.1 reader — and why is that worse than the
-        //      "corrupt `completed` re-renders as failed" cost §6.1 accepts?
-        let expectedResidue: [ExpectedDiagnostic]? = [] // No quarantine, no residue
-        let expectedState: FoldedMessageState? = .failed(partial: "half an answer", .unrecognized(description: "undecodable outcome: resolvedOffline"))
-
-        guard let expectedResidue, let expectedState else {
-            Issue.record("TODO(human): derive the residue and terminal state from §6.6 row 3 + §6.1")
-            return
-        }
-
-        #expect(expectedResidue.isEmpty, "row 3 is the inventory's one non-quarantining row")
-        #expect(state.residue == expectedResidue)
-        #expect(state.messages[Fix.assistantA]?.state == expectedState)
+        // Row 3 is the inventory's one non-quarantining row: the terminal lands,
+        // degraded, rather than being skipped.
+        #expect(state.residue.isEmpty)
+        #expect(
+            state.messages[Fix.assistantA]?.state
+                == .failed(
+                    partial: "half an answer",
+                    .unrecognized(description: "undecodable outcome: resolvedOffline")
+                )
+        )
         #expect(
             state.messages[Fix.assistantA]?.terminalTimestamp == log.timestamp(at: 5),
             "terminal-ness is what I5 depends on, and it must be recorded"
         )
 
-        // whyItMatters: v0.2 log's new error case would have re-rendered historical *failures* as *crashes* on v0.1 readers
+        // Why the tolerance exists: if row 3 quarantined, a v0.2 log's new error
+        // case would re-render historical *failures* as *crashes* on v0.1
+        // readers. That is worse than the cost §6.1 does accept (a corrupt
+        // `completed` re-rendering as failed) on both counts — it is a false
+        // claim about the process rather than a misreported kind, and every
+        // future outcome case would trip it rather than one damaged row.
         if case .interrupted = log.reduced().messages[Fix.assistantA]?.state {
             Issue.record("an unfamiliar outcome was classified .interrupted — the forgery rev 3 closed")
         }

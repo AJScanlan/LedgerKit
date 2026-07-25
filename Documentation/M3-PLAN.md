@@ -142,6 +142,28 @@ both dimensions (sequence *and* reason) everywhere the corpus reaches, via
 them is a low-value mechanical sweep, deliberately not done — their logs are 2–4
 rows, so the row being blamed is unambiguous.
 
+### D9 — A sweep's oracle must be simpler than the fold, or it isn't one *(Phase 2)*
+A property test whose expectation is computed by the code under test proves
+nothing. Phase 2's two oracles are therefore both *strictly simpler* than the
+reducer — one walks a sequence run counting contiguous holes, the other
+concatenates delta text — and neither reimplements routing, tree-building or
+quarantine. Two consequences, both deliberate:
+
+- **The I5 oracle runs on golden fixtures only.** To predict partial content on a
+  hostile log it would have to know which deltas were quarantined, which means
+  replicating §6.6 — at which point it *is* the fold and asserts a tautology.
+  Hostile fixtures are covered by the structural predicates and by monotonicity
+  instead, which need no oracle.
+- **Where no simple oracle exists, assert a *relation* rather than a value.**
+  Monotonicity compares two folds to each other rather than to a predicted
+  answer, which is why it applies to every fixture including the hostile ones.
+  It is also the stronger property: it constrains the whole reduction history,
+  not one endpoint.
+
+Corollary adopted for the rest of M3: **mutation-test any sweep whose failure
+mode is subtle.** Three breakages were injected and reverted in Phase 2; the
+monotonicity property was verified to fail before it was trusted to pass.
+
 ### D6 — Fuzz generators never violate the ordering precondition
 §6.6 (rev 5): reduction *requires* ascending sequence and does not verify it;
 only deltas and tool records are non-idempotent under replay. Truncation and
@@ -283,36 +305,67 @@ that does not survive being copied from a failure message.
 
 ---
 
-### Phase 2 — Crash-point fuzzing + sweeps *(the "single highest-value suite")*
+### Phase 2 — Crash-point fuzzing + sweeps ✅ *done 2026-07-26 (160 → 166 tests)*
 
-**Goal:** the §10.3 suite over the whole corpus.
+**Goal:** the §10.3 suite over the whole corpus. All in `CorpusSweepTests.swift`
+(`CrashFuzzTests`); enumeration is **exhaustive, not randomised** — fixture logs
+are ≤ 22 rows, so every prefix and window fits in milliseconds, and there is no
+seed to manage, no flake, and a failure reproduces by re-running.
 
-- [ ] **Suffix truncation sweep:** every corpus fixture × every prefix length —
-      fold-level `invariantProblems` empty, no traps, and classify-level
-      predicates hold (`Conversation(reducing:)` at every prefix).
-- [ ] **I5 sweep:** at every truncation, every started-unterminated generation
-      classifies `.interrupted` with partial = concatenation of surviving
-      deltas; never `.streaming`; terminals that survived stay terminal.
-- [ ] **Interior-gap sweep:** every fixture × every contiguous interior window
-      `(start, length)` removed (exhaustive — small-scope enumeration beats
-      randomness here; fixture logs are ≤ ~25 rows so O(n³) is trivial).
-      Assert: exactly one `sequenceGap` diagnostic per hole (merged with
-      adjacent holes correctly), reduction continues, gap-swallowed terminals
-      yield `.interrupted`.
-- [ ] **Compound sweep:** truncation × single interior gap on the two richest
-      fixtures (rich, hostile) — the crash-during-partial-restore shape.
-- [ ] **P3 split sweep, corpus-wide:** `fold(resuming: fold(prefix), after:,
-      with: suffix) == fold(full)` at every split point of every fixture,
-      diagnostics included (generalizes `resumeEqualsReplay`).
-- [ ] **I1 repeat + literal goldens:** determinism repeat over the corpus; the
-      pinned-literal expectations from Phase 1 are the cross-process half.
-- [ ] Runtime guard: keep the whole fuzz suite comfortably under a few seconds
-      (it will run on every `swift test` forever; if it creeps, shrink fixture
-      count per sweep, never assertion strength).
+- [x] **Suffix truncation sweep** (landed Phase 0, both layers, corpus-wide).
+- [x] **Truncation monotonicity** — *added beyond the plan, and it is the
+      centerpiece:* every prefix must be a state the full reduction genuinely
+      passed through. Messages only appear, text only extends, terminals never
+      change, diagnostics and sibling order only append. This is the
+      crash-recovery guarantee itself rather than a proxy for it — a fold that
+      revised an earlier conclusion on later evidence would break this while
+      every fixed-point expectation stayed green.
+- [x] **I5 exactness sweep** — at every truncation of a *golden* fixture, each
+      unterminated generation classifies `.interrupted` with a partial equal to
+      the independently-concatenated surviving deltas, and each terminated one
+      does not. Restricted to goldens deliberately: on a hostile log the oracle
+      would have to replicate the quarantine table to know which deltas counted,
+      i.e. become the fold and prove nothing (see D9).
+- [x] **Truncating a healthy log cannot manufacture residue** — the property
+      that makes the oracle above legitimate, since no quarantine rule consults
+      a later row.
+- [x] **Interior-gap sweep** — every fixture × every contiguous window removed
+      (520 mutations), with an independent oracle counting contiguous holes in
+      the surviving sequence run. 437 produce gaps; **393 produce multi-row
+      holes**, which is what proves adjacency *merging* is exercised rather than
+      merely assumed.
+- [x] **Compound sweep** — truncation × interior gap on `rich` and `hostile`
+      (3,289 iterations): a log restored with a hole, from a process that then
+      died mid-generation.
+- [x] **P3 under mutation** — resume-equals-replay at every split of every
+      single-row-deleted fixture, extending Phase 0's clean-log P3 sweep to the
+      case where a stale checkpoint is likeliest to be resumed from.
+- [x] **P3 corpus-wide + I1 repeat + literal goldens** (Phase 0/1).
+- [x] **Runtime:** whole package **0.17 s** for 166 tests. No guard needed.
 
-**Exit:** roadmap's crash-fuzz criterion met in full; suites green.
-**Review gate:** review sweep runtimes + any invariant predicate weakened or
-special-cased during the phase (there should be none).
+**Non-vacuity guards.** Each sweep tallies its own work and asserts a floor
+(`mutations >= 400`, `iterations >= 3_000`, `widened > 0`, `partialsChecked > 0`)
+— the `InvariantCheckTests` lesson applied to the sweeps themselves, since a loop
+narrowed to nothing passes silently and this is the package's highest-value suite
+to lose that way.
+
+**Mutation-tested, not assumed.** Three deliberate reducer breakages, each
+reverted (`git checkout`, source tree confirmed clean):
+
+| Mutation | Caught by |
+|---|---|
+| Gap range narrowed to one row (merging removed) | interior-gap oracle + 2 unit tests |
+| Delta accumulation → assignment | I5 oracle, **monotonicity**, 5 unit tests |
+| *(the above, re-run to isolate)* | `truncationIsMonotone` specifically |
+
+**Also landed:** the Phase 1 follow-up — `TODO(human)` blocks and their dead
+`guard … else { Issue.record }` scaffolding collapsed to plain assertions,
+keeping the derivation comments. Zero `TODO(human)` markers remain.
+
+**Exit:** ✅ roadmap's crash-fuzz criterion met in full; 166 green.
+**Review gate:** review the two oracles — they are the only place a sweep asserts
+something the reducer did not compute, so they are where a wrong expectation
+would hide.
 
 ---
 
@@ -480,6 +533,7 @@ their assertions exist already and mostly move rather than get written.
 | D6 | Fuzz generators remove-only; never reorder/duplicate | **Accepted** · applies Phase 2 |
 | D7 | Classify predicate bridges both layers | **Landed Phase 0** (deviation, reasoned above) |
 | D8 | Corpus = logs worth sweeping; unit tests = rules. No per-row duplication | **Landed Phase 1** (deviation, reasoned above) |
+| D9 | Oracles must be simpler than the fold; else assert a relation | **Landed Phase 2** |
 
 ## 7. Status log
 
@@ -489,3 +543,4 @@ their assertions exist already and mostly move rather than get written.
 | 2026-07-25 | **Phase 0 done** | **151** | Harness + registry + audit; D7 recorded; reviewed and approved |
 | 2026-07-25 | **Phase 1 scaffolded** | **161 (159 green)** | 8 fixtures + 8 rule tests; D8 recorded; 2 `TODO(human)` open |
 | 2026-07-26 | **Phase 1 done** | **160** | Handoffs filled; review cleanups applied (1 duplicate test + 2 dead accessors removed) |
+| 2026-07-26 | **Phase 2 done** | **166** | Crash-fuzz complete: 520 gap mutations + 3,289 compound iterations, 0.17 s; D9 recorded; mutation-tested |
