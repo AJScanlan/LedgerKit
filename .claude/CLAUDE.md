@@ -4,7 +4,7 @@ Durable conversation-state engine for Foundation Models apps on Apple platforms 
 
 ## Two source-of-truth documents
 
-- **`Documentation/SPEC.md`** — the **contract** (currently rev 5). Semantics defined here are binding; type names in it are illustrative ("bikesheddable; semantics not").
+- **`Documentation/SPEC.md`** — the **contract** (rev 5, **ratified** 2026-07-25 at the M2 boundary). Semantics defined here are binding; type names in it are illustrative ("bikesheddable; semantics not").
 - **`Documentation/ROADMAP.md`** — the **build order** (milestones M0–M9).
 - **`Documentation/ADR/`** — three ADRs. **ADR-001 owns the event encoding** (tagged JSON, discriminator registry, tolerant terminals, timestamp canonicalization R-5); ADR-002 identifiers; ADR-003 persistence/GRDB. ADR-001's sentinel *strings* are explicitly non-contractual — assert on typed cases, never prose.
 - **On any conflict, the spec wins and the roadmap is stale — fix the roadmap.** (The roadmap states this rule itself.)
@@ -68,14 +68,14 @@ Reducer test harness (`Log` builder, `Fix` identifiers, `reasons` accessors) liv
 - **Never cut, even under time pressure:** invariants I1–I7 and property tests P1–P3, interruption recovery, and `ScriptedLanguageModel`.
 - **Testing *is* the product differentiation:** golden-log fixtures (snapshot-tested), hostile fixtures mirroring the §6.6 quarantine table row-for-row, crash-point fuzzing (truncate every fixture at every prefix — "the single highest-value suite"), and property tests P1–P3.
 - **Persistence backend is deliberately undecided** (GRDB vs. raw sqlite3, behind a small protocol) — don't bikeshed it early. **SwiftData is explicitly the wrong shape** for an append-only log; don't reach for it.
-- **Status:** M0–M2 done, 136 tests green. `Core/` (wire types, IDs, error taxonomy) and `Reduce/` (`fold → classify`, `RecoverabilityMapping`, `QuarantineReason`) are complete. `Store/Persistence.swift` is the *seam only* — no GRDB wiring. `Session/` and `Projection/` are still empty. Next: M3 (test corpus + `ScriptedLanguageModel`) or M4 (persistence); either is unblocked.
+- **Status:** M0–M2 done and **audited**, 143 tests green, SPEC rev 5 ratified. `Core/` (wire types, IDs, error taxonomy) and `Reduce/` (`fold → classify`, `RecoverabilityMapping`, `QuarantineReason`) are complete. Public reduction entry point is `Conversation(reducing:loadedFrom:mapping:)` — there is no top-level `reduce`. `Store/Persistence.swift` is the *seam only* — no GRDB wiring; its `events` verb returns `[LoadedEvent]`, which is what makes M4's two-stage decode implementable above the seam. `Session/` and `Projection/` are still empty. Next: **M3** (test corpus + `ScriptedLanguageModel`) — preferred over M4, since crash-fuzzing should harden the reducer *before* persistence builds the snapshot fast-path on it, and M2's `invariantProblems` predicates plus the `Log` builder are the corpus's seed.
 
 ## Conventions & workflow preferences
 
 - **Test rhythm**
   - Test Driven Development
   - Do not mark a milestone done without all tests passing
-  - Reducer/spec work goes: audit → propose SPEC amendment → get approval → implement. Amendments land in rev 5 in place (it is still `Draft for ratification`) with an Appendix C bullet.
+  - Reducer/spec work goes: audit → propose SPEC amendment → get approval → implement. **Rev 5 is ratified, so amendments now open rev 6** (new appendix, new `Changes from rev 5:` header) rather than editing rev 5 in place.
 - **Learn-by-doing handoffs**
   - For dense, design-heavy code: Claude writes the scaffolding and leaves one branch as `TODO(human)` with a precise contract, plus tests that fail until it is implemented. Offer this; don't impose it.
 - **Documentation**

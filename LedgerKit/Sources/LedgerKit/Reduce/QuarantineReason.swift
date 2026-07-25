@@ -88,7 +88,12 @@ public enum QuarantineReason: Sendable, Hashable, Codable {
     /// after termination: the binding is permanent, not merely current.
     case generationIDAlreadyUsed(GenerationID)
 
-    /// Row 9 — a delta or tool record naming a generation that never started.
+    /// Row 9 — a delta, tool record, **or terminal** naming a generation that
+    /// never started. The terminal belongs here rather than under row 10:
+    /// row 10 is I3's *second* terminal for a generation that did start, and
+    /// rev 5 widened this row precisely because the first-and-only terminal of
+    /// an orphaned generation previously fell outside the inventory the
+    /// cascade prose claimed contained it.
     case unknownGeneration(GenerationID)
 
     /// Row 9 — a delta or tool record after the generation's terminal. A

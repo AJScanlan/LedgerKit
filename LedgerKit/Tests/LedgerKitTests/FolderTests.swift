@@ -117,6 +117,92 @@ struct FolderStreamTests {
     }
 }
 
+// MARK: - Ordering: a precondition the reducer does not police (§6.6 non-rule)
+
+/// Rev 5 records row ordering as a **non-rule**: reduction requires ascending
+/// `sequence` and neither verifies nor repairs violations, because the store's
+/// UNIQUE `(conversation_id, sequence)` key and ordered reads make enforcement
+/// unreachable code.
+///
+/// These tests pin what the reducer *actually does* on each side of that line, so
+/// M3's fuzz generators and any future import or log-shipping tooling (§12)
+/// inherit a documented answer rather than discovering one. Asserting the
+/// behaviour is not endorsing replayed input — the spec's point is that only two
+/// payload kinds are non-idempotent, and these fixtures are what keep that claim
+/// true as the fold changes.
+@Suite("Folder — ordering is a precondition, not a rule")
+struct FolderOrderingTests {
+
+    /// Replays the log's final row — same sequence, applied twice.
+    private func replayingLastRow(of log: Log) -> [LoadedEvent] {
+        var rows = log.rows
+        if let last = rows.last { rows.append(last) }
+        return rows
+    }
+
+    @Test("deltas are one of the two non-idempotent kinds: a replay doubles the partial, silently")
+    func replayedDeltaAccumulates() {
+        var log = Log.withUserMessage()
+        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(Fix.genA, text: "half"))
+
+        let state = fold(replayingLastRow(of: log), for: log.conversation)
+        #expect(state.messages[Fix.assistantA]?.state == .open(partial: "halfhalf"))
+        #expect(state.reasons.isEmpty, "no diagnostic — ordering is a precondition, not a quarantine row")
+    }
+
+    @Test("tool records are the other non-idempotent kind")
+    func replayedToolRecordAccumulates() {
+        var log = Log.withUserMessage()
+        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.toolInvocationRecorded(Fix.genA, ToolRecord(name: "search", status: .succeeded)))
+
+        let state = fold(replayingLastRow(of: log), for: log.conversation)
+        #expect(state.messages[Fix.assistantA]?.toolRecords.map(\.name) == ["search", "search"])
+        #expect(state.reasons.isEmpty)
+    }
+
+    @Test("last-write-wins kinds are idempotent under replay")
+    func replayedMetadataIsIdempotent() {
+        var log = Log.opened()
+        log.append(.titleChanged("final"))
+
+        let state = fold(replayingLastRow(of: log), for: log.conversation)
+        #expect(state.title == "final")
+        #expect(state.reasons.isEmpty)
+    }
+
+    @Test("node-introducing kinds contain a replay on their own once-only rule (I7)")
+    func replayedNodeIntroductionQuarantines() {
+        // The exposure is narrow *because* I7's allocate-once rule already covers
+        // every kind that introduces a message — the ordering non-rule is only
+        // safe to state given this.
+        let state = fold(replayingLastRow(of: Log.withUserMessage()), for: Fix.conversation)
+        #expect(state.reasons == [.messageIDAlreadyUsed(Fix.userA)])
+        #expect(state.rootChildren == [Fix.userA], "one node, not two")
+    }
+
+    @Test("a replayed terminal is caught by I3, not by ordering")
+    func replayedTerminalQuarantines() {
+        let state = fold(replayingLastRow(of: Log.withCompletedTurn()), for: Fix.conversation)
+        #expect(state.reasons == [.duplicateTerminal(Fix.genA)])
+    }
+
+    @Test("an out-of-order row cannot manufacture a gap — the cursor is a running max, never a rewind")
+    func outOfOrderRowDoesNotRewindGapDetection() {
+        var log = Log.opened()
+        log.append(.titleChanged("one"))              // 2
+        log.append(.instructionsChanged("i"))         // 3
+
+        var rows = log.rows
+        rows.append(rows[1])                          // sequence 2, arriving after sequence 3
+
+        let state = fold(rows, for: log.conversation)
+        #expect(state.reasons.isEmpty, "2-after-3 is below the expected cursor, so gap detection stays silent")
+        #expect(state.title == "one")
+    }
+}
+
 // MARK: - Passing today: user messages, edits, path
 
 @Suite("Folder — user messages, edits, and the active path")

@@ -1,6 +1,7 @@
 # ADR-003 — Persistence dependency: GRDB behind an internal seam
 
-**Status:** Draft · opened 2026-07-19 at M1 · ratifies at M4 (when wired)
+**Status:** Draft · opened 2026-07-19 at M1 · updated 2026-07-25 (M2 audit: the read
+verb returns `LoadedEvent`) · ratifies at M4 (when wired)
 **Spec:** §9 (persistence), §6.5/§11 (store actor & API shape), §10.6 (P1/P3), §12 (cut line)
 **Code:** `Store/Persistence.swift` (the seam; no GRDB wiring until M4)
 
@@ -47,15 +48,27 @@ rules; M4 ratifies it by wiring.
    mentions are LedgerKit-owned values. Enforced structurally: the protocol is
    `internal`; consumers see only `PersistenceConfiguration` (§11's
    `.sqlite(url:)` shape).
-2. **Bytes below, meaning above.** The backend stores encoded blobs + key/index
-   columns; encoding, decoding, quarantine, and snapshot-version policy live above the
-   seam. This is ADR-001's lossy-decode rule applied to storage: the backend can never
-   corrupt what it never interprets.
+2. **Bytes below, meaning above.** GRDB stores and returns encoded blobs + key/index
+   columns and never interprets them — it cannot corrupt what it does not read.
+   Decoding happens in LedgerKit's own loader inside the conformance, and it is
+   *two-stage* (envelope first, payload second, so a row-2 diagnostic keeps its
+   `EventID` — ADR-001, §6.6 "Diagnostic identity"). Quarantine semantics and
+   snapshot-version policy live above the seam entirely. This is ADR-001's
+   lossy-decode rule applied to storage.
+
+   **Corrected at the M2 audit:** the read verb returns `[LoadedEvent]`, not
+   `[LedgerEvent]`. §6.6's input corollary requires that a row whose blob will not
+   decode be *emitted* — dropping it turns a row-1/2 condition into a false **gap**
+   diagnostic, and throwing makes the whole conversation unloadable over one bad row,
+   which I2 forbids. `[LedgerEvent]` could represent neither outcome, so the seam as
+   originally typed made M4's two-stage loader unimplementable above it and forced
+   decode *below* the boundary this rule draws. The asymmetry with `append` — which
+   takes typed records — is principled: encoding is total, decoding is not.
 3. **Atomicity is promised by verbs, not exposed as handles.** Callers get "these
    events append in one transaction," never a transaction object — keeping the protocol
    honest about what any future backend must guarantee, and keeping GRDB's
    `Database` handle out of signatures.
-4. **Small on purpose.** Five verbs. Observation joins at M4/M7 as an `AsyncSequence`
+4. **Small on purpose.** Six verbs. Observation joins at M4/M7 as an `AsyncSequence`
    when the projection needs it; anything else must argue its way in.
 
 ## Costs accepted

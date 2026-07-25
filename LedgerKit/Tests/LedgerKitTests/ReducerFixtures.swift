@@ -112,7 +112,7 @@ struct Log {
     func folded() -> FoldedState { fold(rows, for: conversation) }
 
     func reduced(mapping: RecoverabilityMapping = .default) -> Conversation {
-        reduce(rows, for: conversation, mapping: mapping)
+        Conversation(reducing: rows, loadedFrom: conversation, mapping: mapping)
     }
 
     func timestamp(at sequence: Int64) -> Date { Log.base.addingTimeInterval(Double(sequence)) }

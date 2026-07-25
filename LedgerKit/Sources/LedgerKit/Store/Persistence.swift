@@ -2,7 +2,7 @@ import Foundation
 
 /// The persistence seam (SPEC §9, ADR-003).
 ///
-/// LedgerKit's storage needs are three tables and five verbs; the backend —
+/// LedgerKit's storage needs are three tables and six verbs; the backend —
 /// GRDB, per ADR-003 — sits behind this file so its types never leak into
 /// public API and the choice stays swappable (raw sqlite3 remains the §12
 /// cut-line fallback). Nothing here is wired until M4; this file is the
@@ -10,11 +10,13 @@ import Foundation
 ///
 /// Two design rules, both consequences of "the log is the truth":
 ///
-/// - **Bytes below, meaning above.** The backend stores and returns encoded
-///   blobs plus the columns it needs for keys and the index. Encoding,
-///   decoding, quarantine, and snapshot-version policy all live above this
-///   seam — the same boundary ADR-001's lossy-decode rule draws for
-///   transport.
+/// - **Bytes below, meaning above.** The *database* stores and returns encoded
+///   blobs plus the columns it needs for keys and the index, and never
+///   interprets them — it cannot corrupt what it does not read. Decoding
+///   happens in LedgerKit's own loader inside the conformance; quarantine
+///   semantics and snapshot-version policy live above the seam entirely. This
+///   is the boundary ADR-001's lossy-decode rule draws for transport, applied
+///   to storage.
 /// - **The seam is internal.** Consumers pick a backend via
 ///   `PersistenceConfiguration` (§11: `ConversationStore(persistence:
 ///   .sqlite(url: dbURL))`); the protocol itself is `internal`, callable only
@@ -64,7 +66,7 @@ struct Snapshot: Sendable, Equatable {
     var payload: Data
 }
 
-/// The five verbs LedgerKit needs from a storage backend. Implemented by the
+/// The six verbs LedgerKit needs from a storage backend. Implemented by the
 /// GRDB store at M4; conformances must be `Sendable` because the
 /// `ConversationStore` actor calls across its isolation boundary.
 ///
@@ -123,12 +125,35 @@ protocol PersistenceStore: Sendable {
         to conversation: ConversationID
     ) async throws -> [LedgerEvent]
 
-    /// All events for a conversation with `sequence >= from`, in sequence
-    /// order, envelopes assembled from blob + key column (SPEC §9). `from: 1`
-    /// is a full replay; the snapshot fast-path reads the suffix after
+    /// All rows for a conversation with `sequence >= from`, in sequence order,
+    /// envelopes assembled from blob + key column (SPEC §9). `from: 1` is a
+    /// full replay; the snapshot fast-path reads the suffix after
     /// `Snapshot.upToSequence`. Sequence gaps are returned as-is — the
     /// reducer, not the backend, diagnoses them (§6.1).
-    func events(in conversation: ConversationID, from sequence: Int64) async throws -> [LedgerEvent]
+    ///
+    /// **Returns `LoadedEvent`, not `LedgerEvent`, and that is load-bearing**
+    /// (§6.6's input corollary). A row whose blob will not decode must be
+    /// *emitted*, never dropped and never thrown:
+    ///
+    /// - Dropping it turns a §6.6 row-1/2 condition into a **gap** diagnostic,
+    ///   which is a different and false claim — a gap says the fact is
+    ///   missing, an undecodable row says the fact is present and
+    ///   unintelligible.
+    /// - Throwing makes the whole conversation unloadable over one bad row,
+    ///   which is exactly what I2 forbids. A log written by a *newer*
+    ///   LedgerKit must load degraded, not fail.
+    ///
+    /// So the decode lives here, and it is **two-stage**: envelope first,
+    /// payload second, so an unrecognized payload kind still yields the
+    /// event's `EventID` for its diagnostic (ADR-001; §6.6 "Diagnostic
+    /// identity"). A single all-or-nothing record decode would discard the
+    /// envelope along with the payload and silently degrade every row-2
+    /// diagnostic to sequence-only.
+    ///
+    /// The asymmetry with ``append(_:to:)`` — which takes typed records — is
+    /// principled rather than incidental: encoding is total, so a value can
+    /// always be written; decoding is not, so bytes cannot always be read.
+    func events(in conversation: ConversationID, from sequence: Int64) async throws -> [LoadedEvent]
 
     /// The most recent snapshot for the conversation, regardless of version —
     /// version-match policy lives above the seam. `nil` if none.

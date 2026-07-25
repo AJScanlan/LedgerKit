@@ -134,10 +134,25 @@ struct ClassifyTests {
         #expect(Log.withCompletedTurn().reduced().activeMessages.map(\.id) == [Fix.userA, Fix.assistantA])
     }
 
-    @Test("reduce ≡ classify ∘ fold")
+    @Test("Conversation(reducing:loadedFrom:) ≡ classify ∘ fold")
     func reduceIsTheComposition() {
         let log = Log.withCompletedTurn()
-        #expect(log.reduced() == classify(log.folded(), mapping: .default))
+        #expect(
+            Conversation(reducing: log.rows, loadedFrom: log.conversation)
+                == classify(log.folded(), mapping: .default)
+        )
+    }
+
+    @Test("the default mapping is §8's table — the zero-configuration path")
+    func defaultMappingIsImplicit() {
+        // The initializer's `mapping` default is what makes the 60-second
+        // quickstart (DoD-4) a single call; assert it is genuinely `.default`
+        // rather than merely present.
+        let log = Log.withCompletedTurn()
+        #expect(
+            Conversation(reducing: log.rows, loadedFrom: log.conversation)
+                == Conversation(reducing: log.rows, loadedFrom: log.conversation, mapping: .default)
+        )
     }
 }
 

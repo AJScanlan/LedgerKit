@@ -45,23 +45,47 @@ func classify(_ folded: FoldedState, mapping: RecoverabilityMapping) -> Conversa
     )
 }
 
-/// `reduce ≡ classify ∘ fold` — the composition the public API exposes (§6.3).
-///
-/// - Parameters:
-///   - rows: The conversation's log in sequence order (§6.6 rows 1–2 arrive as
-///     `LoadedEvent.undecodable`).
-///   - conversation: The stream the rows were loaded from; row 4 compares each
-///     envelope against it.
-///   - mapping: Part of classification's identity (I1). Defaults to §8's table.
-public func reduce(
-    _ rows: some Sequence<LoadedEvent>,
-    for conversation: ConversationID,
-    mapping: RecoverabilityMapping = .default
-) -> Conversation {
-    classify(fold(rows, for: conversation), mapping: mapping)
-}
-
 // MARK: - Folded → public projections
+
+extension Conversation {
+
+    /// Reduces a conversation's log to its state — `classify ∘ fold`, the
+    /// composition the public API exposes (§6.3), and the one entry point
+    /// consumers need.
+    ///
+    /// ```swift
+    /// let conversation = Conversation(reducing: rows, loadedFrom: id)
+    /// ```
+    ///
+    /// An initializer rather than a top-level `reduce(_:for:)` because that is
+    /// what this operation *is*: a `Conversation` is derived state, constructed
+    /// from a log the same way `String(decoding:as:)` is constructed from
+    /// bytes. Spelling it as a free function put a context-free verb in the
+    /// module namespace and read, at a call site, as though it might be
+    /// `Sequence.reduce`. The internal pipeline keeps its `fold` / `classify`
+    /// vocabulary (§6.3 names the seams, and snapshots depend on them); the
+    /// public surface does not have to inherit it.
+    ///
+    /// - Parameters:
+    ///   - rows: The conversation's log in sequence order. §6.6 rows 1–2 arrive
+    ///     as `LoadedEvent.undecodable` — a row that would not decode is
+    ///     *present and unintelligible*, which is a different fact from absent
+    ///     (a gap), and both surface in ``diagnostics``.
+    ///   - conversation: The stream the rows were loaded from. Required because
+    ///     row 4 compares every envelope against it — an event cannot
+    ///     self-certify which stream it belongs to.
+    ///   - mapping: Part of classification's identity (I1), which is why it is
+    ///     an explicit input rather than a global. Defaults to §8's table;
+    ///     overriding it retroactively upgrades the affordances on historical
+    ///     failures, because `Recoverability` is never persisted (§8).
+    public init(
+        reducing rows: some Sequence<LoadedEvent>,
+        loadedFrom conversation: ConversationID,
+        mapping: RecoverabilityMapping = .default
+    ) {
+        self = classify(fold(rows, for: conversation), mapping: mapping)
+    }
+}
 
 extension Message {
 
