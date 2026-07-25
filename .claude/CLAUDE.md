@@ -6,6 +6,7 @@ Durable conversation-state engine for Foundation Models apps on Apple platforms 
 
 - **`Documentation/SPEC.md`** — the **contract** (currently rev 5). Semantics defined here are binding; type names in it are illustrative ("bikesheddable; semantics not").
 - **`Documentation/ROADMAP.md`** — the **build order** (milestones M0–M9).
+- **`Documentation/ADR/`** — three ADRs. **ADR-001 owns the event encoding** (tagged JSON, discriminator registry, tolerant terminals, timestamp canonicalization R-5); ADR-002 identifiers; ADR-003 persistence/GRDB. ADR-001's sentinel *strings* are explicitly non-contractual — assert on typed cases, never prose.
 - **On any conflict, the spec wins and the roadmap is stale — fix the roadmap.** (The roadmap states this rule itself.)
 
 Read the relevant spec section before implementing anything in this repo; the design is unusually load-bearing and most "obvious" simplifications are already-considered non-goals.
@@ -22,7 +23,10 @@ swift test  --package-path LedgerKitTestSupport
 ```
 
 - Tests use **Swift Testing** (`import Testing`, `@Test`, `#expect`) — not XCTest.
+- `swift test --package-path LedgerKit --filter <TestTypeName>` — matches the **type** name, not the `@Suite("display name")`. Filtering on the display string silently matches 0 tests and reports **success**.
+- ⚠️ **Ignore SourceKit "Cannot find type X in scope" / "No such module 'Testing'" in new files** — the index goes stale constantly here. `swift build` is the only ground truth; don't chase these.
 - Toolchain: Swift 6.3 (Xcode 26.6), **Swift 6 language mode, strict concurrency**.
+- ⚠️ `ISO8601DateFormatter` **rounds** fractional seconds; `Date.ISO8601FormatStyle` **truncates**. Swapping to the (`Sendable`) format style shifts ~74% of timestamps 1 ms and breaks `WireDate.canonical`. The cached formatter's `nonisolated(unsafe)` is deliberate and measured (ADR-001 R-5, ~120 µs/construction) — don't "fix" it.
 - `LedgerKit.xcworkspace` ties together both packages, the `Projection` demo app, `Documentation/`, and a playground. Build the demo app from the workspace in Xcode (scheme `Projection`).
 
 ## Architecture
@@ -34,13 +38,20 @@ Three products, one workspace:
 - **`LedgerKit/`** — the library. Source tree is scaffolded but mostly empty, filled per milestone:
   - `Core/` — event log + derived-state types (SPEC §6.1–6.2). This is **wire format = API forever**; adding an event kind is a permanent commitment.
   - `Reduce/` — the pure reducer, `fold → classify` (§6.3, invariants I1–I7). **The load-bearing wall:** `nonisolated`, deterministic, no clocks, no I/O. Persistence, the store, the projection, and the demo are all downstream of a correct fold.
+    - **Never let `Dictionary` iteration order reach output** — Swift's hasher seed varies per process, so a leak breaks I1 by passing locally and flaking in CI. Iterate ordered arrays; dictionaries are for keyed lookup.
+    - **No `!`, `precondition`, or recursion over tree depth** — I2 forbids trapping *and* hanging, and tree depth tracks message count in a linear conversation.
+    - **Quarantine is data, not error handling.** Nothing in the fold throws: an event already happened, so the fold can only decide what it means. Wanting `throws` is the smell.
+    - Two parallel state enums, deliberately: internal `FoldedMessageState` (4 cases, `Codable`, = the snapshot schema) vs public `MessageState` (5 cases, **not** `Codable`). `.open ⇒ .interrupted` happens only in `classify`; `.streaming` only in M7's overlay.
+    - Snapshot `Codable` is **disposable** (discard-on-mismatch, no migrations), so widening folded types is free. The event `Payload` encoding is **permanent**. Don't conflate them.
   - `Store/` — SQLite persistence + snapshots + index, the `ConversationStore` actor, and the turn verbs (§9, §6.5, §11).
   - `Session/` — the `GenerationDriver`, the one OS-coupled module (§7). **All iOS-27-beta risk (the ⚠️ / OQ1–9 items) is isolated here and nowhere else.**
   - `Projection/` — the `@MainActor @Observable` read side + `overlay_live` (§6.2, §7.4).
 - **`LedgerKitTestSupport/`** — ships `ScriptedLanguageModel`, a deterministic `LanguageModel` test double. A separate product on purpose ("the gateway drug" — useful to any Foundation Models app, and lets the whole library test with zero network and zero Apple Intelligence eligibility).
 - **`Projection/`** (top-level Xcode app) — the demo (kill-mid-stream recovery + one-line provider swap).
 
-⚠️ **Naming collisions to keep straight:** the top-level `Projection/` *app* is distinct from `LedgerKit/Sources/LedgerKit/Projection/` (the internal observable-projection layer). The roadmap still calls the demo app **"Scroll"** and references deleted `Data/Models/ChatEvent.swift` stubs — both are stale; the app is `Projection` and those stubs were removed at M0.
+⚠️ **Naming collision to keep straight:** the top-level `Projection/` *app* is distinct from `LedgerKit/Sources/LedgerKit/Projection/` (the internal observable-projection layer). Older notes may call the demo app "Scroll" — it is `Projection`.
+
+Reducer test harness (`Log` builder, `Fix` identifiers, `reasons` accessors) lives in `Tests/LedgerKitTests/ReducerFixtures.swift` at **internal** scope — reuse it rather than rebuilding. A same-named `private enum` in another test file in the module will collide with it.
 
 ## Design tenets (constrain every change — SPEC §3)
 
@@ -57,15 +68,16 @@ Three products, one workspace:
 - **Never cut, even under time pressure:** invariants I1–I7 and property tests P1–P3, interruption recovery, and `ScriptedLanguageModel`.
 - **Testing *is* the product differentiation:** golden-log fixtures (snapshot-tested), hostile fixtures mirroring the §6.6 quarantine table row-for-row, crash-point fuzzing (truncate every fixture at every prefix — "the single highest-value suite"), and property tests P1–P3.
 - **Persistence backend is deliberately undecided** (GRDB vs. raw sqlite3, behind a small protocol) — don't bikeshed it early. **SwiftData is explicitly the wrong shape** for an append-only log; don't reach for it.
-- **Status:** M0 done (package split + empty `Core/Reduce/Store/Session/Projection` scaffolding). M1+ not started — source files are placeholder stubs.
+- **Status:** M0–M2 done, 136 tests green. `Core/` (wire types, IDs, error taxonomy) and `Reduce/` (`fold → classify`, `RecoverabilityMapping`, `QuarantineReason`) are complete. `Store/Persistence.swift` is the *seam only* — no GRDB wiring. `Session/` and `Projection/` are still empty. Next: M3 (test corpus + `ScriptedLanguageModel`) or M4 (persistence); either is unblocked.
 
 ## Conventions & workflow preferences
 
-<!-- TODO(human): Fill in your working preferences for this repo — the rules you want
-     followed that can't be inferred from the code. See the "Learn by Doing" request. -->
 - **Test rhythm**
   - Test Driven Development
   - Do not mark a milestone done without all tests passing
+  - Reducer/spec work goes: audit → propose SPEC amendment → get approval → implement. Amendments land in rev 5 in place (it is still `Draft for ratification`) with an Appendix C bullet.
+- **Learn-by-doing handoffs**
+  - For dense, design-heavy code: Claude writes the scaffolding and leaves one branch as `TODO(human)` with a precise contract, plus tests that fail until it is implemented. Offer this; don't impose it.
 - **Documentation**
   - Update `ROADMAP.md` freely if it's stale
   - Do not edit `SPEC.md` without asking
