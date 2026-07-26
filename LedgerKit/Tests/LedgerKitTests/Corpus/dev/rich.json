@@ -1,0 +1,186 @@
+{
+  "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+  "rows" : [
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000101",
+        "payload" : {
+          "kind" : "conversationCreated",
+          "title" : "Origami"
+        },
+        "timestamp" : "2026-07-25T11:30:01.000Z"
+      },
+      "sequence" : 1
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000102",
+        "payload" : {
+          "content" : "q1",
+          "kind" : "userMessageAppended",
+          "messageID" : "01980E5A-0000-7000-8000-000000000010"
+        },
+        "timestamp" : "2026-07-25T11:30:02.000Z"
+      },
+      "sequence" : 2
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000103",
+        "payload" : {
+          "generationID" : "01980E5A-0000-7000-8000-000000000030",
+          "kind" : "generationStarted",
+          "messageID" : "01980E5A-0000-7000-8000-000000000020",
+          "model" : {
+            "model" : "on-device",
+            "provider" : "apple",
+            "version" : "27.0"
+          },
+          "parent" : "01980E5A-0000-7000-8000-000000000010"
+        },
+        "timestamp" : "2026-07-25T11:30:03.000Z"
+      },
+      "sequence" : 3
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000104",
+        "payload" : {
+          "generationID" : "01980E5A-0000-7000-8000-000000000030",
+          "kind" : "deltaAppended",
+          "text" : "one "
+        },
+        "timestamp" : "2026-07-25T11:30:04.000Z"
+      },
+      "sequence" : 4
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000105",
+        "payload" : {
+          "generationID" : "01980E5A-0000-7000-8000-000000000030",
+          "kind" : "deltaAppended",
+          "text" : "two"
+        },
+        "timestamp" : "2026-07-25T11:30:05.000Z"
+      },
+      "sequence" : 5
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000106",
+        "payload" : {
+          "generationID" : "01980E5A-0000-7000-8000-000000000030",
+          "kind" : "generationEnded",
+          "outcome" : {
+            "kind" : "completed",
+            "stopInfo" : {
+              "resolvedModelID" : "on-device-27.0.1",
+              "stopReason" : "endTurn",
+              "usage" : {
+                "inputTokens" : 12,
+                "outputTokens" : 8
+              }
+            }
+          }
+        },
+        "timestamp" : "2026-07-25T11:30:06.000Z"
+      },
+      "sequence" : 6
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000107",
+        "payload" : {
+          "content" : "q2",
+          "kind" : "userMessageAppended",
+          "messageID" : "01980E5A-0000-7000-8000-000000000011",
+          "parent" : "01980E5A-0000-7000-8000-000000000020"
+        },
+        "timestamp" : "2026-07-25T11:30:07.000Z"
+      },
+      "sequence" : 7
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000108",
+        "payload" : {
+          "content" : "q2 v2",
+          "kind" : "messageEdited",
+          "original" : "01980E5A-0000-7000-8000-000000000011",
+          "replacement" : "01980E5A-0000-7000-8000-000000000018"
+        },
+        "timestamp" : "2026-07-25T11:30:08.000Z"
+      },
+      "sequence" : 8
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000109",
+        "payload" : {
+          "endpoint" : "01980E5A-0000-7000-8000-000000000018",
+          "kind" : "activePathChanged"
+        },
+        "timestamp" : "2026-07-25T11:30:09.000Z"
+      },
+      "sequence" : 9
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-00000000010A",
+        "payload" : {
+          "generationID" : "01980E5A-0000-7000-8000-000000000031",
+          "kind" : "generationStarted",
+          "messageID" : "01980E5A-0000-7000-8000-000000000021",
+          "model" : {
+            "model" : "on-device",
+            "provider" : "apple",
+            "version" : "27.0"
+          },
+          "parent" : "01980E5A-0000-7000-8000-000000000018"
+        },
+        "timestamp" : "2026-07-25T11:30:10.000Z"
+      },
+      "sequence" : 10
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-00000000010B",
+        "payload" : {
+          "generationID" : "01980E5A-0000-7000-8000-000000000031",
+          "kind" : "deltaAppended",
+          "text" : "partial"
+        },
+        "timestamp" : "2026-07-25T11:30:11.000Z"
+      },
+      "sequence" : 11
+    },
+    {
+      "raw" : "{\"id\":\"01980E5A-0000-7000-8000-00000000010C\",\"conversationID\":\"01980E5A-0000-7000-8000-000000000001\",\"timestamp\":\"2026-07-25T11:30:12.000Z\",\"payload\":{\"kind\":\"messagePinned\"}}",
+      "sequence" : 12
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-00000000010D",
+        "payload" : {
+          "kind" : "titleChanged",
+          "title" : "Origami, revised"
+        },
+        "timestamp" : "2026-07-25T11:30:15.000Z"
+      },
+      "sequence" : 15
+    }
+  ]
+}

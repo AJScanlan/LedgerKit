@@ -278,7 +278,7 @@ enum Corpus {
         log.append(.activePathChanged(endpoint: Fix.edited))                                            // 9
         log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.edited, model: Fix.model))  // 10
         log.append(.deltaAppended(Fix.genB, text: "partial"))                                           // 11
-        log.undecodable(.payloadKind("messagePinned"))                                                  // 12
+        log.unknownPayloadKind("messagePinned")                                                         // 12 row 2
         log.skip(2)                                                                                     // 13, 14 absent
         log.append(.titleChanged("Origami, revised"))                                                   // 15
 
@@ -317,8 +317,8 @@ enum Corpus {
         log.append(.generationEnded(Fix.genB, .cancelled))                                              // 13 row 10
         log.append(.messageEdited(original: Fix.assistantB, replacement: Fix.edited, content: "no"))    // 14 row 11
         log.append(.activePathChanged(endpoint: Fix.userC))                                             // 15 row 12
-        log.undecodable(.envelope, identified: false)                                                   // 16 row 1
-        log.undecodable(.payloadKind("future"))                                                         // 17 row 2
+        log.corruptRow()                                                                                // 16 row 1
+        log.unknownPayloadKind("future")                                                                // 17 row 2
         log.skip(3)                                                                                     // 18–20 absent
         log.append(.titleChanged("end"))                                                                // 21
         log.append(.titleChanged("elsewhere"), from: Fix.foreign)                                       // 22 row 4

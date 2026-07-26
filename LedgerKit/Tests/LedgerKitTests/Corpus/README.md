@@ -26,6 +26,20 @@ would silently rewrite them into shapes we already understand, which is the one
 thing a forward-compatibility fixture must not do. So they are authored by hand
 and the writer never touches them.
 
+Two fixtures live there:
+
+| Fixture | What it proves |
+|---|---|
+| `tolerantTerminals` | Three §6.6-row-3 shapes — unknown outcome tag, unknown *nested* error tag, absent outcome field — all land as `.failed(.unrecognized(…))` with **zero** diagnostics and a terminal timestamp. The whole tolerant-terminal story, from bytes |
+| `undecodableRows` | Rows 1 and 2 from bytes: a truncated row and a wrong-typed envelope field lose identity; a future payload kind keeps it and names itself; a non-object payload keeps identity with no legible tag. Reduction continues past all five, and the title proves it |
+
+`undecodableRows` also pins one thing it does not endorse: a payload kind this
+version **does** know, carrying a body that will not decode, is reported as
+`unknownPayloadKind("deltaAppended")`. The disposition is right — skip the row,
+keep the identity, keep reading — but the wording misleads, because §6.6 rows 1–2
+have no case for "known kind, malformed body". Pinned so it cannot drift
+unnoticed, and flagged for SPEC rev 7 to either widen row 2 or add a row.
+
 ## File format
 
 Two files per fixture: `<name>.json` (the log) and `<name>.txt` (the state it
@@ -53,20 +67,39 @@ The schema **mirrors the events table** (§9) rather than inventing a container:
   canonicalized at encode (§6.1 R-5). `timestampsAreCanonical` enforces it here
   so M4's store inherits a fixture that already fails if it slips.
 
-### The reserved `raw` row
+### The `raw` row — literal bytes *(implemented at M4 Phase 2)*
 
 ```json
-{ "sequence": 12, "raw": "…" }
+{ "sequence": 12, "raw": "{\"id\":\"…\",\"payload\":{\"kind\":\"messagePinned\"}}" }
 ```
 
-Reserved for **M4**, and deliberately unreadable until then: the loader throws
-rather than guessing. Synthesising `LoadedEvent.undecodable` test-side would
-freeze fixtures against a reimplementation of the two-stage decode boundary,
-which is the drift ADR-003 rule 2 exists to prevent.
+A row stored as bytes rather than as a decoded record, and read by
+**`SQLitePersistenceStore.load`** — the very function the store calls on every row
+it reads. So a fixture's damaged rows and a real damaged database's produce
+identical `LoadedEvent`s, by construction rather than by maintenance.
 
-This is why `rich` and `hostile` have no on-disk form yet — each contains
-undecodable rows, which are *loader outcomes* rather than wire bytes. Their
-coverage is in-memory, where it is unaffected.
+It was reserved-but-unreadable through M3 for a reason worth remembering: without
+a real two-stage loader, the only way to give these rows meaning was to
+synthesise `LoadedEvent.undecodable` test-side — which would have frozen fixtures
+against a *reimplementation* of the decode boundary, the drift ADR-003 rule 2
+forbids. The loader threw rather than guessing.
+
+Consequences now that it works:
+
+- **`rich` and `hostile` are on disk** (M4 Phase 2). Their undecodable rows are
+  built from bytes by `Log.unknownPayloadKind(_:)` and `Log.corruptRow(_:)`, so
+  the file contains exactly the input the in-memory fixture folded.
+- **The corpus now depends on the loader**, which is a coverage *gain*: break the
+  loader's tag recovery and these fixtures' residue expectations fail. While they
+  synthesized their own reasons, no loader bug could reach them.
+- `Log.undecodable(_:identified:)` still exists and still synthesizes. That is
+  legitimate for **fold-level** unit tests — the fold's contract is to turn a
+  loader outcome into a diagnostic, and where the value came from is none of its
+  business — but a synthesized row has no honest on-disk form, so
+  `CorpusDocument(_:)` refuses to serialize one.
+
+Bytes need not be undecodable; that is merely what they are used for. A row whose
+bytes decode cleanly belongs in `event`, which is the diffable form.
 
 ## What `.txt` contains, and what it deliberately does not
 
@@ -88,8 +121,12 @@ compiler error forces someone to confront when the inventory grows.
 ## Adding a fixture
 
 1. Add it to `Corpus.all` in `Corpus.swift`. It immediately inherits every
-   in-memory sweep (truncation, interior-gap, compound, P3).
-2. Re-record. If it contains undecodable rows it is skipped on disk until M4.
+   in-memory sweep (truncation, interior-gap, compound, P3) — and, if it is
+   gapless, single-stream and free of byte-built rows, the store round-trip
+   equivalence sweep too (`isStoreReplayable` states that condition).
+2. Re-record. Damaged rows want `unknownPayloadKind(_:)` / `corruptRow(_:)`, which
+   go through the real loader and therefore serialize; `undecodable(_:)`
+   synthesizes and will refuse to.
 3. Commit both files. Review the `.txt` as carefully as the code — it is the
    assertion.
 

@@ -324,6 +324,45 @@ struct PersistenceSnapshotTests {
     }
 }
 
+@Suite("Persistence — corpus equivalence")
+struct PersistenceCorpusEquivalenceTests {
+
+    @Test("every replayable corpus fixture reduces identically after a round trip through the store")
+    func corpusSurvivesTheStore() async throws {
+        // The join M4 exists to make: until now the corpus proved the *reducer*
+        // right about logs held in memory, and Phase 1 proved the *store* right
+        // about records it invented. This composes them — encode → SQLite →
+        // two-stage decode → fold must land on the same `FoldedState` the
+        // in-memory fixture folds to, for every fixture the store can express.
+        var replayed = 0
+        var skipped: [String] = []
+
+        for fixture in Corpus.all {
+            guard fixture.log.isStoreReplayable else {
+                skipped.append(fixture.name)
+                continue
+            }
+            let store = try SQLitePersistenceStore(.inMemory)
+            _ = try await store.append(fixture.log.records, to: fixture.log.conversation)
+            let loaded = try await store.events(in: fixture.log.conversation, from: 1)
+
+            #expect(
+                fold(loaded, for: fixture.log.conversation) == fixture.log.folded(),
+                "\(fixture.name) reduced differently after a round trip through the store"
+            )
+            replayed += 1
+        }
+
+        // Non-vacuity, the M3 practice: a loop narrowed to nothing passes in
+        // silence, and this is a sweep worth losing that way.
+        #expect(replayed >= 7, "only \(replayed) fixtures were replayed")
+        // The skips are the fixtures with a gap, a byte-built row, or a foreign
+        // event — see `isStoreReplayable`. Named rather than counted so that a
+        // fixture becoming unexpectedly unreplayable is visible in the failure.
+        #expect(skipped.sorted() == ["gapSwallowedTerminal", "hostile", "rich"])
+    }
+}
+
 @Suite("Persistence — two-stage decode")
 struct TwoStageDecodeTests {
 

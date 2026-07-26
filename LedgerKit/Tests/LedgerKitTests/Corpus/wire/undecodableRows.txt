@@ -1,0 +1,14 @@
+conversation 01980E5A-0000-7000-8000-000000000001
+genesis yes
+title "still readable"
+instructions —
+path —
+
+messages
+
+diagnostics
+  seq 2 — undecodableEnvelope
+  seq 3 — undecodableEnvelope
+  seq 4 01980E5A-0000-7000-8000-000000000104 unknownPayloadKind("compactionRecorded")
+  seq 5 01980E5A-0000-7000-8000-000000000105 unknownPayloadKind("deltaAppended")
+  seq 6 01980E5A-0000-7000-8000-000000000106 unknownPayloadKind(—)

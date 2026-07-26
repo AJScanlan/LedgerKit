@@ -20,12 +20,20 @@ struct CorpusDocument: Codable, Equatable {
         enum Content: Equatable {
             /// A decodable wire blob — everything this version can write.
             case event(LedgerEvent.Record)
-            /// **Reserved for M4.** A row whose bytes the loader could not
-            /// decode. Representable in the schema now so that adding it later
-            /// is not a format change, but deliberately unreadable until the
-            /// real two-stage loader exists: synthesising `LoadedEvent`s
-            /// test-side would freeze fixtures against a reimplementation of the
-            /// decode boundary, which is the drift ADR-003 rule 2 forbids.
+            /// Literal bytes, interpreted by the **production loader** exactly as
+            /// the store interprets a row it read (implemented at M4 Phase 2).
+            ///
+            /// Why this was reserved-but-unreadable until M4 is worth keeping in
+            /// view: before the real two-stage loader existed, the only way to
+            /// give these rows meaning was to synthesise `LoadedEvent`s
+            /// test-side — which would have frozen fixtures against a
+            /// reimplementation of the decode boundary, the drift ADR-003 rule 2
+            /// forbids. Now the boundary exists, so the fixture and the store
+            /// agree by construction rather than by maintenance.
+            ///
+            /// Bytes need not be *undecodable*; that is merely what they are used
+            /// for. A row whose bytes decode cleanly belongs in `event`, which is
+            /// the diffable form.
             case raw(String)
         }
 
@@ -76,41 +84,54 @@ struct CorpusDocument: Codable, Equatable {
     var conversationID: ConversationID
     var rows: [Row]
 
-    /// The reducer's input, or `nil` if the document uses a form this version
-    /// cannot load yet (a reserved `raw` row).
-    func loadedEvents() throws -> [LoadedEvent] {
-        try rows.map { row in
+    /// The reducer's input.
+    ///
+    /// `raw` rows go through **`SQLitePersistenceStore.load`** — the same function
+    /// the store calls on every row it reads — so a fixture's undecodable rows and
+    /// a real damaged database's produce identical `LoadedEvent`s. Nothing here
+    /// decides what an unreadable row *means*; that is the loader's job and the
+    /// fold's, which is what makes this an honest end-to-end fixture rather than a
+    /// restatement of the test's own assumptions.
+    func loadedEvents() -> [LoadedEvent] {
+        let decoder = WireJSON.decoder()
+        return rows.map { row in
             switch row.content {
             case .event(let record):
                 .decoded(LedgerEvent(record: record, sequence: row.sequence))
-            case .raw:
-                throw CorpusError.rawRowNotLoadableUntilM4(sequence: row.sequence)
+            case .raw(let json):
+                SQLitePersistenceStore.load(
+                    sequence: row.sequence,
+                    json: Data(json.utf8),
+                    using: decoder
+                )
             }
-        }
-    }
-}
-
-enum CorpusError: Error, CustomStringConvertible {
-    case rawRowNotLoadableUntilM4(sequence: Int64)
-
-    var description: String {
-        switch self {
-        case .rawRowNotLoadableUntilM4(let sequence):
-            "row \(sequence) is a reserved `raw` row; the two-stage loader that reads it arrives at M4"
         }
     }
 }
 
 extension CorpusDocument {
 
-    /// Built from an in-memory fixture. Fails for logs containing
-    /// `LoadedEvent.undecodable` rows — those are *loader outcomes*, not wire
-    /// bytes, so they have no honest on-disk form until M4 (see `raw` above).
+    /// Built from an in-memory fixture.
+    ///
+    /// Decoded rows serialize as `event`; rows the fixture built **from bytes**
+    /// serialize as `raw`, carrying those very bytes — so the on-disk fixture and
+    /// the in-memory one are the same input, not two descriptions of it.
+    ///
+    /// Still fails (`nil`) for a *synthesized* `LoadedEvent.undecodable` — one
+    /// made by `Log.undecodable(_:)` rather than from bytes. Those are loader
+    /// outcomes with no wire form, and inventing bytes to match one would be the
+    /// test writing the loader's answer for it. Fold-level unit tests may
+    /// legitimately synthesize; corpus fixtures may not.
     init?(_ log: Log) {
         var rows: [Row] = []
         for row in log.rows {
-            guard case .decoded(let event) = row else { return nil }
-            rows.append(Row(sequence: event.sequence, content: .event(event.record)))
+            switch row {
+            case .decoded(let event):
+                rows.append(Row(sequence: event.sequence, content: .event(event.record)))
+            case .undecodable(let sequence, _, _):
+                guard let json = log.rawJSON(at: sequence) else { return nil }
+                rows.append(Row(sequence: sequence, content: .raw(json)))
+            }
         }
         self.conversationID = log.conversation
         self.rows = rows

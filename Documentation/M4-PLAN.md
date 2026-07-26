@@ -1,7 +1,7 @@
 # M4 Implementation Plan — SQLite store, snapshots, index
 
-**Status:** In progress · opened 2026-07-26 at the M3 boundary · **Phases 0–1
-done** (223 tests green); **Phase 2 next**.
+**Status:** In progress · opened 2026-07-26 at the M3 boundary · **Phases 0–2
+done** (226 tests green); **Phase 3 next** (snapshots + cold open).
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M4 section) · [SPEC.md](./SPEC.md) §9, §6.6, §6.3, §10.6 · [ADR-003](./ADR/ADR-003-persistence-dependency.md) (ratifies here) · [ADR-001](./ADR/ADR-001-event-encoding.md) (D-1/D-2/D-3 close here)
 **Baseline:** M0–M3 done and audited, SPEC **rev 6 ratified**, **196 tests green**
 (175 `LedgerKit` + 21 in the test-double package — `LedgerKitTestSupport` at
@@ -476,25 +476,87 @@ corpus gaps M3 deliberately left (`raw` rows; `rich`/`hostile` on disk) close.
       `.undecodable(sequence:eventID:, .payloadKind(tag))` with the envelope's
       identity recovered and the tag where legible. Never throws per-row, never
       drops a row, passes gaps through untouched (the fold diagnoses them).
-- [ ] **`CorpusFile` `raw` row form implemented** (M3 handoff #1) — stops
-      throwing; produces the same `LoadedEvent`s the production loader emits.
-      The decode boundary now exists in exactly one place; the corpus consumes
-      it rather than reimplementing it (the drift D5 refused to freeze).
-- [ ] **`wire/` gains row-1 and row-2 fixtures** — bytes this version cannot
-      write: a corrupt-envelope row, an unknown-payload-kind row. Assert the
-      §6.6 diagnostic-identity rule from disk: the row-2 diagnostic carries the
-      `EventID`.
-- [ ] **`rich` and `hostile` land on disk** via `raw` rows — excluded at M3
-      *because* they contain `LoadedEvent.undecodable`; that reason has now
-      expired by construction (M3 handoff #2).
-- [ ] End-to-end equivalence: every corpus file written through the store then
-      loaded folds to a `FoldedState` identical to the in-memory fixture's.
+- [x] **`CorpusFile` `raw` row form implemented** (M3 handoff #1) — stops
+      throwing; routes bytes through `SQLitePersistenceStore.load`, the very
+      function the store calls on every row it reads. The decode boundary now
+      exists in exactly one place; the corpus consumes it rather than
+      reimplementing it (the drift D5 refused to freeze).
+- [x] **`wire/` gains row-1 and row-2 fixtures** — `undecodableRows`: a truncated
+      row and a wrong-typed envelope field (both lose identity), a *future*
+      payload kind (keeps identity, names itself), a non-object payload (keeps
+      identity, no legible tag), and a trailing valid event proving reduction
+      continued past five damaged rows in a row.
+- [x] **`rich` and `hostile` land on disk** via `raw` rows — excluded at M3
+      *because* they contained synthesized `LoadedEvent.undecodable` rows; those
+      are now built **from bytes**, so the reason expired by construction
+      (M3 handoff #2).
+- [x] End-to-end equivalence: every *replayable* corpus fixture written through
+      the store, read back, and folded lands on the same `FoldedState` the
+      in-memory fixture folds to.
 
-**Exit:** loader is the only decode site; corpus sweeps run against
-store-written bytes.
+**Exit:** ✅ loader is the only decode site; the corpus runs against bytes the
+production loader read. **226 green** (205 + 21).
 **Review gate:** walk the row-2 path end to end — this is the
 forward-compatibility diagnostic a developer will actually read in 2027;
 its quality is the point of two-stage decode.
+
+**Status: ✅ done 2026-07-26.** The architectural move worth naming: **corpus
+fixtures stopped *synthesizing* damaged rows and started *deriving* them from
+bytes.** M3 could not do this — with no real loader, the only way to give a
+damaged row meaning was to write the answer test-side, which would have frozen
+fixtures against a reimplementation of the decode boundary. Now
+`Log.unknownPayloadKind(_:)` and `Log.corruptRow(_:)` build bytes and run the
+production loader over them, so the file on disk contains exactly the input the
+in-memory fixture folded — one source of truth instead of two descriptions.
+
+`Log.undecodable(_:identified:)` survives and still synthesizes, deliberately: the
+fold's contract is to turn a loader outcome into a diagnostic, and where the value
+came from is none of its business, so fold-level unit tests may legitimately hand
+it one. What changed is that `CorpusDocument(_:)` refuses to serialize a
+synthesized row — the split is enforced, not merely advised.
+
+**The coverage gain is bigger than "two more files".** The corpus now *depends on*
+the loader: mutating the loader's tag recovery breaks `rich`/`hostile`'s
+**in-memory** residue expectations, which was impossible while those fixtures
+minted their own reasons. Two layers that used to be independently right about the
+same thing are now wired together.
+
+**Store equivalence is scoped, and the scope is stated in code** rather than as a
+list of fixture names that goes stale: `Log.isStoreReplayable`. Three fixtures are
+excluded and each for a structural reason — `gapSwallowedTerminal` has a gap
+(`append` assigns contiguous sequences inside the write transaction and must not
+reproduce a hole), `rich`/`hostile` have byte-built rows (encoding is total,
+decoding is not — the typed write path cannot express an unreadable row) and
+`hostile` additionally has a foreign event (`append` rejects the batch rather than
+manufacture what §6.6 row 4 exists to detect). Mutation-testing confirmed the
+exclusion is load-bearing: widening it to everything produces both a fold mismatch
+and a thrown `conversationMismatch`.
+
+**Mutation-tested, all four caught, all reverted** (three files diffed
+byte-identical against their backups afterwards):
+
+| Mutation | Caught by |
+|---|---|
+| Corpus `raw` rows bypass the production loader | the wire-dump comparison **and** all three tag assertions |
+| Loader drops the unknown-kind tag | `rich`/`hostile` in-memory residue, at fold *and* classify |
+| Row-1 diagnostics wrongly claim identity | both corrupt-envelope tests |
+| `isStoreReplayable` widened to everything | store equivalence, on fold mismatch and on the rejected batch |
+
+**One bug found in my own test helper, worth recording** because it is the failure
+mode CLAUDE.md warns about in the reducer, committed one layer out:
+`isStoreReplayable` first compared against `Array(1...Int64(rows.count))`, which
+**traps** for the zero-row `empty` fixture. The whole test process died with a
+signal instead of one expectation failing. Rewritten as an `enumerated()` walk. The
+lesson generalizes past the reducer: a trapping *helper* is worse than a failing
+one, because it destroys the report that would have told you what broke.
+
+**Found and pinned, not fixed — for SPEC rev 7 (§6 item 14).** A payload kind this
+version *does* know, carrying a body that will not decode, is reported as
+`unknownPayloadKind("deltaAppended")`. The disposition is right (skip the row, keep
+identity, keep reading) but the wording misleads, because §6.6 rows 1–2 have no
+case for "known kind, malformed body" — row 1 is "no identity recoverable", row 2
+is "unknown discriminator", and this is neither. `wire/undecodableRows` pins the
+behaviour so it cannot drift unnoticed.
 
 ---
 
@@ -622,6 +684,20 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
     OQ3 ⚠️ in the same section.
 13. **Footnote** — `Refusal.explanation` is on-demand generation
     (`Response<String>`), not stored data: rev 6's no-projection call confirmed.
+14. **§6.6 rows 1–2 have no case for "known kind, malformed body"** (found at M4
+    Phase 2, pinned by `wire/undecodableRows`). Row 1 is "no identity
+    recoverable"; row 2 is "unknown payload discriminator". A row whose envelope
+    reads and whose payload names a kind we *do* know, but whose body will not
+    decode, is neither — and the loader currently reports it as row 2, rendering
+    the slightly false `unknown payload kind: deltaAppended`. **The disposition is
+    right and should not change** (skip the row, keep the identity, keep
+    reading — contained loss, exactly like row 2). Only the inventory's wording is
+    wrong. Two candidate fixes: widen row 2 to "payload undecodable, with the tag
+    where legible", or add a row and a `QuarantineReason` case for a malformed
+    known payload. Widening is cheaper and loses nothing a diagnostic reader
+    needs; a new case would let fixtures distinguish "from the future" from
+    "corrupt", which has some triage value. Either way §6.6 claims to be a
+    complete inventory, and today it isn't.
 
 ---
 
@@ -676,3 +752,4 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | 2026-07-26 | **Phase 0: Understudy rename (D14)** | **196** (175 + 21) | Rename only, as its own commit — no semantic changes. Historical docs deliberately left naming the old package |
 | 2026-07-26 | **Phase 0 done (D13)** | **200** (179 + 21) | Breaking-surface pass: four inits internal, `MessageContent`, `.failed` labels, `GenerationError` description (+4 tests, mutation-tested), both config types → structs with factories. Zero warnings. Playground label-fixed; its rewrite carried as a follow-up |
 | 2026-07-26 | **Phase 1 done (GRDB wiring)** | **223** (202 + 21) | GRDB 7.11.1, three `STRICT` tables, six verbs, `WireJSON`, `LedgerSchema`'s two versions, two-stage loader (pulled forward from Phase 2). D16 → column-only, D19 recorded. **ADR-003 Accepted; ADR-001 D-1/D-2 closed.** 4 mutations injected, all caught, all reverted |
+| 2026-07-26 | **Phase 2 done (corpus integration)** | **226** (205 + 21) | `raw` rows implemented through the production loader; `rich`/`hostile` on disk (M3 handoffs 1–2 closed); `wire/undecodableRows` authored; store↔corpus equivalence sweep. Corpus now *depends on* the loader. 4 mutations caught. **Rev 7 gains item 14** (§6.6 has no case for "known kind, malformed body") |

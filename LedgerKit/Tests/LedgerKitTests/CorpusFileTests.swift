@@ -178,6 +178,75 @@ struct CorpusFileTests {
         }
     }
 
+    @Test("§6.6's diagnostic-identity rule holds from disk, through the real loader", .enabled(if: !CorpusFiles.isRecording))
+    func diagnosticIdentityHoldsFromDisk() throws {
+        // `invariantProblems` already checks this for in-memory folds. This checks
+        // it where it is actually *earned*: over bytes, decoded by the production
+        // loader. The rule is one-directional and easy to get subtly wrong —
+        // exactly two things leave `eventID` nil (a row whose envelope did not
+        // read, and a gap, which has no row to have identity) and **everything
+        // else must carry it**, including row 2, which is the one that takes
+        // deliberate effort to get right and the one a developer reads when a
+        // newer LedgerKit wrote the log.
+        var sawUnidentified = 0
+        var sawIdentified = 0
+
+        for directory in [CorpusFiles.dev, CorpusFiles.wire, CorpusFiles.frozen] {
+            for name in CorpusFiles.names(in: directory) {
+                let document = try JSONDecoder().decode(
+                    CorpusDocument.self,
+                    from: CorpusFiles.read(CorpusFiles.logFile(directory, name))
+                )
+                let state = fold(document.loadedEvents(), for: document.conversationID)
+
+                for diagnostic in state.diagnostics {
+                    let where_ = "\(directory)/\(name) seq \(diagnostic.sequence)"
+                    switch diagnostic.reason {
+                    case .undecodableEnvelope, .sequenceGap:
+                        #expect(diagnostic.eventID == nil, "\(where_) should carry no identity")
+                        sawUnidentified += 1
+                    default:
+                        #expect(diagnostic.eventID != nil, "\(where_) lost its event identity")
+                        sawIdentified += 1
+                    }
+                }
+            }
+        }
+
+        // Non-vacuity: the rule is only interesting if the corpus reaches both
+        // sides of it, and it is now on disk that it does.
+        #expect(sawUnidentified > 0)
+        #expect(sawIdentified > 0)
+    }
+
+    @Test("unknown payload kinds on disk are reported with their tag", .enabled(if: !CorpusFiles.isRecording))
+    func unknownKindsReportTheirTag() throws {
+        // The forward-compatibility promise, read back from bytes: a kind this
+        // version has never heard of names itself in the diagnostic. `wire/`
+        // carries a future kind (`compactionRecorded`) that no encoder here can
+        // produce, which is the only honest way to test this.
+        let document = try JSONDecoder().decode(
+            CorpusDocument.self,
+            from: CorpusFiles.read(CorpusFiles.logFile(CorpusFiles.wire, "undecodableRows"))
+        )
+        let state = fold(document.loadedEvents(), for: document.conversationID)
+
+        #expect(state.reasons.contains(.unknownPayloadKind("compactionRecorded")))
+        // Reduction continued past five damaged rows in a row — the degraded-but-
+        // alive guarantee (I2), and the title is the proof it kept reading.
+        #expect(state.title == "still readable")
+        // ⚠️ Recorded, not endorsed: a kind this version *does* know, carrying a
+        // body that will not decode, also lands here — reported as
+        // `unknownPayloadKind("deltaAppended")`, which reads oddly because §6.6
+        // rows 1–2 have no case for "known kind, malformed body". The disposition
+        // is right (skip the row, keep the identity, keep reading); only the
+        // wording misleads. Pinned so the behaviour cannot drift unnoticed, and
+        // flagged for SPEC rev 7 to either widen row 2 or add a row.
+        #expect(state.reasons.contains(.unknownPayloadKind("deltaAppended")))
+        // A payload that is not an object at all leaves no legible tag.
+        #expect(state.reasons.contains(.unknownPayloadKind(nil)))
+    }
+
     @Test("the corpus covers every payload kind in the discriminator registry", .enabled(if: !CorpusFiles.isRecording))
     func corpusCoversTheWireSurface() throws {
         // The corpus exists to protect *encoding* evolution, so a payload kind
