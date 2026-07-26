@@ -1,9 +1,9 @@
 # LedgerKit v0.1 — Design Specification
 
-**Status:** **Ratified — rev 7** (2026-07-26, at the M4 boundary). Subsequent amendments open rev 8. (Rev 6 was ratified 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.)
-**Date:** 2026-07-26 (rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
+**Status:** **rev 8 — open** (2026-07-27, post-M4-audit amendments; ratifies at the next milestone boundary). Rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
+**Date:** 2026-07-27 (rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
 **Targets:** iOS 27 / macOS 27 (Foundation Models `LanguageModel` protocol as inference substrate)
-**Changes from rev 6:** Appendix E.
+**Changes from rev 7:** Appendix F.
 
 ---
 
@@ -98,15 +98,17 @@ public struct LedgerEvent: Sendable, Codable, Identifiable {
 
     public enum Payload: Sendable, Codable {
         case conversationCreated(title: String?)
-        case userMessageAppended(MessageID, content: String, parent: MessageID?)
+        case userMessageAppended(message: MessageID, content: String, parent: MessageID?)
         case instructionsChanged(String?)   // nil clears; see §7.1
-        case generationStarted(GenerationID, MessageID, parent: MessageID?, model: ModelDescriptor)
+        case generationStarted(generation: GenerationID, message: MessageID, parent: MessageID?, model: ModelDescriptor)
                                             // parent nil ⇒ child of the virtual root (I6). The v0.1
                                             // store never emits nil — wire headroom for N10.
                                             // model = the *requested* descriptor (§7.8).
-        case deltaAppended(GenerationID, text: String)
-        case toolInvocationRecorded(GenerationID, ToolRecord)
-        case generationEnded(GenerationID, Outcome)
+                                            // Labels are wire-neutral (rev 8): tags live in the
+                                            // discriminator registry, field keys in CodingKeys.
+        case deltaAppended(generation: GenerationID, text: String)
+        case toolInvocationRecorded(generation: GenerationID, record: ToolRecord)
+        case generationEnded(generation: GenerationID, outcome: Outcome)
         case messageEdited(original: MessageID, replacement: MessageID, content: String)
         case activePathChanged(endpoint: MessageID)
         case titleChanged(String?)          // nil clears — symmetric with instructions (rev 4)
@@ -146,7 +148,7 @@ public struct ToolRecord: Sendable, Codable {
 }
 ```
 
-`StopInfo` and `ModelDescriptor` remain illustrative. `StopInfo` carries stop reason and usage from `Response.usage` — usage spans input/output with cached and reasoning token counts (**field names verified at rev 7; the mapping table is in §7.7**) — plus `resolvedModelID: String?`, the model identity the provider *reports* on the response (§7.8), **nil-by-default on-device now that OQ8 is closed**. `ModelDescriptor` identifies the *requested* provider + model + version well enough for branch-compare across models, and rev 7 settles that it is **app-supplied**: nothing in the framework exposes a model-identity key to derive it from. Evolution note: structs with optional fields tolerate additive change; *enums* are the evolution cliffs. A new enum case inside a non-terminal payload (e.g. `ToolRecord.Status`) quarantines that event only — contained loss, accepted. Terminals get the tolerance exception above.
+`StopInfo` and `ModelDescriptor` remain illustrative. `StopInfo` carries usage from `Response.usage` — spanning input/output with cached and reasoning token counts (**field names verified at rev 7; the mapping table is in §7.7**) — plus `stopReason: String?` and `resolvedModelID: String?`. **Both of those are per-provider convention, not framework surface (rev 8, scoping rev 7's "verified" claim honestly):** the verification covered the four usage fields, and the M4 audit read the interface for the rest — no stop-reason key exists anywhere in the 27 SDK (§7.7), and `resolvedModelID` was already known to be convention (§7.8, OQ8). **Nil is the expected value for both on-device**, and a nil must never read as a failure. `ModelDescriptor` identifies the *requested* provider + model + version well enough for branch-compare across models, and rev 7 settles that it is **app-supplied**: nothing in the framework exposes a model-identity key to derive it from. Evolution note: structs with optional fields tolerate additive change; *enums* are the evolution cliffs. A new enum case inside a non-terminal payload (e.g. `ToolRecord.Status`) quarantines that event only — contained loss, accepted. Terminals get the tolerance exception above.
 
 ### 6.2 Derived state
 
@@ -196,21 +198,21 @@ public struct QuarantinedEvent: Sendable {
 }
 
 public enum MessageState: Sendable {
-    case complete(Content)
+    case complete(MessageContent)
     case streaming(partial: String)
-    case failed(partial: String, GenerationError, Recoverability)
+    case failed(partial: String, error: GenerationError, recoverability: Recoverability)
     case cancelled(partial: String)
     case interrupted(partial: String)
 }
 
-public struct Content: Sendable {
+public struct MessageContent: Sendable {
     public var text: String
 }
 ```
 
 User messages are always `.complete`. Assistant messages traverse the machine. There is deliberately no `.pending` distinct from `.streaming(partial: "")` — collapsing them removed a state with no distinct UI meaning; reintroduce only if a provider exposes a meaningful queued phase.
 
-`Content` is a struct, not a bare `String`, on purpose: N8's structured partials extend it additively in v0.2 without a source-breaking change, and without turning `MessageState` — the exhaustive-switch showpiece — into a moving target. (`stopInfo` and `terminalTimestamp` live on `Message`, not inside the enum cases, for the same reason: the showpiece switch stays stable.)
+`MessageContent` is a struct, not a bare `String`, on purpose: N8's structured partials extend it additively in v0.2 without a source-breaking change, and without turning `MessageState` — the exhaustive-switch showpiece — into a moving target. (`stopInfo` and `terminalTimestamp` live on `Message`, not inside the enum cases, for the same reason: the showpiece switch stays stable.)
 
 `Recoverability` in `.failed` is **derived at classification time, never persisted** — see §6.3 (the fold → classify → overlay pipeline) and §8. Two of these states are derived-only in a stronger sense, and they are duals: `.interrupted` is fold-derivable only (dead logs); `.streaming` is projection-only (live stores, via the §7.4 overlay — no fold of any log ever yields it). Neither is wire format.
 
@@ -233,7 +235,7 @@ overlay_live(...)                             // projection-side only — §7.4;
 ```swift
 // Folded — persisted (the snapshot schema, §9). No Recoverability, no .streaming, no .interrupted.
 enum FoldedMessageState: Sendable, Codable {
-    case complete(Content)
+    case complete(MessageContent)
     case open(partial: String)               // started, not terminated. NOT a claim about why.
     case failed(partial: String, GenerationError)
     case cancelled(partial: String)
@@ -248,7 +250,7 @@ One fact appears under three names, at three levels of knowledge, and the progre
 
 Reading right-to-left is the crash: the overlay disappears, and the fold's honest "no terminal exists" surfaces as `.interrupted`. Reading a *snapshot* is why `.open` must exist — an intermediate fold has not finished reading, so it has not earned `.interrupted`, and storing that state would make reduced state depend on snapshot timing. **A snapshot that could hold `.interrupted` is a snapshot that can forge a crash; giving the folded layer its own enum makes that unrepresentable rather than merely forbidden** (tenet 1). P3 (§10) is the executable version of the same guarantee.
 
-**The folded layer is `Codable` in its entirety — and that conformance commits to nothing.** Snapshots are discard-on-mismatch with no migration ever (§9), so the folded encoding is disposable in a way the event wire format emphatically is not. `Content` and `QuarantinedEvent` therefore gain `Codable` for the snapshot path alone; adding a field to either is free, where the same change to `Payload` would be forever. Keeping `FoldedState` internal — consumers only ever hold `Conversation` — makes that asymmetry structural rather than a comment. **The one conformance that stays load-bearing is `GenerationError`'s**, which is on both paths: inside `Outcome` on the wire *and* inside `FoldedMessageState.failed` in snapshots.
+**The folded layer is `Codable` in its entirety — and that conformance commits to nothing.** Snapshots are discard-on-mismatch with no migration ever (§9), so the folded encoding is disposable in a way the event wire format emphatically is not. `MessageContent` and `QuarantinedEvent` therefore gain `Codable` for the snapshot path alone; adding a field to either is free, where the same change to `Payload` would be forever. Keeping `FoldedState` internal — consumers only ever hold `Conversation` — makes that asymmetry structural rather than a comment. **The one conformance that stays load-bearing is `GenerationError`'s**, which is on both paths: inside `Outcome` on the wire *and* inside `FoldedMessageState.failed` in snapshots.
 
 Names above are illustrative per §6.1's standing rule; the semantics are not. The test suite must enforce:
 
@@ -406,6 +408,8 @@ The mapping onto `TokenUsage` (§6.1) is 1:1 and total:
 | `Usage.Output.reasoningTokenCount` | `reasoningTokens` |
 
 **One asymmetry, deliberate:** Apple's four fields are non-optional `Int`; LedgerKit's are `Int?`. The ledger records what a provider *reported*, and a provider outside Apple's path may report nothing — nil means "not reported," which zero cannot say. **One M6 empirical residue:** whether `Input.totalTokenCount` is inclusive of `cachedTokenCount` is not stated by the interface, and it decides whether an app may sum the two. Record the answer here when M6 measures it; until then apps should display, not arithmetise.
+
+**`stopReason` has no source in the framework (rev 8, from the M4 audit's interface read).** `Response` is `{content, rawContent, transcriptEntries, usage}`, and no stop-reason key exists anywhere in the 27 SDK — the only free-form reporting channels are the `metadata` dictionaries (on `Usage` and the executor channel's `Metadata`). `StopInfo.stopReason` therefore has exactly `resolvedModelID`'s standing (§7.8): a per-provider convention the driver may populate from metadata where a provider follows one, **nil expected on-device**, never an error. Recorded because rev 7's "field names verified" sentence read as covering it, and a claim of verification has to say what it verified.
 
 ### 7.8 Provider swap & model identity
 
@@ -590,7 +594,7 @@ The test story *is* the differentiation — "how do you even test an FM app?" cu
 ## 11. Public API sketch (consumer's view)
 
 ```swift
-let store = try ConversationStore(persistence: .sqlite(url: dbURL))   // actor
+let store = try ConversationStore(persistence: .sqlite(at: dbURL))    // actor
 
 // Lifecycle & metadata
 let convo = try await store.createConversation()                      // optional title:
@@ -679,7 +683,7 @@ The pitch in one exhaustive `switch`: the compiler forces the app to handle inte
 ## 12. Phasing & effort (evenings/weekends, honest)
 
 - **v0.1 — target: tagged before iOS 27 GA (~Sept).** §6–§11 complete; demo app; README with the kill-mid-stream GIF. Estimate: **4–6 weeks part-time**, which assumes the ⚠️ verifications hold across betas — expect to repeat the API-verification evening per beta through August; price that in. Cut line if slipping, in order: (1) branch-switcher UX in demo (keep the events, hide the UI), (2) GRDB polish → naive SQLite, (3) tool-invocation recording → v0.2, (4) provider-mapping breadth — ship on-device + Claude-package mappings only; Chat-Completions family → v0.2. Never cut: I1–I7 **and P1–P3** tests, interruption recovery, ScriptedLanguageModel.
-- **v0.2:** tool records → replay view (and, if OQ2 makes live tool activity observable, the started/ended event-pair design — see §7.6's priced-in quarantine consequence); **transcript-fidelity rehydration** (reconstruct tool-call/tool-output entries from `.full` records into rebuilt transcripts; record reasoning/custom segments if OQ9 exposes them — closes the §7.1 fidelity gap for apps that opt in); guided-generation partials (extends `Content`); export (Markdown/JSON — now self-describing per-event thanks to the envelope `conversationID`); `RecordingLanguageModel` (capture real streams as fixtures); **continuation-resume research** (relaxes I7 to N:1 — the honest version of "Resume"); **parallel sibling generation** (relax single-flight per §6.5, multi-model branch-compare UX; the §7.2 session gate and §7.8 cardinality rules are its groundwork); **erasure design doc** (crypto-shredding vs. log rewrite, §9).
+- **v0.2:** tool records → replay view (and, if OQ2 makes live tool activity observable, the started/ended event-pair design — see §7.6's priced-in quarantine consequence); **transcript-fidelity rehydration** (reconstruct tool-call/tool-output entries from `.full` records into rebuilt transcripts; record reasoning/custom segments if OQ9 exposes them — closes the §7.1 fidelity gap for apps that opt in); guided-generation partials (extends `MessageContent`); export (Markdown/JSON — now self-describing per-event thanks to the envelope `conversationID`); `RecordingLanguageModel` (capture real streams as fixtures); **continuation-resume research** (relaxes I7 to N:1 — the honest version of "Resume"); **parallel sibling generation** (relax single-flight per §6.5, multi-model branch-compare UX; the §7.2 session gate and §7.8 cardinality rules are its groundwork); **erasure design doc** (crypto-shredding vs. log rewrite, §9).
 - **v0.3:** compaction bookkeeping integrated with utilities' summarizer — `compactionRecorded` **carries the summary text**, so both rehydration and the audit trail reproduce what the model actually saw, not merely that something happened; search; **sync design doc only** (log-shipping / CRDT exploration — the distributed-systems bridge, deliberately paper-first; inbox from v0.1: deletion tombstones (§9), envelope operation/correlation IDs (§6.1/§9)).
 
 ## 13. Definition of done (v0.1)
@@ -792,3 +796,11 @@ Rev 7 is opened by **M4** and closes the arc rev 6 began. Rev 6 was the first re
 - **The test double is named `Understudy` (§10.1).** The provisional name undercut the positioning it existed to serve and advertised a dependency the product deliberately does not have. The theatrical vocabulary was already in the API (`Script`, `Step`, `Cue`); discoverability is the package description's job.
 - **What M4 built, recorded where the spec was vague or now-stale (§9, §10).** Events are **TEXT** holding UTF-8 JSON — "blob" described opacity to the database and was read as a storage class, and a log that prints readably under `sqlite3` is worth real money in a project whose fixtures are documentation; the database still never interprets it. The **schema version lives in a column, never the blob** (ADR-001 D-2). The **snapshot discard condition is four-way**, two of them previously unstated — a payload naming another conversation (the snapshot analogue of row 4) and a checkpoint claiming a sequence before genesis. **GRDB is the decided backend** (ADR-003), behind a six-verb internal protocol that keeps the §12 cut line to raw sqlite3 cheap. **P1 is a store property, not a pure one** — its actual question is whether `append`'s return value is interchangeable with a re-read, which in memory is unaskable. **P1 and P3 sweep exhaustively rather than randomly**, because fixtures are ≤ 22 rows and exhaustive buys no seed, no flake, and failures that reproduce by re-running. **P2's harness exists before its overlay**, parameterized over it, because the empty-live-set case is not a placeholder but the state every cold open lands in. And the **discriminator registry is mechanically enforced** (ADR-001 D-3): a checked-in manifest, compared against what the codecs encode in both directions, with deletion caught by the compiler because the test reads the same exhaustive inventories the round-trips do.
 - rev 5 → rev 6 map: see Appendix D.
+
+## Appendix F — Changes from rev 7
+
+Rev 8 is opened by the **M4 boundary audit** (2026-07-27) rather than by a milestone, and is deliberately small: one provenance correction found by reading the swiftinterface, and a refresh of illustrative names to match the shipped surface. No invariant weakens, no event kind is added or removed, and nothing here touches the wire.
+
+- **`StopInfo.stopReason` has no source in the framework (§6.1, §7.7).** Rev 7's "field names verified" sentence covered the four usage fields but read as covering all of `StopInfo`; the audit read the interface for the rest and found **no stop-reason surface anywhere in the 27 SDK** — `Response` is `{content, rawContent, transcriptEntries, usage}`, and the only free-form reporting channels are the `metadata` dictionaries. `stopReason` therefore joins `resolvedModelID` (§7.8) as per-provider convention: the ledger records what is reported, **nil is the expected value on-device**, and a nil must never read as a failure. The field stays — optional struct fields are cheap headroom — but its provenance is now stated instead of implied. The general rule, restated from Appendix E because it caught its own author: *a claim of verification has to say what it verified.*
+- **Illustrative names refreshed to the shipped surface (§6.1, §6.2, §6.3, §11, §12).** `Content` → `MessageContent`; `Payload`'s generation/message values labelled (`generationStarted(generation:message:parent:model:)` and kin — wire-neutral, since tags live in the discriminator registry and field keys in `CodingKeys`); `MessageState.failed` labelled; `.sqlite(url:)` → `.sqlite(at:)`, Foundation's convention for file-location labels. Names were always bikesheddable per §6.1's standing rule, so none of this is semantic — but sketches that match the code they illustrate are worth keeping true whenever the drift is noticed, and the M4 audit noticed.
+- rev 6 → rev 7 map: see Appendix E.

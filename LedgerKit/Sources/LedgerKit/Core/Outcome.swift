@@ -24,8 +24,8 @@ public enum Outcome: Sendable, Equatable {
 /// All fields optional: providers differ, and optional struct fields tolerate
 /// additive change — enums are the evolution cliffs, structs are not.
 ///
-/// Provenance differs per field, verified against the 27 SDK (rev 7 / M4
-/// audit): `usage` maps 1:1 from `Response.usage` (§7.7's table). `stopReason`
+/// Provenance differs per field, verified against the 27 SDK (SPEC §7.7,
+/// rev 8): `usage` maps 1:1 from `Response.usage` (§7.7's table). `stopReason`
 /// and `resolvedModelID` have **no dedicated surface anywhere in the
 /// framework** — `Response` is `{content, rawContent, transcriptEntries,
 /// usage}`, and the only free-form channel is the `metadata` dictionaries —
