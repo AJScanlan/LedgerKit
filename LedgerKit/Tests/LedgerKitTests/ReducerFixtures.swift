@@ -141,6 +141,32 @@ struct Log {
     }
 
     func timestamp(at sequence: Int64) -> Date { Log.base.addingTimeInterval(Double(sequence)) }
+
+    /// The decoded rows' wire records — what `PersistenceStore.append` takes, so
+    /// the store suites replay the very fixtures the reducer suites fold (M4
+    /// handoff 2).
+    ///
+    /// Undecodable rows have no record *by construction*: they are loader
+    /// outcomes, not events anyone could have written. A log containing them
+    /// therefore cannot be replayed through the store, which is exactly why the
+    /// on-disk corpus reserves a `raw` row form (M3 D5) rather than pretending
+    /// such rows can be round-tripped.
+    var records: [LedgerEvent.Record] {
+        rows.compactMap { row in
+            switch row {
+            case .decoded(let event): event.record
+            case .undecodable: nil
+            }
+        }
+    }
+
+    /// Timestamps are minted on whole seconds, so every fixture record is born
+    /// canonical (ADR-001 R-5) and satisfies `append`'s debug assertion. Pinned
+    /// as a test rather than left as a happy accident — see
+    /// `PersistenceAppendTests`.
+    var timestampsAreCanonical: Bool {
+        records.allSatisfy { WireDate.canonical($0.timestamp) == $0.timestamp }
+    }
 }
 
 extension FoldedState {

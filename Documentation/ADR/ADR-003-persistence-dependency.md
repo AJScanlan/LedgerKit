@@ -1,7 +1,8 @@
 # ADR-003 — Persistence dependency: GRDB behind an internal seam
 
-**Status:** Draft · opened 2026-07-19 at M1 · updated 2026-07-25 (M2 audit: the read
-verb returns `LoadedEvent`) · ratifies at M4 (when wired)
+**Status:** **Accepted** · opened 2026-07-19 at M1 · updated 2026-07-25 (M2 audit: the read
+verb returns `LoadedEvent`) · **ratified 2026-07-26 at M4 Phase 1, by wiring it**
+(`Store/SQLitePersistenceStore.swift`, GRDB 7.11.1, 23 tests in 5 suites)
 **Spec:** §9 (persistence), §6.5/§11 (store actor & API shape), §10.6 (P1/P3), §12 (cut line)
 **Code:** `Store/Persistence.swift` (the seam; no GRDB wiring until M4)
 
@@ -78,10 +79,52 @@ rules; M4 ratifies it by wiring.
 - The seam itself is a thin layer of indirection that must not grow features — its
   budget is "small protocol," and D-rule 4 is the guard.
 
-## Open until M4
+## Settled at M4 Phase 1 (2026-07-26) — the wiring
 
-- `DatabaseQueue` vs `DatabasePool` (likely pool for concurrent projection reads).
-- Canonical encoder configuration shared with the frozen corpus (ADR-001 D-1).
-- Schema-version column placement (ADR-001 D-2) — decided with the table DDL.
-- The append verb's exact signature is being designed now at M1 (the one seam decision
-  with API-shape consequences); this ADR inherits it once settled.
+- **`DatabasePool` for `.sqlite`, `DatabaseQueue` for `.inMemory`**, both behind
+  `any DatabaseWriter` — which is why this was never an API decision. The pool brings WAL
+  and concurrent reads that M7's projection wants while a write is in flight; in-memory
+  databases have no pool form and need none, since a test has nothing to read
+  concurrently.
+- **Canonical encoder** is `WireJSON` (ADR-001 D-1, closed): `[.sortedKeys,
+  .withoutEscapingSlashes]`, compact. The store and the corpus share the *configuration*,
+  not the whitespace — corpus files pretty-print, because readability is their job and
+  whitespace is invisible to the value comparisons those tests make. Byte-level pinning
+  happens against `WireJSON` output.
+- **Schema version is column-only** (ADR-001 D-2, closed; M4-PLAN D16). A version is
+  loader routing metadata, exactly like `sequence`; duplicating it into the blob would add
+  a permanent envelope key to every event ever written, to buy self-description that no
+  transport needs — log transport moves *rows*, not bare blobs.
+- **`events.payload` is TEXT, not BLOB.** JSON is text, and a log that
+  `sqlite3 ledger.db "SELECT payload FROM events"` prints readably is worth real money in
+  a project whose fixtures are documentation; it also puts SQLite's `json1` functions
+  within reach for triage. Rule 2 asks that the database never *interpret* the value,
+  which TEXT honours exactly as well as BLOB. Snapshots stay BLOB — the seam types that
+  payload as `Data`, it is a disposable cache rather than audited truth, and nobody reads
+  a snapshot by eye.
+- **`STRICT` tables throughout.** SQLite's default affinity would happily store a string
+  in an integer column; tenet 1 does not stop being true at the storage layer.
+- **Identifiers reach SQL as bare UUID strings** via an internal `sqlText`, deliberately
+  identical to ADR-002's wire form so the `conversation_id` column and the same field
+  inside the blob are the same bytes — which is what makes §6.6 row 4's duplication an
+  honest read-side check rather than one the writer forged agreement into. Spelled out
+  rather than conforming the identifiers to GRDB's `DatabaseValueConvertible`, which would
+  be visible to anyone importing both modules and is exactly the leak rule 1 forbids.
+- **`from: "7.9.0"`, not `.exact(_:)`.** An exact pin in a *library* manifest forces a
+  resolution conflict on any consumer who also depends on GRDB — a cost paid by other
+  people to buy us nothing, since `Package.resolved` already pins the exact version for
+  our own CI. (Resolved: 7.11.1.)
+
+**Rule 4 held.** The protocol is still six verbs. Value observation did not join, and will
+not until M7's projection actually needs it.
+
+## Owned limitation: file protection
+
+§9's `.completeUntilFirstUserAuthentication` minimum is applied to the database and its
+sidecars on the iOS family (`FileProtectionType` is an iOS-family concept; macOS's
+equivalent is FileVault, which is not ours to set). Two honest gaps: `-wal` and `-shm` do
+not exist until the first write, so they are protected on the *next* open rather than the
+first; and the robust answer is protection on the containing *directory*, which belongs to
+the app because the app chose the directory. This is a floor, not a guarantee — §9's
+guidance that sensitive domains layer their own encryption stands. Worth revisiting at M5
+when `ConversationStore` owns database creation end to end.

@@ -1,6 +1,7 @@
 # M4 Implementation Plan — SQLite store, snapshots, index
 
-**Status:** Planned · opened 2026-07-26 at the M3 boundary.
+**Status:** In progress · opened 2026-07-26 at the M3 boundary · **Phases 0–1
+done** (223 tests green); **Phase 2 next**.
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M4 section) · [SPEC.md](./SPEC.md) §9, §6.6, §6.3, §10.6 · [ADR-003](./ADR/ADR-003-persistence-dependency.md) (ratifies here) · [ADR-001](./ADR/ADR-001-event-encoding.md) (D-1/D-2/D-3 close here)
 **Baseline:** M0–M3 done and audited, SPEC **rev 6 ratified**, **196 tests green**
 (175 `LedgerKit` + 21 in the test-double package — `LedgerKitTestSupport` at
@@ -133,7 +134,7 @@ compare *values after decode*, where whitespace is invisible. Snapshots also
 encode via `WireJSON` for uniformity — while noting that per §6.3 that
 conformance commits to nothing.
 
-### D16 — Schema-version placement: decide at the Phase 1 gate *(ADR-001 D-2)*
+### D16 — Schema-version placement *(ADR-001 D-2)* — **RESOLVED: column-only** (2026-07-26, Alexander)
 §9: "every event row carries a schema version." Column-only, or column + blob?
 - **Column-only (recommended):** version is loader routing metadata, exactly
   like `sequence` — "bytes below, meaning above" says bookkeeping lives in
@@ -145,6 +146,13 @@ conformance commits to nothing.
   being separated from its row, the `conversationID` precedent. Costs a
   permanent envelope key on every event ever written.
 Present both to Alexander with the DDL; record the outcome here and in ADR-001.
+
+**Outcome:** column-only, as recommended. Recorded in ADR-001 D-2 (closed) and
+ADR-003's "Settled at M4 Phase 1". Consequence worth stating so the column's
+silence is not mistaken for neglect: **nothing reads it yet, by design** — with
+one version there is nothing to route. It is the hook an upcaster hangs from, and
+the first version bump is what gives it both a switch and a test. The corpus
+`version` field lands with Phase 2's row-form work.
 
 ### D17 — `contextSizeExceeded` gains an optional payload *(pending rev 7 approval; Phase 4)*
 The recommendation from the audit, restated so the wire reasoning survives:
@@ -166,6 +174,34 @@ small, so P1 enumerates **every flush split of every fixture** (the
 `persisted ++ tail` boundary at every row), same shape as P3's split sweep.
 D6 also carries: generators only ever *remove or split*; never reorder, never
 duplicate (§6.6 ordering precondition).
+
+### D19 — `events.payload` is TEXT; `snapshots.payload` stays BLOB *(taken during Phase 1)*
+Not planned up front — surfaced writing the DDL, where §9's word "blob" turned out
+to be describing *opacity*, not a SQLite storage class.
+
+**Decision: `events.payload` is TEXT holding UTF-8 JSON.** JSON *is* text, and the
+whole point of the events table is that it is the audited, permanent truth. A log
+that `sqlite3 ledger.db "SELECT payload FROM events"` prints readably is worth
+real money in a project whose fixtures are documentation and whose §10 story is
+"how do you even debug this" — and it puts SQLite's `json1` functions within reach
+for ad-hoc triage (`json_extract(payload, '$.payload.kind')` over a hostile log
+beats writing a program). BLOB renders as hex, which costs exactly that.
+
+**This does not weaken ADR-003 rule 2.** That rule asks the database never to
+*interpret* the value, and TEXT honours it identically: SQLite stores and returns
+the bytes, LedgerKit's loader is still the only thing that decodes them. Nothing
+about the column type invites the database to participate in meaning.
+
+**`snapshots.payload` stays BLOB**, and the asymmetry is the reasoning rather than
+an oversight: the seam types that payload as `Data`, a snapshot is a disposable
+cache of a fold rather than audited truth, and nobody has ever wanted to read one
+by eye. Converting `Data` → String → `Data` to buy readability nobody needs is
+work in exchange for nothing.
+
+**Costs accepted:** one UTF-8 conversion per row in each direction (JSON is always
+valid UTF-8, so it cannot fail); and the two tables now differ, which is a fact a
+reader could mistake for accident — hence this entry, the DDL comment, and
+ADR-003's settled section all saying why.
 
 ---
 
@@ -308,38 +344,118 @@ floor's `"driver:"` convention is now legible in CI output for free.
 
 **Goal:** ADR-003 stops being a decision document and becomes a conformance.
 
-- [ ] Add GRDB, pinned (first external dependency — record the version and the
-      supply-chain note from ADR-003 in the commit message).
-- [ ] **DDL:** `events` (`conversation_id`, `sequence`) UNIQUE, blob column,
-      version column per **D16 (decide at this gate)**; `snapshots`;
-      `conversations`.
-- [ ] **`DatabaseQueue` vs `DatabasePool`:** recommendation — `.sqlite` maps to
-      a `DatabasePool` (WAL, the production shape; M7's concurrent projection
-      reads want it) and `.inMemory` maps to a `DatabaseQueue` (in-memory pools
-      don't exist), both behind `any DatabaseWriter`, which is why ADR-003
-      called this "not an API decision." Confirm at the gate.
-- [ ] `append(_:to:)`: one transaction; **sequence assigned inside the write**,
-      contiguous from 1; index maintenance on non-delta kinds derived from the
-      payloads (Persistence.swift doc contract); whole-batch rejection on a
-      record whose `conversationID` mismatches; returns assembled
-      `[LedgerEvent]`; empty batch is a no-op returning `[]`.
-- [ ] Debug-assert appended timestamps are born canonical
-      (`WireDate.canonical` fixed point) — the corpus's
-      `timestampsAreCanonical` is the cross-check (M3 handoff #3).
-- [ ] File protection `.completeUntilFirstUserAuthentication` at database
-      creation (§9). Applied, not yet configurable (guardrail 5).
-- [ ] `deleteConversation`: transactional across all three tables.
-- [ ] `conversationSummaries()`: ordered `lastEventAt` descending, one read.
-- [ ] **`WireJSON` extracted** (D15); the store encodes through it and nothing
-      else; the existing literal-bytes test moves onto it.
-- [ ] Tests (in-memory): append/read round-trip value-identity; sequence
-      contiguity across batches; index rules (created seeds the row,
-      `titleChanged` updates it, delta flushes *don't touch it*, `lastEventAt`
-      stamps on non-delta appends); delete removes all three tables' rows.
+**Status: ✅ done 2026-07-26 — 223 tests green** (202 `LedgerKit` + 21
+`Understudy`), zero warnings. `Store/SQLitePersistenceStore.swift` (the
+conformance), `Store/LedgerSchema.swift` (the two versions), `WireJSON` in
+`Core/WireCoding.swift`, and `PersistenceStoreTests.swift` (23 tests in 5
+suites). **ADR-003 is Accepted**; **ADR-001 D-1 and D-2 are closed**.
 
-**Exit:** six verbs implemented and tested against in-memory GRDB.
-**Review gate:** DDL review with Alexander; **D16 decided and recorded** (here
-+ ADR-001); ADR-003 status flips to Accepted once the conformance passes.
+**Decisions taken at the gate, as recommended:** D16 → **column-only**;
+`DatabasePool` for `.sqlite`, `DatabaseQueue` for `.inMemory`. Both are written up
+in ADR-003's new "Settled at M4 Phase 1" section rather than only here, since
+that is where a future reader looks.
+
+**Three things decided while implementing, recorded because the diff does not
+explain itself:**
+
+- **`events.payload` is TEXT, not BLOB** (new, D19). JSON is text, and a log that
+  `sqlite3 ledger.db "SELECT payload FROM events"` prints readably is worth real
+  money in a project whose fixtures are documentation — it also puts SQLite's
+  `json1` functions within reach for triage. ADR-003 rule 2 asks only that the
+  database never *interpret* the value, which TEXT honours exactly as well.
+  Snapshots stay BLOB: the seam types that payload as `Data`, it is a disposable
+  cache rather than audited truth, and nobody reads a snapshot by eye.
+- **The two version numbers are separate constants**, not one. A payload bump
+  selects an upcaster and invalidates nothing; a reducer bump discards snapshots
+  and migrates nothing. A single "schema version" could only have had one of
+  those two behaviours, and picking either would have made the other
+  inexpressible. `LedgerSchema` documents which is which and when to bump.
+- **`load` is internal rather than private**, so the two-stage decode rules are
+  tested by handing them bytes. That is both the sharper test and the cheaper
+  one: the rules are pure, so going through a database would have added I/O *and*
+  a GRDB dependency in the test target to verify something with no storage in it.
+  This pulled the loader's unit tests **forward from Phase 2**, which is a
+  deviation worth naming — Phase 2 keeps its real substance (the corpus `raw`
+  form, row-1/2 fixtures on disk, `rich`/`hostile` on disk, end-to-end
+  equivalence) and no longer has to invent a corrupt-row injection mechanism.
+
+**Mutation-tested, all four caught, all reverted** (file diffed byte-identical
+against its pre-mutation backup afterwards):
+
+| Mutation | Caught by |
+|---|---|
+| Sequence assignment skips a number | contiguity **and** backend-assigns-sequence |
+| `updatesIndex` returns `true` for `deltaAppended` | the ~4 Hz churn test, on both assertions |
+| Single-stage decode (envelope discarded with payload) | all three row-1/row-2 identity tests |
+| Conversation-mismatch check removed | foreign-batch rejection, on all three assertions |
+
+The fourth is worth dwelling on: without that check, records naming a *foreign*
+conversation were written into this conversation's sequence run — the writer
+manufacturing exactly the cross-stream contamination §6.6 row 4 exists to detect
+at read time. The check does not merely reject bad input; it prevents the store
+from creating a condition the reducer would later have to diagnose.
+
+**One gap closed late:** every suite initially used `.inMemory`, leaving the
+production path — `DatabasePool`, WAL, file protection, and *migrating a database
+that already has the schema* — completely untested. `PersistenceFileBackendTests`
+now writes a real file, closes the store, reopens it, and reads back. Migration
+idempotence on reopen is the cold-open path every app launch takes and the one
+DoD-1's kill-and-relaunch demo depends on.
+
+**Deferred deliberately:** the `schema_version` column's *value* is unasserted.
+It is exercised (a wrong column name or a NOT NULL violation fails every append)
+but nothing reads the number back, because nothing reads it at all yet — with one
+version there is nothing to route. It is the upcaster hook, and the first version
+bump is what gives it a test.
+
+- [x] Add GRDB, pinned (first external dependency — record the version and the
+      supply-chain note from ADR-003 in the commit message). **GRDB 7.11.1** via
+      `from: "7.9.0"` — `.exact(_:)` in a *library* manifest would force a
+      resolution conflict on any consumer who also depends on GRDB, a cost paid
+      by other people to buy us nothing, since `Package.resolved` already pins
+      exactly for our CI.
+- [x] **DDL:** `events` keyed `(conversation_id, sequence)`, TEXT payload (D19),
+      `schema_version` column-only (**D16 resolved: column-only**); `snapshots`
+      (one row per conversation, BLOB payload); `conversations` + a
+      `last_event_at DESC` index. All `STRICT`.
+- [x] **`DatabaseQueue` vs `DatabasePool`:** confirmed as recommended — `.sqlite`
+      → `DatabasePool` (WAL, the production shape; M7's concurrent projection
+      reads want it), `.inMemory` → `DatabaseQueue` (in-memory pools don't
+      exist), both behind `any DatabaseWriter`, which is why ADR-003 called this
+      "not an API decision."
+- [x] `append(_:to:)`: one transaction; **sequence assigned inside the write**,
+      contiguous from 1; index maintenance on non-delta kinds derived from the
+      payloads via an exhaustive `Payload.updatesIndex`, so a future kind cannot
+      be added without deciding which side of the line it falls on; whole-batch
+      rejection *before* the transaction opens; returns assembled
+      `[LedgerEvent]`; empty batch is a no-op returning `[]`.
+- [x] Debug-assert appended timestamps are born canonical
+      (`WireDate.canonical` fixed point) — asserted rather than *repaired*, since
+      canonicalizing at write time would give every event two identities
+      depending on whether it had been to disk. `Log.timestampsAreCanonical`
+      pins the fixture side so a violation reads legibly instead of trapping
+      inside a store call (M3 handoff #3).
+- [x] File protection `.completeUntilFirstUserAuthentication` at database
+      creation (§9). Applied, not yet configurable (guardrail 5); the `-wal`/
+      `-shm` and directory-level limitations are owned in ADR-003.
+- [x] `deleteConversation`: transactional across all three tables, and scoped —
+      both asserted.
+- [x] `conversationSummaries()`: ordered `lastEventAt` descending, one read.
+      Canonical ISO 8601 UTC means lexical order *is* chronological, so the index
+      serves the sort without a collation.
+- [x] **`WireJSON` extracted** (D15); the store encodes through it and nothing
+      else; `pinnedJSON` now encodes through it too — a test configuring its own
+      encoder would pin bytes nobody writes, hiding the *symmetric* fault that
+      assertion is the only instrument for.
+- [x] Tests: append/read round-trip value-identity (and that `append`'s return
+      equals a subsequent read — the property M5's fold-forward depends on);
+      sequence contiguity across three separate transactions; index rules
+      including the ~4 Hz churn guard; delete; snapshots; list ordering;
+      two-stage decode; **and the file backend**.
+
+**Exit:** ✅ six verbs implemented and tested; **223 green**, zero warnings.
+**Review gate:** DDL review with Alexander; **D16 decided and recorded** (here,
+ADR-001 D-2, and ADR-003); **ADR-003 is now Accepted**.
 
 ---
 
@@ -348,7 +464,14 @@ floor's `"driver:"` convention is now legible in CI output for free.
 **Goal:** §6.6's input corollary implemented by production code, and the two
 corpus gaps M3 deliberately left (`raw` rows; `rich`/`hostile` on disk) close.
 
-- [ ] `events(in:from:)`: **envelope first, payload second**. Row 1 →
+> **Pulled forward into Phase 1:** the loader itself and its unit tests are
+> **done**, because `load` is a pure function over bytes and testing it through a
+> database would have cost I/O and a GRDB dependency in the test target to verify
+> something with no storage in it. What remains below is Phase 2's real
+> substance — the *corpus* work — which no longer has to invent a corrupt-row
+> injection mechanism.
+
+- [x] `events(in:from:)`: **envelope first, payload second**. Row 1 →
       `.undecodable(sequence:eventID: nil, .envelope)`; row 2 →
       `.undecodable(sequence:eventID:, .payloadKind(tag))` with the envelope's
       identity recovered and the tag where legible. Never throws per-row, never
@@ -540,7 +663,8 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | D13 | Contract hygiene precedes store work (audit pass, Phase 0) | **Landed** 2026-07-26 · `MessageContent.init` stays public (no invariant to violate); folded enum keeps positional `.failed` |
 | D14 | `LedgerKitTestSupport` → `Understudy`; one name everywhere | **Landed** 2026-07-26 (accepted by Alexander; own commit) |
 | D15 | One production `WireJSON` encoder; corpus files stay pretty; bytes pinned against `WireJSON` | **Accepted** · applies Phase 1 |
-| D16 | Schema-version placement (column-only vs column+blob) | **Open** — decide at Phase 1 gate |
+| D16 | Schema-version placement (column-only vs column+blob) | **Resolved: column-only** 2026-07-26 (Alexander) · ADR-001 D-2 closed |
+| D19 | `events.payload` is TEXT (readable via `sqlite3`/`json1`); snapshots stay BLOB | **Accepted** 2026-07-26 · landed Phase 1 |
 | D17 | `contextSizeExceeded` optional payload | **Pending rev 7 approval** — implement Phase 4 |
 | D18 | P1 splits exhaustive, D6 generator discipline carries forward | **Accepted** · applies Phase 4 |
 
@@ -551,3 +675,4 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | 2026-07-26 | Plan drafted | 196 | Sourced from the M3 boundary audit; D13–D15/D18 accepted, D16 open, D17 pending rev 7 |
 | 2026-07-26 | **Phase 0: Understudy rename (D14)** | **196** (175 + 21) | Rename only, as its own commit — no semantic changes. Historical docs deliberately left naming the old package |
 | 2026-07-26 | **Phase 0 done (D13)** | **200** (179 + 21) | Breaking-surface pass: four inits internal, `MessageContent`, `.failed` labels, `GenerationError` description (+4 tests, mutation-tested), both config types → structs with factories. Zero warnings. Playground label-fixed; its rewrite carried as a follow-up |
+| 2026-07-26 | **Phase 1 done (GRDB wiring)** | **223** (202 + 21) | GRDB 7.11.1, three `STRICT` tables, six verbs, `WireJSON`, `LedgerSchema`'s two versions, two-stage loader (pulled forward from Phase 2). D16 → column-only, D19 recorded. **ADR-003 Accepted; ADR-001 D-1/D-2 closed.** 4 mutations injected, all caught, all reverted |

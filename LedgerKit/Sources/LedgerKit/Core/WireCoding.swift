@@ -7,6 +7,43 @@ import Foundation
 /// format lives in the types and cannot drift with store configuration —
 /// the same reasoning as `LedgerIdentifier`'s explicit single-value coding.
 
+/// The canonical JSON configuration for everything LedgerKit persists (ADR-001
+/// D-1, settled at M4).
+///
+/// **Why this exists at all: round-trip tests cannot catch a *symmetric* coding
+/// bug.** If the encoder and decoder are consistently wrong in the same way — two
+/// same-typed fields transposed, say — every round-trip passes while the bytes on
+/// disk are silently wrong, and those bytes are permanent (§9). The only
+/// instrument that catches it is a fixture asserting *literal encoded bytes*, and
+/// that requires bytes to be deterministic. Hence `sortedKeys`: not aesthetics,
+/// but the precondition for the frozen corpus to mean anything.
+///
+/// `withoutEscapingSlashes` because `\/` is legal JSON that no reader needs and
+/// every human reading a fixture trips over. Compact (no `prettyPrinted`) because
+/// this is the *store's* form; the on-disk corpus pretty-prints its own files,
+/// where readability is the point and whitespace is invisible to the value
+/// comparison those tests actually make.
+///
+/// **Factories, not shared instances**, and the contrast with ``WireDate`` is
+/// deliberate: that type caches because constructing an `ISO8601DateFormatter`
+/// measured ~120 µs and a 10k-event cold open would have spent ~1.2 s on it. A
+/// `JSONEncoder` has no formatter to build and is cheap enough that one per
+/// call-site — a local, so never shared across isolation domains — buys safety
+/// (no `nonisolated(unsafe)`, no assumption about Foundation's thread-safety) for
+/// no measured cost. Reach for a cache here only with a measurement in hand.
+enum WireJSON {
+
+    static func encoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return encoder
+    }
+
+    static func decoder() -> JSONDecoder {
+        JSONDecoder()
+    }
+}
+
 extension Duration {
     /// Ratified wire form: integer milliseconds. Integer-exact for both
     /// sub-second tool durations and Retry-After delta-seconds, and readable

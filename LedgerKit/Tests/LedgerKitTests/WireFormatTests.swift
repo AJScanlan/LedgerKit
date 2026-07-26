@@ -161,9 +161,13 @@ struct EnvelopeTests {
 
     @Test("exact wire JSON — the blob omits sequence, timestamps are ISO 8601")
     func pinnedJSON() throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let json = String(decoding: try encoder.encode(record), as: UTF8.self)
+        // Encoded through `WireJSON` — the *production* configuration — rather
+        // than a local copy of it (ADR-001 D-1, closed at M4). A test that
+        // configured its own encoder would pin bytes nobody writes: the one bug
+        // class this assertion exists to catch is a *symmetric* encoder/decoder
+        // fault, which round-trips cannot see and which a divergent test encoder
+        // would hide all over again.
+        let json = String(decoding: try WireJSON.encoder().encode(record), as: UTF8.self)
         #expect(json == """
             {"conversationID":"01980E5A-0000-7000-8000-00000000000B",\
             "id":"01980E5A-0000-7000-8000-00000000000A",\

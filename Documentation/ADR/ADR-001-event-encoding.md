@@ -219,25 +219,55 @@ notice. Declared here so Hyrum's Law doesn't ossify them by usage.
 *(Renumbered from the draft's OQ-1…5 to avoid colliding with the spec's beta-tracking
 OQ1–9, §14.)*
 
-### D-1. The frozen corpus asserts **encoded bytes** under a **canonical encoder** *(was OQ-2)*
+### ~~D-1. The frozen corpus asserts **encoded bytes** under a **canonical encoder**~~ — **closed at M4 Phase 1**
 
 Round-trip tests catch an *asymmetric* encoder/decoder bug. They cannot catch a
 *symmetric* one: if encoder and decoder are consistently transposed, round-trip passes
 while the on-disk format is silently wrong — and that format is then permanent. Only a
 fixture asserting literal encoded bytes catches it.
 
-Byte assertion requires deterministic bytes, so this decision now includes its
-prerequisite: a **canonical encoder configuration** — `outputFormatting = [.sortedKeys]`
-at minimum (decide slash-escaping alongside) — which the M4 store must share, or the
-corpus asserts bytes the store doesn't produce. `WireFormatTests` pins one exact JSON
-string under sorted keys as the down payment; the version-frozen corpus (§10.2, M3)
-generalizes it.
+**Resolved (2026-07-26):** the canonical configuration is `WireJSON`
+(`Core/WireCoding.swift`) — `[.sortedKeys, .withoutEscapingSlashes]`, compact — and the
+store encodes through nothing else. `sortedKeys` is not aesthetics; it is the
+*precondition* for deterministic bytes, without which the frozen corpus cannot mean
+anything. `withoutEscapingSlashes` because `\/` is legal JSON that no reader needs and
+every human reading a fixture trips over.
 
-### D-2. Where the schema version physically lives *(was OQ-4)*
+One nuance the original phrasing glossed: the store and the corpus share the
+**configuration**, not the whitespace. Corpus *files* pretty-print — readability is their
+job, and whitespace is invisible to the value comparisons those tests actually make.
+Byte-level pinning therefore happens against `WireJSON` output, which is what
+`WireFormatTests`' exact-string assertion now uses.
+
+**Factories, not shared instances**, and the contrast with R-5 is the point: `WireDate`
+caches because an `ISO8601DateFormatter` measured ~120 µs to build and a 10k-event cold
+open would have spent ~1.2 s on it. A `JSONEncoder` has no formatter to construct, so one
+per call-site — a local, never shared across isolation domains — buys safety (no
+`nonisolated(unsafe)`, no assumption about Foundation's thread-safety) for no measured
+cost. Reach for a cache here only with a measurement in hand.
+
+### ~~D-2. Where the schema version physically lives~~ — **closed at M4 Phase 1: column-only**
 
 §9 says every row carries one. Column, envelope field, or both? Interacts with the
 `sequence`/`conversationID` split — one is key-only, the other deliberately duplicated,
-so there is precedent in both directions. Decide at M4 with the table schema.
+so there was precedent in both directions.
+
+**Resolved (2026-07-26): the column only** — `events.schema_version`, alongside
+`sequence`. A version is *loader routing metadata*, which is what the key columns are for,
+and "bytes below, meaning above" puts bookkeeping in columns. The counterargument — that a
+self-describing blob survives being separated from its row — does not survive contact with
+how logs actually move: transport carries **rows** (sequence, version, blob), never bare
+blobs, a rule this ADR already imposes in the lossy-decode section. Duplicating the
+version would have added a permanent envelope key to every event ever written to buy
+self-description nothing needs.
+
+Consequence recorded so the column's silence is not mistaken for neglect: **nothing reads
+it yet, by design.** With one version there is nothing to route. It is the hook an
+*upcaster* hangs from, and the first version bump adds the switch. `LedgerSchema`
+(`Store/LedgerSchema.swift`) holds it, deliberately separate from the snapshot
+`reducerVersion` because the two fail in opposite directions — a payload bump selects an
+upcaster and invalidates nothing, a reducer bump discards snapshots and migrates nothing. A
+single "schema version" could only have had one of those behaviours.
 
 ### D-3. Registry enforcement *(was OQ-5)*
 

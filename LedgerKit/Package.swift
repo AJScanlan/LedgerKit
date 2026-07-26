@@ -17,9 +17,20 @@ let package = Package(
             targets: ["LedgerKit"]
         ),
     ],
+    // GRDB is the only external dependency, chosen at ADR-003 and wired at M4.
+    // `from:` rather than `.exact(_:)` deliberately: an exact pin in a *library*
+    // manifest forces a resolution conflict on any consumer who also depends on
+    // GRDB, which is a cost paid by other people to buy us nothing —
+    // `Package.resolved` already pins the exact version for our own CI. The
+    // supply-chain exposure this accepts is priced in ADR-003 ("Costs accepted"),
+    // and the seam is what keeps the raw-sqlite3 fallback (§12 cut line) cheap.
+    dependencies: [
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.9.0"),
+    ],
     targets: [
         .target(
-            name: "LedgerKit"
+            name: "LedgerKit",
+            dependencies: [.product(name: "GRDB", package: "GRDB.swift")]
         ),
         // `Corpus/` holds the on-disk fixture corpus (SPEC §10.2): logs as wire
         // JSON plus their expected reduced state. Declared as a resource so the
