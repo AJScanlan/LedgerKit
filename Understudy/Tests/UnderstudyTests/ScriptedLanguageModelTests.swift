@@ -49,7 +49,6 @@ struct ScriptedLanguageModelTests {
 
         let model = ScriptedLanguageModel(script: "hello")
         #expect(model.requests.isEmpty)
-        #expect(model.responseCount == 0)
     }
 
     @Test("capabilities are empty unless the test asks for them")

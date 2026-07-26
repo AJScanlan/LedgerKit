@@ -37,7 +37,7 @@ enum Wire {
         id: eventID,
         conversationID: conversationID,
         timestamp: timestamp,
-        payload: .userMessageAppended(messageID, content: "Explain valley folds", parent: nil)
+        payload: .userMessageAppended(message: messageID, content: "Explain valley folds", parent: nil)
     )
 
     static let stopInfo = StopInfo(
@@ -74,12 +74,12 @@ enum Wire {
     /// One of every payload kind, with associated values populated.
     static let allKinds: [LedgerEvent.Payload] = [
         .conversationCreated(title: "Valley folds 101"),
-        .userMessageAppended(messageID, content: "Explain valley folds", parent: parentID),
+        .userMessageAppended(message: messageID, content: "Explain valley folds", parent: parentID),
         .instructionsChanged("You are an origami tutor."),
-        .generationStarted(generationID, messageID, parent: parentID, model: model),
-        .deltaAppended(generationID, text: "A valley fold is"),
-        .toolInvocationRecorded(generationID, toolRecord),
-        .generationEnded(generationID, .completed(stopInfo)),
+        .generationStarted(generation: generationID, message: messageID, parent: parentID, model: model),
+        .deltaAppended(generation: generationID, text: "A valley fold is"),
+        .toolInvocationRecorded(generation: generationID, record: toolRecord),
+        .generationEnded(generation: generationID, outcome: .completed(stopInfo)),
         .messageEdited(original: messageID, replacement: parentID, content: "Explain mountain folds"),
         .activePathChanged(endpoint: messageID),
         .titleChanged("Valley folds 101"),
@@ -89,11 +89,11 @@ enum Wire {
     /// omitted on the wire and restored on decode.
     static let nilVariants: [LedgerEvent.Payload] = [
         .conversationCreated(title: nil),
-        .userMessageAppended(messageID, content: "First message", parent: nil),
+        .userMessageAppended(message: messageID, content: "First message", parent: nil),
         .instructionsChanged(nil),
-        .generationStarted(generationID, messageID, parent: nil, model: model),
-        .generationEnded(generationID, .failed(.rateLimited(retryAfter: nil))),
-        .generationEnded(generationID, .failed(.contextSizeExceeded(contextSize: nil, tokenCount: nil))),
+        .generationStarted(generation: generationID, message: messageID, parent: nil, model: model),
+        .generationEnded(generation: generationID, outcome: .failed(.rateLimited(retryAfter: nil))),
+        .generationEnded(generation: generationID, outcome: .failed(.contextSizeExceeded(contextSize: nil, tokenCount: nil))),
         .titleChanged(nil),
     ]
 
@@ -252,7 +252,7 @@ struct WireRoundTripTests {
         let payload = try decodePayload(
             #"{"kind":"deltaAppended","generationID":"01980E5A-0000-7000-8000-00000000000E","text":"hi","mood":"jaunty"}"#
         )
-        #expect(payload == .deltaAppended(Wire.generationID, text: "hi"))
+        #expect(payload == .deltaAppended(generation: Wire.generationID, text: "hi"))
     }
 }
 
@@ -381,8 +381,8 @@ struct TerminalToleranceTests {
             #"{"kind":"generationEnded","generationID":"01980E5A-0000-7000-8000-00000000000E","outcome":{"kind":"resolvedOffline","note":"from the future"}}"#
         )
         #expect(payload == .generationEnded(
-            Wire.generationID,
-            .failed(.unrecognized(description: "undecodable outcome: resolvedOffline"))
+            generation: Wire.generationID,
+            outcome: .failed(.unrecognized(description: "undecodable outcome: resolvedOffline"))
         ))
     }
 
@@ -394,8 +394,8 @@ struct TerminalToleranceTests {
         // "error", not "outcome": the Outcome decoded fine as `failed`; it is
         // the nested GenerationError that was unreadable (§6.6 row 3).
         #expect(payload == .generationEnded(
-            Wire.generationID,
-            .failed(.unrecognized(description: "undecodable error: quotaExhausted"))
+            generation: Wire.generationID,
+            outcome: .failed(.unrecognized(description: "undecodable error: quotaExhausted"))
         ))
     }
 
@@ -409,8 +409,8 @@ struct TerminalToleranceTests {
             #"{"kind":"generationEnded","generationID":"01980E5A-0000-7000-8000-00000000000E","outcome":{"kind":"completed"}}"#
         )
         #expect(payload == .generationEnded(
-            Wire.generationID,
-            .failed(.unrecognized(description: "undecodable outcome: completed"))
+            generation: Wire.generationID,
+            outcome: .failed(.unrecognized(description: "undecodable outcome: completed"))
         ))
     }
 
@@ -420,8 +420,8 @@ struct TerminalToleranceTests {
             #"{"kind":"generationEnded","generationID":"01980E5A-0000-7000-8000-00000000000E","outcome":42}"#
         )
         #expect(payload == .generationEnded(
-            Wire.generationID,
-            .failed(.unrecognized(description: "undecodable outcome: <unreadable>"))
+            generation: Wire.generationID,
+            outcome: .failed(.unrecognized(description: "undecodable outcome: <unreadable>"))
         ))
     }
 
@@ -431,8 +431,8 @@ struct TerminalToleranceTests {
             #"{"kind":"generationEnded","generationID":"01980E5A-0000-7000-8000-00000000000E"}"#
         )
         #expect(payload == .generationEnded(
-            Wire.generationID,
-            .failed(.unrecognized(description: "undecodable outcome: <missing>"))
+            generation: Wire.generationID,
+            outcome: .failed(.unrecognized(description: "undecodable outcome: <missing>"))
         ))
     }
 

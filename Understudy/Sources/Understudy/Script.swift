@@ -68,8 +68,8 @@ public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLi
         /// and demo recordings look real.
         ///
         /// Uses the player's clock, so a test may drive it without real time.
-        /// For *deterministic* pauses prefer ``waitFor(_:)``, which parks until
-        /// the test says otherwise instead of racing a duration.
+        /// For *deterministic* pauses prefer ``wait(until:)``, which parks
+        /// until the test says otherwise instead of racing a duration.
         public static func wait(_ duration: Duration) -> Step {
             Step(.wait(duration))
         }
@@ -79,7 +79,11 @@ public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLi
         /// The tool for asserting anything about a generation *while it is in
         /// flight*: cancel it, kill the process, switch branches, assert the
         /// partial. No sleeps, no polling, no flakes.
-        public static func waitFor(_ cue: Cue) -> Step {
+        ///
+        /// Spelled `wait(until:)` since the M4 audit (was `waitFor(_:)`) — the
+        /// guidelines put prepositions in argument labels, and it pairs with
+        /// ``wait(_:)`` as one verb, two kinds of waiting.
+        public static func wait(until cue: Cue) -> Step {
             Step(.waitFor(cue))
         }
 
@@ -170,12 +174,12 @@ public struct ScriptExhaustion: Sendable, Equatable {
 /// (``ScriptExhaustion/fail``).
 public struct ScriptExhausted: Error, CustomStringConvertible {
     /// How many scripts the model was given.
-    public let scripted: Int
-    /// Which request this was — 1-based, so `scripted: 2, requested: 3` reads
-    /// as "the third request, and only two were scripted".
-    public let requested: Int
+    public let scriptCount: Int
+    /// Which request this was — 1-based, so `scriptCount: 2, requestNumber: 3`
+    /// reads as "the third request, and only two were scripted".
+    public let requestNumber: Int
 
     public var description: String {
-        "the scripted model was asked for response \(requested) but was given \(scripted)"
+        "the scripted model was asked for response \(requestNumber) but was given \(scriptCount)"
     }
 }

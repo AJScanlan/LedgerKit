@@ -32,5 +32,10 @@ enum LedgerSchema {
     /// over-bumping is one replay and the penalty for under-bumping is resuming
     /// from a checkpoint that means something subtly different, which is exactly
     /// the divergence P3 exists to catch and the kind that would ship silently.
-    static let reducerVersion = 1
+    ///
+    /// 2: the M4-audit rename `QuarantineReason.unknownPayloadKind` →
+    /// `undecodablePayload(kind:)` changed the synthesized snapshot encoding of
+    /// diagnostics. Old checkpoints would discard on decode failure anyway;
+    /// bumping makes the discard deterministic rather than incidental.
+    static let reducerVersion = 2
 }

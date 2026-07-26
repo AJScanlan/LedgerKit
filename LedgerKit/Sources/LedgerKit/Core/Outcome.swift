@@ -23,10 +23,18 @@ public enum Outcome: Sendable, Equatable {
 ///
 /// All fields optional: providers differ, and optional struct fields tolerate
 /// additive change — enums are the evolution cliffs, structs are not.
-/// ⚠️ Field names pinned against the iOS 27 beta at M6 (OQ5/OQ8); the shape is
-/// stable.
+///
+/// Provenance differs per field, verified against the 27 SDK (rev 7 / M4
+/// audit): `usage` maps 1:1 from `Response.usage` (§7.7's table). `stopReason`
+/// and `resolvedModelID` have **no dedicated surface anywhere in the
+/// framework** — `Response` is `{content, rawContent, transcriptEntries,
+/// usage}`, and the only free-form channel is the `metadata` dictionaries —
+/// so both are per-provider convention, and **nil is the expected value
+/// on-device**. A nil must never read as a failure.
 public struct StopInfo: Sendable, Codable, Equatable {
-    /// Why generation stopped, as reported by the provider.
+    /// Why generation stopped, as reported by the provider — if it reports
+    /// one at all. No standard key exists (see the type note); on-device this
+    /// is expected nil.
     public var stopReason: String?
     public var usage: TokenUsage?
     /// The model identity the provider *reports* on the response — versus the

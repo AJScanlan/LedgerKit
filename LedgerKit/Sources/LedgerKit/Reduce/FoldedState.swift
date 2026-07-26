@@ -38,7 +38,8 @@ struct FoldedState: Sendable, Equatable, Codable {
     /// genesis carrying a nil title with no messages yet is indistinguishable
     /// from no genesis at all. Without it, resuming a snapshot of a
     /// *genesis-less* log — which the hostile corpus contains, and which P3
-    /// snapshots at randomized points — would start accepting events that a
+    /// snapshots at every split point (§10.6: exhaustive, not randomized) —
+    /// would start accepting events that a
     /// replay from sequence 1 quarantines as `beforeGenesis`. P3 demands exact
     /// equivalence including diagnostics, so the flag is the price of that.
     var hasGenesis: Bool

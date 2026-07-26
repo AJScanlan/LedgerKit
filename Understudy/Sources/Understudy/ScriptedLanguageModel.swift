@@ -77,11 +77,6 @@ public struct ScriptedLanguageModel: LanguageModel {
     public var requests: [LanguageModelExecutorGenerationRequest] {
         playbook.requests
     }
-
-    /// How many responses have been requested so far.
-    public var responseCount: Int {
-        playbook.requests.count
-    }
 }
 
 // MARK: - Executor

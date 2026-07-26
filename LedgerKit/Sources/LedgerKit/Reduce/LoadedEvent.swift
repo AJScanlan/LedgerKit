@@ -22,9 +22,11 @@ public enum LoadedEvent: Sendable, Equatable {
     public enum DecodeFailure: Sendable, Equatable {
         /// Row 1 — nothing readable, not even identity.
         case envelope
-        /// Row 2 — envelope read, payload discriminator unrecognized. Carries
-        /// the tag where it was legible.
-        case payloadKind(String?)
+        /// Row 2 — envelope read, payload unreadable: an unknown
+        /// discriminator, *or* a known one whose body will not decode (the two
+        /// conditions rev 7's widened row 2 names). Carries the tag where it
+        /// was legible.
+        case payload(kind: String?)
     }
 
     case decoded(LedgerEvent)
@@ -32,7 +34,7 @@ public enum LoadedEvent: Sendable, Equatable {
     /// A row whose key was readable but whose contents were not. `sequence`
     /// always exists — it *is* the table key (§9) — which is why it is a plain
     /// `Int64` here while `eventID` is optional.
-    case undecodable(sequence: Int64, eventID: EventID?, DecodeFailure)
+    case undecodable(sequence: Int64, eventID: EventID?, failure: DecodeFailure)
 
     /// The row's position in the conversation's sequence run — the sole
     /// authoritative order (§6.1), and what gap detection walks.
@@ -59,7 +61,7 @@ extension LoadedEvent.DecodeFailure {
     var quarantineReason: QuarantineReason {
         switch self {
         case .envelope: .undecodableEnvelope
-        case .payloadKind(let kind): .unknownPayloadKind(kind)
+        case .payload(let kind): .undecodablePayload(kind: kind)
         }
     }
 }

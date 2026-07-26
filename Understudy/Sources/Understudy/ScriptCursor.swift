@@ -36,15 +36,15 @@ final class ScriptCursor: Sendable {
 
             switch exhaustion.policy {
             case .fail:
-                throw ScriptExhausted(scripted: scripts.count, requested: index + 1)
+                throw ScriptExhausted(scriptCount: scripts.count, requestNumber: index + 1)
             case .repeatLast:
                 guard let last = scripts.last else {
-                    throw ScriptExhausted(scripted: 0, requested: index + 1)
+                    throw ScriptExhausted(scriptCount: 0, requestNumber: index + 1)
                 }
                 return last
             case .loop:
                 guard !scripts.isEmpty else {
-                    throw ScriptExhausted(scripted: 0, requested: index + 1)
+                    throw ScriptExhausted(scriptCount: 0, requestNumber: index + 1)
                 }
                 return scripts[index % scripts.count]
             }

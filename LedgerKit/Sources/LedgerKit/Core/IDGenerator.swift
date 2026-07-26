@@ -14,26 +14,29 @@ import Foundation
 ///   someone had to hand it, so no code path can quietly inherit production
 ///   randomness. The store owns one generator and mints inside its append
 ///   transaction (SPEC §6.1).
-public struct IDGenerator<RNG: RandomNumberGenerator & Sendable>: Sendable {
+public struct IDGenerator<RandomSource: RandomNumberGenerator & Sendable>: Sendable {
 
     private var uuidV7 = UUIDv7Generator()
-    private var rng: RNG
+    private var randomSource: RandomSource
     private let now: @Sendable () -> UInt64
 
     /// - Parameters:
-    ///   - rng: Randomness source. Seed it for deterministic fixtures.
+    ///   - randomSource: Randomness source. Seed it for deterministic fixtures.
     ///   - now: Milliseconds since the Unix epoch.
-    public init(rng: RNG, now: @escaping @Sendable () -> UInt64) {
-        self.rng = rng
+    public init(randomSource: RandomSource, now: @escaping @Sendable () -> UInt64) {
+        self.randomSource = randomSource
         self.now = now
     }
 
     // MARK: - Vending
 
-    public mutating func eventID() -> EventID { EventID(mintV7()) }
-    public mutating func conversationID() -> ConversationID { ConversationID(mintV7()) }
-    public mutating func messageID() -> MessageID { MessageID(mintV7()) }
-    public mutating func generationID() -> GenerationID { GenerationID(mintV7()) }
+    /// `make`-prefixed because these are **mutating**: each call advances the
+    /// v7 generator's monotonicity state, and a getter-shaped name would read
+    /// as pure at exactly the call sites where it is not.
+    public mutating func makeEventID() -> EventID { EventID(mintV7()) }
+    public mutating func makeConversationID() -> ConversationID { ConversationID(mintV7()) }
+    public mutating func makeMessageID() -> MessageID { MessageID(mintV7()) }
+    public mutating func makeGenerationID() -> GenerationID { GenerationID(mintV7()) }
 
     // MARK: - Minting
 
@@ -43,16 +46,22 @@ public struct IDGenerator<RNG: RandomNumberGenerator & Sendable>: Sendable {
     /// `EventID`-only v7 requirement to every identifier for uniformity, so
     /// there is deliberately no second strategy to choose between.
     private mutating func mintV7() -> UUID {
-        uuidV7.next(milliseconds: now(), using: &rng)
+        uuidV7.next(milliseconds: now(), using: &randomSource)
     }
 }
 
-extension IDGenerator where RNG == SystemRandomNumberGenerator {
+extension IDGenerator where RandomSource == SystemRandomNumberGenerator {
     /// The production generator: system randomness, wall clock.
+    ///
+    /// The clock is clamped at zero: a wall clock set before 1970 would make
+    /// the interval negative and the `UInt64` conversion trap — a crash on
+    /// ambient state, which nothing in this package is allowed to do. The
+    /// v7 generator's own monotonicity handles a merely *regressing* clock;
+    /// this handles an absurd one.
     public static func live() -> Self {
         Self(
-            rng: SystemRandomNumberGenerator(),
-            now: { UInt64(Date().timeIntervalSince1970 * 1000) }
+            randomSource: SystemRandomNumberGenerator(),
+            now: { UInt64(max(0, Date().timeIntervalSince1970 * 1000)) }
         )
     }
 }

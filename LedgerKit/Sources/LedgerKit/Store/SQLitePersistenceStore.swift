@@ -227,6 +227,15 @@ final class SQLitePersistenceStore: PersistenceStore {
     /// caller-supplied flag: §9 states it in terms of kind, so a flag could only
     /// ever *disagree* with the payloads — an illegal state this signature cannot
     /// represent.
+    ///
+    /// **Known non-rule (M4 audit): index maintenance trusts the writer.** A
+    /// *second* `conversationCreated` appended through the seam upserts this
+    /// row's title, while the reducer quarantines that same event (§6.6 row 5) —
+    /// so a hostile append can leave the index advertising a title the reduction
+    /// rejects. Unreachable through the store actor's verbs (M5 never appends a
+    /// second genesis), and the index is a rebuildable projection, so the
+    /// divergence is contained and cheap. Deliberately not guarded here: doing
+    /// so would put fold semantics below the seam, which ADR-003 rule 2 forbids.
     private static func updateIndex(_ db: Database, for records: [LedgerEvent.Record]) throws {
         for record in records {
             guard record.payload.updatesIndex else { continue }
@@ -324,14 +333,14 @@ final class SQLitePersistenceStore: PersistenceStore {
     /// enclosing type is already internal, so this widens no surface.
     static func load(sequence: Int64, json: Data, using decoder: JSONDecoder) -> LoadedEvent {
         guard let envelope = try? decoder.decode(EnvelopeProbe.self, from: json) else {
-            return .undecodable(sequence: sequence, eventID: nil, .envelope)
+            return .undecodable(sequence: sequence, eventID: nil, failure: .envelope)
         }
         do {
             let record = try decoder.decode(LedgerEvent.Record.self, from: json)
             return .decoded(LedgerEvent(record: record, sequence: sequence))
         } catch {
             let tag = (try? decoder.decode(PayloadTagProbe.self, from: json))?.payload?.kind
-            return .undecodable(sequence: sequence, eventID: envelope.id, .payloadKind(tag))
+            return .undecodable(sequence: sequence, eventID: envelope.id, failure: .payload(kind: tag))
         }
     }
 

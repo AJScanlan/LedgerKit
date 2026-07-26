@@ -34,8 +34,8 @@ private enum Fold {
     /// table — if a row is added and this array isn't, the count check fails.
     static let allReasons: [QuarantineReason] = [
         .undecodableEnvelope,
-        .unknownPayloadKind("messagePinned"),
-        .unknownPayloadKind(nil),
+        .undecodablePayload(kind: "messagePinned"),
+        .undecodablePayload(kind: nil),
         .foreignConversation(found: conversation),
         .beforeGenesis,
         .duplicateGenesis,

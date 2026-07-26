@@ -77,7 +77,7 @@ struct PersistenceAppendTests {
     func foreignRecordRejectsBatch() async throws {
         let store = try SQLitePersistenceStore(.inMemory)
         var log = Log.opened()
-        log.append(.userMessageAppended(Fix.userA, content: "mine", parent: nil))
+        log.append(.userMessageAppended(message: Fix.userA, content: "mine", parent: nil))
         log.append(.titleChanged("theirs"), from: Fix.foreign)
 
         await #expect(throws: SQLitePersistenceStore.StoreError.conversationMismatch(
@@ -139,13 +139,13 @@ struct PersistenceFileBackendTests {
 
         let log = Log.withCompletedTurn()
         let written = try await {
-            let store = try SQLitePersistenceStore(.sqlite(url: url))
+            let store = try SQLitePersistenceStore(.sqlite(at: url))
             return try await store.append(log.records, to: log.conversation)
         }()
 
         // A second store over the same file — the cold-open path an app takes on
         // every launch, and the one the kill-mid-stream demo depends on (DoD-1).
-        let reopened = try SQLitePersistenceStore(.sqlite(url: url))
+        let reopened = try SQLitePersistenceStore(.sqlite(at: url))
         let loaded = try await reopened.events(in: log.conversation, from: 1)
 
         #expect(loaded == written.map(LoadedEvent.decoded))
@@ -192,10 +192,10 @@ struct PersistenceIndexTests {
     func deltasDoNotTouchIndex() async throws {
         let store = try SQLitePersistenceStore(.inMemory)
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
         let beforeDeltas = log.lastSequence
-        log.append(.deltaAppended(Fix.genA, text: "A valley "))
-        log.append(.deltaAppended(Fix.genA, text: "fold"))
+        log.append(.deltaAppended(generation: Fix.genA, text: "A valley "))
+        log.append(.deltaAppended(generation: Fix.genA, text: "fold"))
 
         let records = log.records
         _ = try await store.append(Array(records[0..<Int(beforeDeltas)]), to: log.conversation)
@@ -413,7 +413,7 @@ struct TwoStageDecodeTests {
         #expect(row == .undecodable(
             sequence: 7,
             eventID: EventID(uuid(0x101)),
-            .payloadKind("compactionRecorded")
+            failure: .payload(kind: "compactionRecorded")
         ))
     }
 
@@ -427,7 +427,7 @@ struct TwoStageDecodeTests {
             // `undecodableEnvelope ⇒ eventID == nil` is a contract the fold's
             // diagnostic-identity check relies on, so the loader must never
             // report a *partially* recovered envelope as identified.
-            #expect(load(json) == .undecodable(sequence: 7, eventID: nil, .envelope))
+            #expect(load(json) == .undecodable(sequence: 7, eventID: nil, failure: .envelope))
         }
     }
 
@@ -444,7 +444,7 @@ struct TwoStageDecodeTests {
         // event that claimed identity while lying about when it happened would
         // be worse than one that admits it is unreadable — timestamps are
         // display/audit data, and a wrong one is silently wrong.
-        #expect(row == .undecodable(sequence: 7, eventID: nil, .envelope))
+        #expect(row == .undecodable(sequence: 7, eventID: nil, failure: .envelope))
     }
 
     @Test("a decodable row is never reported as a gap")

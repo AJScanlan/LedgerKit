@@ -58,9 +58,12 @@ public enum GenerationError: Error, Sendable, Equatable {
     /// had in fact been shown. Grouped rather than lifted because all four
     /// classify `.terminal` and three of four are configuration errors.
     case unsupported(UnsupportedFeature)
-    /// `retryAfter` is normalized to a duration at normalization time (both
-    /// RFC 9110 `Retry-After` forms), so the persisted value is
-    /// clock-independent; display math is `terminalTimestamp + retryAfter`.
+    /// `retryAfter` is normalized to a duration at normalization time — from
+    /// any of §8's three forms: RFC 9110 `Retry-After` delta-seconds,
+    /// RFC 9110 HTTP-date, or Apple's `RateLimited.resetDate` instant (rev 7).
+    /// Converting an instant to a duration reads a clock, which is legal in
+    /// the driver and forbidden in the reducer (I1) — so the persisted value
+    /// is clock-independent; display math is `terminalTimestamp + retryAfter`.
     case rateLimited(retryAfter: Duration?)
     /// A failure that crossed a provider boundary. `status` is the HTTP
     /// status when one exists; `code` is the provider's stable

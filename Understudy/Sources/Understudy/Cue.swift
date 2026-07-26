@@ -4,7 +4,7 @@ import Foundation
 ///
 /// ```swift
 /// let cue = Cue()
-/// let model = ScriptedLanguageModel(script: ["half an ans", .waitFor(cue), "wer"])
+/// let model = ScriptedLanguageModel(script: ["half an ans", .wait(until: cue), "wer"])
 ///
 /// await cue.reached()                     // the model is parked, mid-response
 /// await store.cancelGeneration(in: id)    // …so cancel at a point you chose

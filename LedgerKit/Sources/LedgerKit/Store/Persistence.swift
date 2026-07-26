@@ -19,13 +19,13 @@ import Foundation
 ///   to storage.
 /// - **The seam is internal.** Consumers pick a backend via
 ///   `PersistenceConfiguration` (§11: `ConversationStore(persistence:
-///   .sqlite(url: dbURL))`); the protocol itself is `internal`, callable only
+///   .sqlite(at: dbURL))`); the protocol itself is `internal`, callable only
 ///   by the `ConversationStore` actor (M5) and test doubles.
 
 /// How a `ConversationStore` persists its ledger (SPEC §11).
 ///
 /// ```swift
-/// let store = try ConversationStore(persistence: .sqlite(url: dbURL))
+/// let store = try ConversationStore(persistence: .sqlite(at: dbURL))
 /// ```
 ///
 /// A struct with static factories rather than an `enum`, applying the rule M3
@@ -54,7 +54,11 @@ public struct PersistenceConfiguration: Sendable {
     }
 
     /// A single SQLite database file — the production shape (§9).
-    public static func sqlite(url: URL) -> Self {
+    ///
+    /// Labelled `at:` per Foundation's convention for file locations
+    /// (`FileManager.createDirectory(at:)`); §11's sketch spells it `url:`,
+    /// which is illustrative per §6.1's standing rule.
+    public static func sqlite(at url: URL) -> Self {
         Self(.sqlite(url: url))
     }
 

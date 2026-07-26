@@ -84,11 +84,11 @@ enum Corpus {
     static var ordinaryTurn: CorpusFixture {
         var log = Log()
         log.append(.conversationCreated(title: "Valley folds 101"))
-        log.append(.userMessageAppended(Fix.userA, content: "Explain valley folds", parent: nil))
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.deltaAppended(Fix.genA, text: "A valley fold "))
-        log.append(.deltaAppended(Fix.genA, text: "brings the paper down."))
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+        log.append(.userMessageAppended(message: Fix.userA, content: "Explain valley folds", parent: nil))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(generation: Fix.genA, text: "A valley fold "))
+        log.append(.deltaAppended(generation: Fix.genA, text: "brings the paper down."))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
 
         return CorpusFixture(
             name: "ordinaryTurn",
@@ -104,15 +104,15 @@ enum Corpus {
     static var multiTurn: CorpusFixture {
         var log = Log()
         log.append(.conversationCreated(title: "Origami"))
-        log.append(.userMessageAppended(Fix.userA, content: "q1", parent: nil))
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.deltaAppended(Fix.genA, text: "a1"))
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
-        log.append(.userMessageAppended(Fix.userB, content: "q2", parent: Fix.assistantA))
-        log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.userB, model: Fix.model))
-        log.append(.deltaAppended(Fix.genB, text: "a2"))
-        log.append(.generationEnded(Fix.genB, .completed(Fix.stopInfo)))
-        log.append(.userMessageAppended(Fix.userC, content: "q3", parent: Fix.assistantB))
+        log.append(.userMessageAppended(message: Fix.userA, content: "q1", parent: nil))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(generation: Fix.genA, text: "a1"))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
+        log.append(.userMessageAppended(message: Fix.userB, content: "q2", parent: Fix.assistantA))
+        log.append(.generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.userB, model: Fix.model))
+        log.append(.deltaAppended(generation: Fix.genB, text: "a2"))
+        log.append(.generationEnded(generation: Fix.genB, outcome: .completed(Fix.stopInfo)))
+        log.append(.userMessageAppended(message: Fix.userC, content: "q3", parent: Fix.assistantB))
 
         return CorpusFixture(
             name: "multiTurn",
@@ -128,11 +128,11 @@ enum Corpus {
     static var editBranch: CorpusFixture {
         var log = Log()
         log.append(.conversationCreated(title: "Origami"))
-        log.append(.userMessageAppended(Fix.userA, content: "q1", parent: nil))
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.deltaAppended(Fix.genA, text: "a1"))
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
-        log.append(.userMessageAppended(Fix.userB, content: "q2", parent: Fix.assistantA))
+        log.append(.userMessageAppended(message: Fix.userA, content: "q1", parent: nil))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(generation: Fix.genA, text: "a1"))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
+        log.append(.userMessageAppended(message: Fix.userB, content: "q2", parent: Fix.assistantA))
         log.append(.messageEdited(original: Fix.userB, replacement: Fix.edited, content: "q2, revised"))
         log.append(.activePathChanged(endpoint: Fix.edited))
 
@@ -151,7 +151,7 @@ enum Corpus {
     static var rootEdit: CorpusFixture {
         var log = Log()
         log.append(.conversationCreated(title: nil))
-        log.append(.userMessageAppended(Fix.userA, content: "Explain valley folds", parent: nil))
+        log.append(.userMessageAppended(message: Fix.userA, content: "Explain valley folds", parent: nil))
         log.append(.messageEdited(original: Fix.userA, replacement: Fix.edited, content: "Explain mountain folds"))
         log.append(.activePathChanged(endpoint: Fix.edited))
 
@@ -173,13 +173,13 @@ enum Corpus {
     static var regenerateAfterInterruption: CorpusFixture {
         var log = Log()
         log.append(.conversationCreated(title: "Origami"))
-        log.append(.userMessageAppended(Fix.userA, content: "Explain valley folds", parent: nil))
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.deltaAppended(Fix.genA, text: "A valley fol"))
-        log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.userA, model: Fix.model))
+        log.append(.userMessageAppended(message: Fix.userA, content: "Explain valley folds", parent: nil))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(generation: Fix.genA, text: "A valley fol"))
+        log.append(.generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.userA, model: Fix.model))
         log.append(.activePathChanged(endpoint: Fix.assistantB))
-        log.append(.deltaAppended(Fix.genB, text: "A valley fold brings the paper down."))
-        log.append(.generationEnded(Fix.genB, .completed(Fix.stopInfo)))
+        log.append(.deltaAppended(generation: Fix.genB, text: "A valley fold brings the paper down."))
+        log.append(.generationEnded(generation: Fix.genB, outcome: .completed(Fix.stopInfo)))
 
         return CorpusFixture(
             name: "regenerateAfterInterruption",
@@ -198,19 +198,19 @@ enum Corpus {
         log.append(.conversationCreated(title: nil))
         log.append(.instructionsChanged("You are an origami tutor."))
         log.append(.titleChanged("Valley folds 101"))
-        log.append(.userMessageAppended(Fix.userA, content: "Look it up", parent: nil))
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.userMessageAppended(message: Fix.userA, content: "Look it up", parent: nil))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
         log.append(.toolInvocationRecorded(
-            Fix.genA,
-            ToolRecord(name: "search", status: .succeeded, duration: .milliseconds(120))
+            generation: Fix.genA,
+            record: ToolRecord(name: "search", status: .succeeded, duration: .milliseconds(120))
         ))
-        log.append(.deltaAppended(Fix.genA, text: "Found it: "))
+        log.append(.deltaAppended(generation: Fix.genA, text: "Found it: "))
         log.append(.toolInvocationRecorded(
-            Fix.genA,
-            ToolRecord(name: "fetch", status: .failed, duration: .milliseconds(35), argumentsJSON: #"{"url":"…"}"#)
+            generation: Fix.genA,
+            record: ToolRecord(name: "fetch", status: .failed, duration: .milliseconds(35), argumentsJSON: #"{"url":"…"}"#)
         ))
-        log.append(.deltaAppended(Fix.genA, text: "a valley fold."))
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+        log.append(.deltaAppended(generation: Fix.genA, text: "a valley fold."))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
         log.append(.titleChanged(nil))
 
         return CorpusFixture(
@@ -244,9 +244,9 @@ enum Corpus {
     static var gapSwallowedTerminal: CorpusFixture {
         var log = Log()
         log.append(.conversationCreated(title: "Origami"))                                              // 1
-        log.append(.userMessageAppended(Fix.userA, content: "q", parent: nil))                          // 2
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 3
-        log.append(.deltaAppended(Fix.genA, text: "half an answer"))                                    // 4
+        log.append(.userMessageAppended(message: Fix.userA, content: "q", parent: nil))                          // 2
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 3
+        log.append(.deltaAppended(generation: Fix.genA, text: "half an answer"))                                    // 4
         log.skip(1)                                                                                     // 5 — the terminal
         log.append(.titleChanged("after the hole"))                                                     // 6
 
@@ -268,16 +268,16 @@ enum Corpus {
     static var rich: CorpusFixture {
         var log = Log()
         log.append(.conversationCreated(title: "Origami"))                                              // 1
-        log.append(.userMessageAppended(Fix.userA, content: "q1", parent: nil))                         // 2
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 3
-        log.append(.deltaAppended(Fix.genA, text: "one "))                                              // 4
-        log.append(.deltaAppended(Fix.genA, text: "two"))                                               // 5
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))                                // 6
-        log.append(.userMessageAppended(Fix.userB, content: "q2", parent: Fix.assistantA))              // 7
+        log.append(.userMessageAppended(message: Fix.userA, content: "q1", parent: nil))                         // 2
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 3
+        log.append(.deltaAppended(generation: Fix.genA, text: "one "))                                              // 4
+        log.append(.deltaAppended(generation: Fix.genA, text: "two"))                                               // 5
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))                                // 6
+        log.append(.userMessageAppended(message: Fix.userB, content: "q2", parent: Fix.assistantA))              // 7
         log.append(.messageEdited(original: Fix.userB, replacement: Fix.edited, content: "q2 v2"))      // 8
         log.append(.activePathChanged(endpoint: Fix.edited))                                            // 9
-        log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.edited, model: Fix.model))  // 10
-        log.append(.deltaAppended(Fix.genB, text: "partial"))                                           // 11
+        log.append(.generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.edited, model: Fix.model))  // 10
+        log.append(.deltaAppended(generation: Fix.genB, text: "partial"))                                           // 11
         log.unknownPayloadKind("messagePinned")                                                         // 12 row 2
         log.skip(2)                                                                                     // 13, 14 absent
         log.append(.titleChanged("Origami, revised"))                                                   // 15
@@ -288,7 +288,7 @@ enum Corpus {
             summary: "every structural feature, plus one undecodable row and one interior gap",
             log: log,
             residue: [
-                ExpectedDiagnostic(12, .unknownPayloadKind("messagePinned")),
+                ExpectedDiagnostic(12, .undecodablePayload(kind: "messagePinned")),
                 ExpectedDiagnostic(13, .sequenceGap(missing: 13...14)),
             ]
         )
@@ -305,16 +305,16 @@ enum Corpus {
         log.append(.titleChanged("premature"))                                                          // 1  row 5
         log.append(.conversationCreated(title: "hostile"))                                              // 2
         log.append(.conversationCreated(title: "again"))                                                // 3  row 5
-        log.append(.userMessageAppended(Fix.userA, content: "q", parent: nil))                          // 4
-        log.append(.userMessageAppended(Fix.userB, content: "new topic", parent: nil))                  // 5  row 7
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userC, model: Fix.model))   // 6  row 8
-        log.append(.deltaAppended(Fix.genA, text: "orphan"))                                            // 7  cascade
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))                                // 8  cascade
-        log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.userA, model: Fix.model))   // 9
-        log.append(.deltaAppended(Fix.genB, text: "real"))                                              // 10
-        log.append(.generationEnded(Fix.genB, .cancelled))                                              // 11
-        log.append(.deltaAppended(Fix.genB, text: "late"))                                              // 12 row 9
-        log.append(.generationEnded(Fix.genB, .cancelled))                                              // 13 row 10
+        log.append(.userMessageAppended(message: Fix.userA, content: "q", parent: nil))                          // 4
+        log.append(.userMessageAppended(message: Fix.userB, content: "new topic", parent: nil))                  // 5  row 7
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userC, model: Fix.model))   // 6  row 8
+        log.append(.deltaAppended(generation: Fix.genA, text: "orphan"))                                            // 7  cascade
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))                                // 8  cascade
+        log.append(.generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.userA, model: Fix.model))   // 9
+        log.append(.deltaAppended(generation: Fix.genB, text: "real"))                                              // 10
+        log.append(.generationEnded(generation: Fix.genB, outcome: .cancelled))                                              // 11
+        log.append(.deltaAppended(generation: Fix.genB, text: "late"))                                              // 12 row 9
+        log.append(.generationEnded(generation: Fix.genB, outcome: .cancelled))                                              // 13 row 10
         log.append(.messageEdited(original: Fix.assistantB, replacement: Fix.edited, content: "no"))    // 14 row 11
         log.append(.activePathChanged(endpoint: Fix.userC))                                             // 15 row 12
         log.corruptRow()                                                                                // 16 row 1
@@ -340,7 +340,7 @@ enum Corpus {
                 ExpectedDiagnostic(14, .editTargetNotUser(Fix.assistantB)),
                 ExpectedDiagnostic(15, .unknownPathEndpoint(Fix.userC)),
                 ExpectedDiagnostic(16, .undecodableEnvelope),
-                ExpectedDiagnostic(17, .unknownPayloadKind("future")),
+                ExpectedDiagnostic(17, .undecodablePayload(kind: "future")),
                 ExpectedDiagnostic(18, .sequenceGap(missing: 18...20)),
                 ExpectedDiagnostic(22, .foreignConversation(found: Fix.foreign)),
             ]

@@ -65,7 +65,7 @@ struct Log {
     /// Genesis, one root user message, path sitting on it.
     static func withUserMessage() -> Log {
         var log = Log.opened()
-        log.append(.userMessageAppended(Fix.userA, content: "Explain valley folds", parent: nil))
+        log.append(.userMessageAppended(message: Fix.userA, content: "Explain valley folds", parent: nil))
         return log
     }
 
@@ -73,9 +73,9 @@ struct Log {
     /// ordinary turn, and the shape most classify tests want.
     static func withCompletedTurn() -> Log {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.deltaAppended(Fix.genA, text: "A valley fold"))
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(generation: Fix.genA, text: "A valley fold"))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
         return log
     }
 
@@ -141,7 +141,7 @@ struct Log {
             .undecodable(
                 sequence: sequence,
                 eventID: identified ? EventID(uuid(nextEventNumber)) : nil,
-                failure
+                failure: failure
             )
         )
     }

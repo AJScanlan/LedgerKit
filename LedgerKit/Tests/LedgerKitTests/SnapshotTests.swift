@@ -262,12 +262,12 @@ struct ColdOpenTests {
             let user = MessageID(uuid(0x100_000 + turn))
             let assistant = MessageID(uuid(0x200_000 + turn))
             let generation = GenerationID(uuid(0x300_000 + turn))
-            log.append(.userMessageAppended(user, content: "q\(turn)", parent: parent))
-            log.append(.generationStarted(generation, assistant, parent: user, model: Fix.model))
+            log.append(.userMessageAppended(message: user, content: "q\(turn)", parent: parent))
+            log.append(.generationStarted(generation: generation, message: assistant, parent: user, model: Fix.model))
             for _ in 0..<deltas {
-                log.append(.deltaAppended(generation, text: "tok "))
+                log.append(.deltaAppended(generation: generation, text: "tok "))
             }
-            log.append(.generationEnded(generation, .completed(Fix.stopInfo)))
+            log.append(.generationEnded(generation: generation, outcome: .completed(Fix.stopInfo)))
             parent = assistant
         }
         return log
@@ -298,9 +298,9 @@ struct ColdOpenTests {
         let user = MessageID(uuid(0x400_001))
         let assistant = MessageID(uuid(0x400_002))
         let generation = GenerationID(uuid(0x400_003))
-        tail.append(.userMessageAppended(user, content: "one more", parent: lastAssistant))
-        tail.append(.generationStarted(generation, assistant, parent: user, model: Fix.model))
-        tail.append(.deltaAppended(generation, text: "half an ans"))
+        tail.append(.userMessageAppended(message: user, content: "one more", parent: lastAssistant))
+        tail.append(.generationStarted(generation: generation, message: assistant, parent: user, model: Fix.model))
+        tail.append(.deltaAppended(generation: generation, text: "half an ans"))
         let unterminated = Array(tail.records.dropFirst(history.records.count))
         _ = try await counting.append(unterminated, to: tail.conversation)
 

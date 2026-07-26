@@ -233,7 +233,7 @@ struct ScriptPlayerTests {
     func cancellationStopsAtABoundary() async throws {
         let cue = Cue()
         let sink = RecordingSink()
-        let script: Script = ["one ", "two ", .waitFor(cue), "three ", "four"]
+        let script: Script = ["one ", "two ", .wait(until: cue), "three ", "four"]
 
         let task = Task {
             try await ScriptPlayer(clock: ImmediateClock()).play(script, into: sink)
@@ -260,7 +260,7 @@ struct CueTests {
 
         let task = Task {
             try await ScriptPlayer(clock: ImmediateClock())
-                .play(["before ", .waitFor(cue), "after"], into: sink)
+                .play(["before ", .wait(until: cue), "after"], into: sink)
         }
 
         await cue.reached()
@@ -279,7 +279,7 @@ struct CueTests {
 
         let sink = RecordingSink()
         try await ScriptPlayer(clock: ImmediateClock())
-            .play(["before ", .waitFor(cue), "after"], into: sink)
+            .play(["before ", .wait(until: cue), "after"], into: sink)
 
         #expect(sink.text == "before after")
     }
@@ -292,7 +292,7 @@ struct CueTests {
         #expect(await cue.isReached == false, "nothing ever arrived")
 
         let sink = RecordingSink()
-        try await ScriptPlayer(clock: ImmediateClock()).play([.waitFor(cue), "through"], into: sink)
+        try await ScriptPlayer(clock: ImmediateClock()).play([.wait(until: cue), "through"], into: sink)
         #expect(sink.text == "through", "a doubly-signalled cue is still open, not closed again")
     }
 
@@ -305,7 +305,7 @@ struct CueTests {
 
         let task = Task {
             try await ScriptPlayer(clock: ImmediateClock())
-                .play(["partial", .waitFor(cue), "unreachable"], into: sink)
+                .play(["partial", .wait(until: cue), "unreachable"], into: sink)
         }
 
         await cue.reached()
@@ -345,8 +345,8 @@ struct ScriptCursorTests {
         // Loud by default: over-asking is a bug in the test or the code, and
         // silence would let it pass as a mysteriously empty response.
         let error = #expect(throws: ScriptExhausted.self) { _ = try cursor.next() }
-        #expect(error?.scripted == 1)
-        #expect(error?.requested == 2, "1-based, so it reads as 'the second request'")
+        #expect(error?.scriptCount == 1)
+        #expect(error?.requestNumber == 2, "1-based, so it reads as 'the second request'")
     }
 
     @Test("repeatLast keeps answering with the final script")

@@ -23,11 +23,11 @@ struct AllocateOnceTests {
     func oneRuleThreeSites() {
         // Site 1 — userMessageAppended (row 6).
         var userAppend = Log.withUserMessage()
-        userAppend.append(.userMessageAppended(Fix.userA, content: "overwrite", parent: Fix.userA))
+        userAppend.append(.userMessageAppended(message: Fix.userA, content: "overwrite", parent: Fix.userA))
 
         // Site 2 — generationStarted binding an ID the tree holds (row 8).
         var generationStart = Log.withUserMessage()
-        generationStart.append(.generationStarted(Fix.genA, Fix.userA, parent: Fix.userA, model: Fix.model))
+        generationStart.append(.generationStarted(generation: Fix.genA, message: Fix.userA, parent: Fix.userA, model: Fix.model))
 
         // Site 3 — messageEdited's replacement (row 11).
         var edit = Log.withUserMessage()
@@ -50,7 +50,7 @@ struct AllocateOnceTests {
         // "Has ever named a node", not "currently names a live one" — otherwise
         // an append-only log would admit in-place rewrites of settled history.
         var log = Log.withCompletedTurn()
-        log.append(.userMessageAppended(Fix.assistantA, content: "rewrite the answer", parent: Fix.userA))
+        log.append(.userMessageAppended(message: Fix.assistantA, content: "rewrite the answer", parent: Fix.userA))
         let state = log.folded()
 
         #expect(state.residue == [ExpectedDiagnostic(6, .messageIDAlreadyUsed(Fix.assistantA))])
@@ -64,9 +64,9 @@ struct AllocateOnceTests {
         // `generationStarted`, so while the generation streams there is a live
         // node whose ID a hostile — or merely buggy — writer could name.
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 3
-        log.append(.deltaAppended(Fix.genA, text: "half an answer"))                                    // 4
-        log.append(.userMessageAppended(Fix.assistantA, content: "hijacked", parent: Fix.userA))        // 5
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 3
+        log.append(.deltaAppended(generation: Fix.genA, text: "half an answer"))                                    // 4
+        log.append(.userMessageAppended(message: Fix.assistantA, content: "hijacked", parent: Fix.userA))        // 5
 
         let state = log.folded()
 
@@ -99,8 +99,8 @@ struct NonRuleTests {
     @Test("a tolerant terminal is still a terminal — the forgery hole, closed at the fold")
     func tolerantTerminalTerminatesTheGeneration() throws {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 3
-        log.append(.deltaAppended(Fix.genA, text: "half an answer"))                                    // 4
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 3
+        log.append(.deltaAppended(generation: Fix.genA, text: "half an answer"))                                    // 4
         // A terminal carrying an outcome kind this version has never heard of —
         // what a v0.2 log looks like to a v0.1 reader. Decoded through the real
         // decoder, not hand-constructed: the rule lives in `Payload.init(from:)`,
@@ -172,10 +172,10 @@ struct TerminalPartitionTests {
     @Test("never-started is row 9; already-terminated is row 10")
     func partition() {
         var log = Log.withUserMessage()
-        log.append(.generationEnded(Fix.genGhost, .cancelled))                                          // 3
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 4
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))                                // 5
-        log.append(.generationEnded(Fix.genA, .cancelled))                                              // 6
+        log.append(.generationEnded(generation: Fix.genGhost, outcome: .cancelled))                                          // 3
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))   // 4
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))                                // 5
+        log.append(.generationEnded(generation: Fix.genA, outcome: .cancelled))                                              // 6
 
         #expect(
             log.folded().residue == [

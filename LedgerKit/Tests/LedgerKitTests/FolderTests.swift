@@ -87,10 +87,10 @@ struct FolderStreamTests {
     @Test("an undecodable row is not a gap — it is present and unintelligible")
     func undecodableIsNotAGap() {
         var log = Log.opened()
-        log.undecodable(.payloadKind("messagePinned"))
+        log.undecodable(.payload(kind: "messagePinned"))
         log.append(.titleChanged("after"))
         let state = log.folded()
-        #expect(state.reasons == [.unknownPayloadKind("messagePinned")])
+        #expect(state.reasons == [.undecodablePayload(kind: "messagePinned")])
         #expect(state.diagnostics.first?.eventID != nil, "row 2 carries identity (§6.6 diagnostic identity)")
     }
 
@@ -143,8 +143,8 @@ struct FolderOrderingTests {
     @Test("deltas are one of the two non-idempotent kinds: a replay doubles the partial, silently")
     func replayedDeltaAccumulates() {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.deltaAppended(Fix.genA, text: "half"))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(generation: Fix.genA, text: "half"))
 
         let state = fold(replayingLastRow(of: log), for: log.conversation)
         #expect(state.messages[Fix.assistantA]?.state == .open(partial: "halfhalf"))
@@ -154,8 +154,8 @@ struct FolderOrderingTests {
     @Test("tool records are the other non-idempotent kind")
     func replayedToolRecordAccumulates() {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.toolInvocationRecorded(Fix.genA, ToolRecord(name: "search", status: .succeeded)))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.toolInvocationRecorded(generation: Fix.genA, record: ToolRecord(name: "search", status: .succeeded)))
 
         let state = fold(replayingLastRow(of: log), for: log.conversation)
         #expect(state.messages[Fix.assistantA]?.toolRecords.map(\.name) == ["search", "search"])
@@ -221,7 +221,7 @@ struct FolderTreeTests {
     @Test("a second bare nil-parent append quarantines — new topic ≠ new branch (row 7)")
     func secondRootMessage() {
         var log = Log.withUserMessage()
-        log.append(.userMessageAppended(Fix.userB, content: "unrelated", parent: nil))
+        log.append(.userMessageAppended(message: Fix.userB, content: "unrelated", parent: nil))
         let state = log.folded()
         #expect(state.reasons == [.additionalRootMessage(Fix.userB)])
         #expect(state.rootChildren == [Fix.userA], "the tree is untouched (I2 containment)")
@@ -231,7 +231,7 @@ struct FolderTreeTests {
     @Test("an unknown parent quarantines (row 6)")
     func unknownParent() {
         var log = Log.opened()
-        log.append(.userMessageAppended(Fix.userB, content: "orphan", parent: Fix.userC))
+        log.append(.userMessageAppended(message: Fix.userB, content: "orphan", parent: Fix.userC))
         let state = log.folded()
         #expect(state.reasons == [.unknownParent(Fix.userC)])
         #expect(state.messages.isEmpty)
@@ -240,7 +240,7 @@ struct FolderTreeTests {
     @Test("reusing a MessageID quarantines — I7 once-only (row 6)")
     func duplicateMessageID() {
         var log = Log.withUserMessage()
-        log.append(.userMessageAppended(Fix.userA, content: "overwrite attempt", parent: Fix.userA))
+        log.append(.userMessageAppended(message: Fix.userA, content: "overwrite attempt", parent: Fix.userA))
         let state = log.folded()
         #expect(state.reasons == [.messageIDAlreadyUsed(Fix.userA)])
         #expect(
@@ -252,8 +252,8 @@ struct FolderTreeTests {
     @Test("the path materializes as a chain from a root-level node to the endpoint")
     func pathChain() {
         var log = Log.withUserMessage()
-        log.append(.userMessageAppended(Fix.userB, content: "and mountain folds?", parent: Fix.userA))
-        log.append(.userMessageAppended(Fix.userC, content: "and reverse folds?", parent: Fix.userB))
+        log.append(.userMessageAppended(message: Fix.userB, content: "and mountain folds?", parent: Fix.userA))
+        log.append(.userMessageAppended(message: Fix.userC, content: "and reverse folds?", parent: Fix.userB))
         let state = log.folded()
         #expect(state.activePath == [Fix.userA, Fix.userB, Fix.userC])
         #expect(state.reasons.isEmpty, "role adjacency is a deliberate non-rule (§6.6)")
@@ -262,7 +262,7 @@ struct FolderTreeTests {
     @Test("editing a user message creates a sibling under the same parent")
     func editCreatesSibling() {
         var log = Log.withUserMessage()
-        log.append(.userMessageAppended(Fix.userB, content: "second", parent: Fix.userA))
+        log.append(.userMessageAppended(message: Fix.userB, content: "second", parent: Fix.userA))
         log.append(.messageEdited(original: Fix.userB, replacement: Fix.edited, content: "second, revised"))
         let state = log.folded()
         #expect(state.messages[Fix.edited]?.parent == Fix.userA)
@@ -281,7 +281,7 @@ struct FolderTreeTests {
         // this behaviour is load-bearing. Pinned deliberately rather than left for
         // a fuzz failure to decide.
         var log = Log.withUserMessage()
-        log.append(.userMessageAppended(Fix.userB, content: "second", parent: Fix.userA))
+        log.append(.userMessageAppended(message: Fix.userB, content: "second", parent: Fix.userA))
         log.append(.activePathChanged(endpoint: Fix.userA))
         // userB is now off-path, so the replacement's parent IS the endpoint.
         log.append(.messageEdited(original: Fix.userB, replacement: Fix.edited, content: "second, revised"))
@@ -293,7 +293,7 @@ struct FolderTreeTests {
     @Test("an edit does NOT auto-extend when the endpoint is elsewhere")
     func editWithoutAutoExtend() {
         var log = Log.withUserMessage()
-        log.append(.userMessageAppended(Fix.userB, content: "second", parent: Fix.userA))
+        log.append(.userMessageAppended(message: Fix.userB, content: "second", parent: Fix.userA))
         // Endpoint is userB; the replacement's parent is userA, so the rule cannot fire.
         log.append(.messageEdited(original: Fix.userB, replacement: Fix.edited, content: "revised"))
         let state = log.folded()
@@ -365,7 +365,7 @@ struct FolderGenerationStartedTests {
     /// Genesis, a user message, and a generation started off it.
     private func started(parent: MessageID? = Fix.userA) -> Log {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: parent, model: Fix.model))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: parent, model: Fix.model))
         return log
     }
 
@@ -395,7 +395,7 @@ struct FolderGenerationStartedTests {
     @Test("attaches to the named parent in sibling order")
     func attachesToParent() {
         var log = started()
-        log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.userA, model: Fix.model))
+        log.append(.generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.userA, model: Fix.model))
         let state = log.folded()
         #expect(state.messages[Fix.assistantA]?.parent == Fix.userA)
         #expect(state.messages[Fix.userA]?.children == [Fix.assistantA, Fix.assistantB])
@@ -409,9 +409,9 @@ struct FolderGenerationStartedTests {
     @Test("does NOT auto-extend when the parent is not the endpoint")
     func noAutoExtendOffPath() {
         var log = Log.withUserMessage()
-        log.append(.userMessageAppended(Fix.userB, content: "second", parent: Fix.userA))
+        log.append(.userMessageAppended(message: Fix.userB, content: "second", parent: Fix.userA))
         // Endpoint is userB; this generation hangs off userA instead.
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
         let state = log.folded()
         #expect(state.reasons.isEmpty)
         #expect(state.activePath == [Fix.userA, Fix.userB], "the store pairs an explicit path event")
@@ -421,7 +421,7 @@ struct FolderGenerationStartedTests {
     @Test("a nil parent is LEGAL here — virtual-root child, wire headroom for N10")
     func nilParentIsHeadroom() {
         var log = Log.opened()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: nil, model: Fix.model))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: nil, model: Fix.model))
         let state = log.folded()
         #expect(state.reasons.isEmpty, "row 7's guard applies to userMessageAppended only")
         #expect(state.rootChildren == [Fix.assistantA])
@@ -431,7 +431,7 @@ struct FolderGenerationStartedTests {
     @Test("an assistant parent is LEGAL — role adjacency is a non-rule (§6.6)")
     func assistantParentIsNonRule() {
         var log = started()
-        log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.assistantA, model: Fix.model))
+        log.append(.generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.assistantA, model: Fix.model))
         let state = log.folded()
         #expect(state.reasons.isEmpty, "the continuation shape decodes; the STORE forbids it, not the fold")
         #expect(state.messages[Fix.assistantB]?.parent == Fix.assistantA)
@@ -440,7 +440,7 @@ struct FolderGenerationStartedTests {
     @Test("reusing a GenerationID quarantines (row 8)")
     func reusedGenerationID() {
         var log = started()
-        log.append(.generationStarted(Fix.genA, Fix.assistantB, parent: Fix.userA, model: Fix.model))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantB, parent: Fix.userA, model: Fix.model))
         let state = log.folded()
         #expect(state.reasons == [.generationIDAlreadyUsed(Fix.genA)])
         #expect(state.messages[Fix.assistantB] == nil, "nothing was created (I2 containment)")
@@ -449,15 +449,15 @@ struct FolderGenerationStartedTests {
     @Test("a GenerationID stays used after termination — the binding is permanent")
     func generationIDStaysUsedAfterTerminal() {
         var log = started()
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
-        log.append(.generationStarted(Fix.genA, Fix.assistantB, parent: Fix.userA, model: Fix.model))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantB, parent: Fix.userA, model: Fix.model))
         #expect(log.folded().reasons == [.generationIDAlreadyUsed(Fix.genA)])
     }
 
     @Test("binding an already-used MessageID quarantines — I7 once-only (row 8)")
     func reusedMessageID() {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.userA, parent: Fix.userA, model: Fix.model))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.userA, parent: Fix.userA, model: Fix.model))
         let state = log.folded()
         #expect(state.reasons == [.messageIDAlreadyUsed(Fix.userA)])
         #expect(state.messages[Fix.userA]?.role == .user, "the existing node is untouched")
@@ -495,9 +495,9 @@ struct FolderGenerationLifecycleTests {
     /// Genesis, user message, generation started, two deltas.
     private func streaming() -> Log {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.deltaAppended(Fix.genA, text: "A valley "))
-        log.append(.deltaAppended(Fix.genA, text: "fold"))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(generation: Fix.genA, text: "A valley "))
+        log.append(.deltaAppended(generation: Fix.genA, text: "fold"))
         return log
     }
 
@@ -520,7 +520,7 @@ struct FolderGenerationLifecycleTests {
     @Test("completed captures content, stopInfo, and the terminal timestamp")
     func completed() {
         var log = streaming()
-        let sequence = log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+        let sequence = log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
         let state = log.folded()
         #expect(state.messages[Fix.assistantA]?.state == .complete(MessageContent(text: "A valley fold")))
         #expect(state.messages[Fix.assistantA]?.stopInfo == Fix.stopInfo)
@@ -530,7 +530,7 @@ struct FolderGenerationLifecycleTests {
     @Test("failed retains the partial alongside the error")
     func failed() {
         var log = streaming()
-        log.append(.generationEnded(Fix.genA, .failed(.rateLimited(retryAfter: .seconds(30)))))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .failed(.rateLimited(retryAfter: .seconds(30)))))
         let state = log.folded()
         #expect(
             state.messages[Fix.assistantA]?.state
@@ -542,8 +542,8 @@ struct FolderGenerationLifecycleTests {
     @Test("a zero-token failure renders as an empty failed bubble, not an absent one (§7.2)")
     func zeroTokenFailure() {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.generationEnded(Fix.genA, .failed(.providerFailure(status: 401, code: nil, message: nil))))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .failed(.providerFailure(status: 401, code: nil, message: nil))))
         let state = log.folded()
         #expect(
             state.messages[Fix.assistantA]?.state
@@ -554,15 +554,15 @@ struct FolderGenerationLifecycleTests {
     @Test("cancelled retains the partial")
     func cancelled() {
         var log = streaming()
-        log.append(.generationEnded(Fix.genA, .cancelled))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .cancelled))
         #expect(log.folded().messages[Fix.assistantA]?.state == .cancelled(partial: "A valley fold"))
     }
 
     @Test("tool records accumulate in sequence order")
     func toolRecords() {
         var log = streaming()
-        log.append(.toolInvocationRecorded(Fix.genA, ToolRecord(name: "search", status: .succeeded)))
-        log.append(.toolInvocationRecorded(Fix.genA, ToolRecord(name: "fetch", status: .failed)))
+        log.append(.toolInvocationRecorded(generation: Fix.genA, record: ToolRecord(name: "search", status: .succeeded)))
+        log.append(.toolInvocationRecorded(generation: Fix.genA, record: ToolRecord(name: "fetch", status: .failed)))
         let state = log.folded()
         #expect(state.messages[Fix.assistantA]?.toolRecords.map(\.name) == ["search", "fetch"])
         #expect(state.reasons.isEmpty)
@@ -571,8 +571,8 @@ struct FolderGenerationLifecycleTests {
     @Test("a delta after the terminal quarantines and content stays frozen (I4, row 9)")
     func deltaAfterTerminal() {
         var log = streaming()
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
-        log.append(.deltaAppended(Fix.genA, text: " — and more"))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
+        log.append(.deltaAppended(generation: Fix.genA, text: " — and more"))
         let state = log.folded()
         #expect(state.reasons == [.generationAlreadyTerminated(Fix.genA)])
         #expect(state.messages[Fix.assistantA]?.state == .complete(MessageContent(text: "A valley fold")))
@@ -581,8 +581,8 @@ struct FolderGenerationLifecycleTests {
     @Test("a tool record after the terminal quarantines — the audit trail is immutable too (I4)")
     func toolRecordAfterTerminal() {
         var log = streaming()
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
-        log.append(.toolInvocationRecorded(Fix.genA, ToolRecord(name: "late", status: .succeeded)))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
+        log.append(.toolInvocationRecorded(generation: Fix.genA, record: ToolRecord(name: "late", status: .succeeded)))
         let state = log.folded()
         #expect(state.reasons == [.generationAlreadyTerminated(Fix.genA)])
         #expect(state.messages[Fix.assistantA]?.toolRecords.isEmpty == true)
@@ -591,8 +591,8 @@ struct FolderGenerationLifecycleTests {
     @Test("a second terminal quarantines (I3, row 10)")
     func duplicateTerminal() {
         var log = streaming()
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
-        log.append(.generationEnded(Fix.genA, .cancelled))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .cancelled))
         let state = log.folded()
         #expect(state.reasons == [.duplicateTerminal(Fix.genA)])
         #expect(state.messages[Fix.assistantA]?.state == .complete(MessageContent(text: "A valley fold")))
@@ -601,14 +601,14 @@ struct FolderGenerationLifecycleTests {
     @Test("a delta naming a generation that never started quarantines (row 9)")
     func unknownGeneration() {
         var log = Log.withUserMessage()
-        log.append(.deltaAppended(Fix.genGhost, text: "from nowhere"))
+        log.append(.deltaAppended(generation: Fix.genGhost, text: "from nowhere"))
         #expect(log.folded().reasons == [.unknownGeneration(Fix.genGhost)])
     }
 
     @Test("editing an assistant message quarantines (row 11)")
     func editAssistantMessage() {
         var log = streaming()
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
         log.append(.messageEdited(original: Fix.assistantA, replacement: Fix.edited, content: "rewritten"))
         let state = log.folded()
         #expect(state.reasons == [.editTargetNotUser(Fix.assistantA)])
@@ -619,11 +619,11 @@ struct FolderGenerationLifecycleTests {
     func cascade() {
         var log = Log.withUserMessage()
         // Unknown parent, so the start itself is rejected...
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userC, model: Fix.model))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userC, model: Fix.model))
         // ...and everything keyed to it then fails individually under rows 9–10.
-        log.append(.deltaAppended(Fix.genA, text: "orphan"))
-        log.append(.toolInvocationRecorded(Fix.genA, ToolRecord(name: "orphan", status: .succeeded)))
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+        log.append(.deltaAppended(generation: Fix.genA, text: "orphan"))
+        log.append(.toolInvocationRecorded(generation: Fix.genA, record: ToolRecord(name: "orphan", status: .succeeded)))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
         let state = log.folded()
         #expect(
             state.reasons == [
@@ -640,11 +640,11 @@ struct FolderGenerationLifecycleTests {
     @Test("regenerate leaves the old response as a sibling branch")
     func siblingResponses() {
         var log = streaming()
-        log.append(.generationEnded(Fix.genA, .cancelled))
-        log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.userA, model: Fix.model))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .cancelled))
+        log.append(.generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.userA, model: Fix.model))
         log.append(.activePathChanged(endpoint: Fix.assistantB))
-        log.append(.deltaAppended(Fix.genB, text: "A valley fold brings"))
-        log.append(.generationEnded(Fix.genB, .completed(Fix.stopInfo)))
+        log.append(.deltaAppended(generation: Fix.genB, text: "A valley fold brings"))
+        log.append(.generationEnded(generation: Fix.genB, outcome: .completed(Fix.stopInfo)))
         let state = log.folded()
         #expect(state.messages[Fix.userA]?.children == [Fix.assistantA, Fix.assistantB])
         #expect(state.activePath == [Fix.userA, Fix.assistantB])

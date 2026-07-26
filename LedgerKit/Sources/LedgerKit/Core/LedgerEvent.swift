@@ -27,16 +27,22 @@ public struct LedgerEvent: Sendable, Identifiable, Equatable {
     /// they alone get the tolerance.
     public enum Payload: Sendable, Equatable {
         case conversationCreated(title: String?)
-        case userMessageAppended(MessageID, content: String, parent: MessageID?)
+        case userMessageAppended(message: MessageID, content: String, parent: MessageID?)
         /// `nil` clears (SPEC §7.1).
         case instructionsChanged(String?)
         /// `parent: nil` ⇒ child of the virtual root (I6). The v0.1 store
         /// never emits nil — wire headroom for N10. `model` is the
         /// *requested* descriptor (SPEC §7.8).
-        case generationStarted(GenerationID, MessageID, parent: MessageID?, model: ModelDescriptor)
-        case deltaAppended(GenerationID, text: String)
-        case toolInvocationRecorded(GenerationID, ToolRecord)
-        case generationEnded(GenerationID, Outcome)
+        ///
+        /// Every value is labelled (M4 audit): the two leading IDs are
+        /// distinct types, so a swap cannot compile — but a *reader* of a
+        /// positional destructure has no such check, and `Payload` is what
+        /// export and tooling consumers destructure. Labels are wire-neutral:
+        /// the tags live in `Kind`, the field keys in `CodingKeys`.
+        case generationStarted(generation: GenerationID, message: MessageID, parent: MessageID?, model: ModelDescriptor)
+        case deltaAppended(generation: GenerationID, text: String)
+        case toolInvocationRecorded(generation: GenerationID, record: ToolRecord)
+        case generationEnded(generation: GenerationID, outcome: Outcome)
         /// User messages only — an edit naming an assistant message
         /// quarantines (SPEC §6.1, §6.6 row 11).
         case messageEdited(original: MessageID, replacement: MessageID, content: String)
@@ -167,7 +173,7 @@ extension LedgerEvent.Payload: Codable {
             self = .conversationCreated(title: try container.decodeIfPresent(String.self, forKey: .title))
         case .userMessageAppended:
             self = .userMessageAppended(
-                try container.decode(MessageID.self, forKey: .messageID),
+                message: try container.decode(MessageID.self, forKey: .messageID),
                 content: try container.decode(String.self, forKey: .content),
                 parent: try container.decodeIfPresent(MessageID.self, forKey: .parent)
             )
@@ -175,20 +181,20 @@ extension LedgerEvent.Payload: Codable {
             self = .instructionsChanged(try container.decodeIfPresent(String.self, forKey: .instructions))
         case .generationStarted:
             self = .generationStarted(
-                try container.decode(GenerationID.self, forKey: .generationID),
-                try container.decode(MessageID.self, forKey: .messageID),
+                generation: try container.decode(GenerationID.self, forKey: .generationID),
+                message: try container.decode(MessageID.self, forKey: .messageID),
                 parent: try container.decodeIfPresent(MessageID.self, forKey: .parent),
                 model: try container.decode(ModelDescriptor.self, forKey: .model)
             )
         case .deltaAppended:
             self = .deltaAppended(
-                try container.decode(GenerationID.self, forKey: .generationID),
+                generation: try container.decode(GenerationID.self, forKey: .generationID),
                 text: try container.decode(String.self, forKey: .text)
             )
         case .toolInvocationRecorded:
             self = .toolInvocationRecorded(
-                try container.decode(GenerationID.self, forKey: .generationID),
-                try container.decode(ToolRecord.self, forKey: .record)
+                generation: try container.decode(GenerationID.self, forKey: .generationID),
+                record: try container.decode(ToolRecord.self, forKey: .record)
             )
         case .generationEnded:
             // Tolerant-terminal rule (SPEC §6.1, §6.6 row 3): if the
@@ -210,7 +216,7 @@ extension LedgerEvent.Payload: Codable {
                 }
                 outcome = .failed(.unrecognized(description: "undecodable outcome: \(tag)"))
             }
-            self = .generationEnded(generationID, outcome)
+            self = .generationEnded(generation: generationID, outcome: outcome)
         case .messageEdited:
             self = .messageEdited(
                 original: try container.decode(MessageID.self, forKey: .original),

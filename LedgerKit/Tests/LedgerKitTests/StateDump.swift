@@ -144,7 +144,7 @@ enum StateDump {
     private static func describe(_ reason: QuarantineReason) -> String {
         switch reason {
         case .undecodableEnvelope: "undecodableEnvelope"
-        case .unknownPayloadKind(let kind): "unknownPayloadKind(\(quoted(kind)))"
+        case .undecodablePayload(kind: let kind): "unknownPayloadKind(\(quoted(kind)))"
         case .foreignConversation(let found): "foreignConversation(\(found))"
         case .beforeGenesis: "beforeGenesis"
         case .duplicateGenesis: "duplicateGenesis"

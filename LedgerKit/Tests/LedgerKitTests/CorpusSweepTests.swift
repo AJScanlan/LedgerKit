@@ -192,10 +192,10 @@ struct CrashFuzzTests {
                 for row in rows {
                     guard case .decoded(let event) = row else { continue }
                     switch event.payload {
-                    case .generationStarted(let generation, let id, _, _):
+                    case .generationStarted(generation: let generation, let id, _, _):
                         message[generation] = id
                         order.append(generation)
-                    case .deltaAppended(let generation, let text):
+                    case .deltaAppended(generation: let generation, let text):
                         partial[generation, default: ""] += text
                     case .generationEnded(let generation, _):
                         terminated.insert(generation)

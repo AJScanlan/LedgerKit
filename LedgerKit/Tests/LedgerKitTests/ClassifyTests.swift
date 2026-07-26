@@ -9,8 +9,8 @@ struct ClassifyTests {
     /// the crash shape.
     private func interrupted() -> Log {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.deltaAppended(Fix.genA, text: "A valley fol"))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(generation: Fix.genA, text: "A valley fol"))
         return log
     }
 
@@ -26,8 +26,8 @@ struct ClassifyTests {
     @Test("no reduction of any log yields .streaming — liveness is the projection's (§7.4)")
     func streamingIsUnreachable() {
         var switched = Log.withCompletedTurn()
-        switched.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.userA, model: Fix.model))
-        switched.append(.deltaAppended(Fix.genB, text: "second attempt"))
+        switched.append(.generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.userA, model: Fix.model))
+        switched.append(.deltaAppended(generation: Fix.genB, text: "second attempt"))
 
         for log in [Log.withUserMessage(), Log.withCompletedTurn(), interrupted(), switched] {
             let conversation = log.reduced()
@@ -44,8 +44,8 @@ struct ClassifyTests {
     @Test(".failed carries the Recoverability the mapping produced")
     func failedCarriesRecoverability() {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.generationEnded(Fix.genA, .failed(.providerFailure(status: 401, code: nil, message: "nope"))))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .failed(.providerFailure(status: 401, code: nil, message: "nope"))))
 
         #expect(
             log.reduced().messages[Fix.assistantA]?.state
@@ -66,9 +66,9 @@ struct ClassifyTests {
         )
 
         var cancelled = Log.withUserMessage()
-        cancelled.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        cancelled.append(.deltaAppended(Fix.genA, text: "half"))
-        cancelled.append(.generationEnded(Fix.genA, .cancelled))
+        cancelled.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        cancelled.append(.deltaAppended(generation: Fix.genA, text: "half"))
+        cancelled.append(.generationEnded(generation: Fix.genA, outcome: .cancelled))
         #expect(cancelled.reduced().messages[Fix.assistantA]?.state == .cancelled(partial: "half"))
     }
 
@@ -93,10 +93,10 @@ struct ClassifyTests {
     @Test("tool records survive projection in sequence order")
     func toolRecordsPassThrough() {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.toolInvocationRecorded(Fix.genA, ToolRecord(name: "search", status: .succeeded)))
-        log.append(.toolInvocationRecorded(Fix.genA, ToolRecord(name: "fetch", status: .failed)))
-        log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.toolInvocationRecorded(generation: Fix.genA, record: ToolRecord(name: "search", status: .succeeded)))
+        log.append(.toolInvocationRecorded(generation: Fix.genA, record: ToolRecord(name: "fetch", status: .failed)))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
 
         #expect(log.reduced().messages[Fix.assistantA]?.toolRecords.map(\.name) == ["search", "fetch"])
     }
@@ -105,7 +105,7 @@ struct ClassifyTests {
     func conversationFieldsPassThrough() {
         var log = Log.opened(title: "Origami")
         log.append(.instructionsChanged("You are an origami tutor."))
-        log.append(.userMessageAppended(Fix.userA, content: "q", parent: nil))
+        log.append(.userMessageAppended(message: Fix.userA, content: "q", parent: nil))
         log.append(.activePathChanged(endpoint: Fix.userC))
 
         let conversation = log.reduced()
@@ -119,8 +119,8 @@ struct ClassifyTests {
     @Test("the projected tree supports the public read API end to end")
     func treeReadAPI() {
         var log = Log.withCompletedTurn()
-        log.append(.generationStarted(Fix.genB, Fix.assistantB, parent: Fix.userA, model: Fix.model))
-        log.append(.generationEnded(Fix.genB, .cancelled))
+        log.append(.generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.userA, model: Fix.model))
+        log.append(.generationEnded(generation: Fix.genB, outcome: .cancelled))
 
         let tree = log.reduced().messages
         #expect(tree.rootChildren == [Fix.userA])
@@ -161,8 +161,8 @@ struct ClassifyDeterminismTests {
 
     private func failing() -> Log {
         var log = Log.withUserMessage()
-        log.append(.generationStarted(Fix.genA, Fix.assistantA, parent: Fix.userA, model: Fix.model))
-        log.append(.generationEnded(Fix.genA, .failed(.guardrailViolation)))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .failed(.guardrailViolation)))
         return log
     }
 

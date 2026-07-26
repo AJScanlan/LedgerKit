@@ -231,7 +231,7 @@ struct CorpusFileTests {
         )
         let state = fold(document.loadedEvents(), for: document.conversationID)
 
-        #expect(state.reasons.contains(.unknownPayloadKind("compactionRecorded")))
+        #expect(state.reasons.contains(.undecodablePayload(kind: "compactionRecorded")))
         // Reduction continued past five damaged rows in a row — the degraded-but-
         // alive guarantee (I2), and the title is the proof it kept reading.
         #expect(state.title == "still readable")
@@ -242,9 +242,9 @@ struct CorpusFileTests {
         // is right (skip the row, keep the identity, keep reading); only the
         // wording misleads. Pinned so the behaviour cannot drift unnoticed, and
         // flagged for SPEC rev 7 to either widen row 2 or add a row.
-        #expect(state.reasons.contains(.unknownPayloadKind("deltaAppended")))
+        #expect(state.reasons.contains(.undecodablePayload(kind: "deltaAppended")))
         // A payload that is not an object at all leaves no legible tag.
-        #expect(state.reasons.contains(.unknownPayloadKind(nil)))
+        #expect(state.reasons.contains(.undecodablePayload(kind: nil)))
     }
 
     @Test("the pre-widening contextSizeExceeded form still decodes (D17)", .enabled(if: !CorpusFiles.isRecording))
