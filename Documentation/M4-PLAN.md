@@ -235,23 +235,72 @@ the package the ecosystem meets first gets its real name.
       sources ever named the package, which is what D14 meant by minimal blast
       radius; the only remaining mention is `Package.swift`'s new provenance
       comment.
-- [ ] Internal-ize `Message.init`, `Conversation.init`, `QuarantinedEvent.init`,
+- [x] Internal-ize `Message.init`, `Conversation.init`, `QuarantinedEvent.init`,
       `ConversationSummary.init` (D13). Playground/tests unaffected
-      (`@testable`).
-- [ ] `Content` → `MessageContent`, everywhere including doc comments.
-- [ ] `MessageState.failed(partial:error:recoverability:)` labels.
-- [ ] `GenerationError: CustomStringConvertible` (prose non-contractual, say so
+      (`@testable`). Each carries its *own* reason at the site, because they
+      differ: `Message`/`Conversation` can express states no log produces, a
+      hand-built `QuarantinedEvent` asserts a reduction that never happened, and
+      a hand-built `ConversationSummary` asserts index facts no log backs.
+- [x] `Content` → `MessageContent`, everywhere including doc comments.
+- [x] `MessageState.failed(partial:error:recoverability:)` labels.
+- [x] `GenerationError: CustomStringConvertible` (prose non-contractual, say so
       in the doc comment; ADR-001's sentinel-string rule already covers the
       `unrecognized` descriptions it will interpolate).
-- [ ] `PersistenceConfiguration` → struct with `.sqlite(url:)` / `.inMemory`
+- [x] `PersistenceConfiguration` → struct with `.sqlite(url:)` / `.inMemory`
       factories over internal storage; `ScriptExhaustion` gets the same
       treatment in Understudy.
-- [ ] Suites green in both packages under the new names; count unchanged.
+- [x] Suites green in both packages; **200** (179 + 21), zero warnings.
 
-**Exit:** zero public memberwise inits on derived state; `import Understudy`
-compiles; 196 green.
+**Exit:** ✅ zero public memberwise inits on derived state; `import Understudy`
+compiles; **200 green** (175 → 179 in LedgerKit: four new diagnostics tests).
 **Review gate:** read the whole diff as an API reviewer — this is the last
 cheap look at the pre-1.0 surface before M4/M5 freeze it in practice.
+
+**Status: ✅ done 2026-07-26.** Three judgment calls made while implementing,
+each recorded here because they are the parts a reader would otherwise have to
+reverse-engineer from the diff:
+
+- **`MessageContent.init` stays public** while its four siblings went internal.
+  D13's argument is specifically about *illegal states*, and a wrapper over a
+  `String` has no invariant to violate — so the rule does not reach it. It also
+  earns its keep: a consumer previewing their own bubble view needs some way to
+  hand it content, and with `Message.init` gone this is the only remaining way.
+- **Only the *public* `MessageState.failed` gained labels; `FoldedMessageState`
+  did not.** The position-counting problem is real at three payloads and absent
+  at two, and the asymmetry now carries information: the public enum is the one
+  consumers destructure, so it gets the ergonomic treatment; the folded one is
+  reducer-internal and reads fine positionally. `Classify.swift` shows both in
+  four lines — positional destructure of the folded case, labelled construction
+  of the public one — which is the clearest statement of the distinction.
+- **The Playground was fixed, not rewritten.** Its `.failed` construction needed
+  the new labels (playgrounds are invisible to `swift build`, so this would have
+  broken silently). Converting it to the honest `Conversation(reducing:)` example
+  — which D13's doc comments now advertise — is deliberately **not** done here: it
+  is an iOS/UIKit playground that cannot be compile-verified from the CLI, and
+  shipping unverifiable code to make a point about good examples is a bad trade.
+  A ⚠️ comment at the top of the file records why it needs `@testable` and what
+  the real path is. **Carried as a follow-up** — best done in Xcode, or at M7
+  when the observable projection gives previews a better story anyway.
+
+**Also landed, beyond the checklist:** four tests for the new rendering
+(`ErrorDiagnosticsTests`), asserting **structure and payload propagation, never
+prose** — non-emptiness over the whole `Wire.allErrors` inventory, no dangling
+separators from the one *assembled* rendering, and that `unrecognized` and
+`providerFailure` surface the payloads triage greps for (`"driver:"` prefixes,
+status, `code`). Matching on wording would freeze exactly what ADR-001 promises
+is loose. Placed beside `Wire.allErrors` because that is the module's only
+exhaustive inventory of the taxonomy, and duplicating it is how a future case
+silently escapes coverage. **Mutation-tested, both caught:** an empty
+description for one case (caught by non-emptiness), and `compactMap` → `map { $0
+?? "" }` in the assembly branch, which yields `"provider failure: : "` (caught
+by the whitespace/separator assertions). Reverted; `git diff` on the file shows
+insertions only.
+
+**A free side effect worth knowing:** Swift Testing renders parameterized-test
+arguments via `CustomStringConvertible`, so `GenerationError` cases now appear in
+test names as readable prose (`provider failure: status 500: code
+overloaded_error: Overloaded`) instead of reflection dumps. The `unrecognized`
+floor's `"driver:"` convention is now legible in CI output for free.
 
 ---
 
@@ -488,7 +537,7 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 
 | # | Decision | Status |
 |---|---|---|
-| D13 | Contract hygiene precedes store work (audit pass, Phase 0) | **Accepted** 2026-07-26 |
+| D13 | Contract hygiene precedes store work (audit pass, Phase 0) | **Landed** 2026-07-26 · `MessageContent.init` stays public (no invariant to violate); folded enum keeps positional `.failed` |
 | D14 | `LedgerKitTestSupport` → `Understudy`; one name everywhere | **Landed** 2026-07-26 (accepted by Alexander; own commit) |
 | D15 | One production `WireJSON` encoder; corpus files stay pretty; bytes pinned against `WireJSON` | **Accepted** · applies Phase 1 |
 | D16 | Schema-version placement (column-only vs column+blob) | **Open** — decide at Phase 1 gate |
@@ -501,3 +550,4 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 |---|---|---|---|
 | 2026-07-26 | Plan drafted | 196 | Sourced from the M3 boundary audit; D13–D15/D18 accepted, D16 open, D17 pending rev 7 |
 | 2026-07-26 | **Phase 0: Understudy rename (D14)** | **196** (175 + 21) | Rename only, as its own commit — no semantic changes. Historical docs deliberately left naming the old package |
+| 2026-07-26 | **Phase 0 done (D13)** | **200** (179 + 21) | Breaking-surface pass: four inits internal, `MessageContent`, `.failed` labels, `GenerationError` description (+4 tests, mutation-tested), both config types → structs with factories. Zero warnings. Playground label-fixed; its rewrite carried as a follow-up |
