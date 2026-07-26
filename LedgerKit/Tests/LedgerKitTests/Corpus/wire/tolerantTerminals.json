@@ -1,0 +1,173 @@
+{
+  "conversationID": "01980E5A-0000-7000-8000-000000000001",
+  "rows": [
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-000000000101",
+        "payload": {
+          "kind": "conversationCreated",
+          "title": "terminals from the future"
+        },
+        "timestamp": "2026-07-25T11:30:01.000Z"
+      },
+      "sequence": 1
+    },
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-000000000102",
+        "payload": {
+          "content": "q",
+          "kind": "userMessageAppended",
+          "messageID": "01980E5A-0000-7000-8000-000000000010"
+        },
+        "timestamp": "2026-07-25T11:30:02.000Z"
+      },
+      "sequence": 2
+    },
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-000000000103",
+        "payload": {
+          "generationID": "01980E5A-0000-7000-8000-000000000030",
+          "kind": "generationStarted",
+          "messageID": "01980E5A-0000-7000-8000-000000000020",
+          "model": {
+            "model": "on-device",
+            "provider": "apple",
+            "version": "27.0"
+          },
+          "parent": "01980E5A-0000-7000-8000-000000000010"
+        },
+        "timestamp": "2026-07-25T11:30:03.000Z"
+      },
+      "sequence": 3
+    },
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-000000000104",
+        "payload": {
+          "generationID": "01980E5A-0000-7000-8000-000000000030",
+          "kind": "deltaAppended",
+          "text": "an outcome kind we have never heard of"
+        },
+        "timestamp": "2026-07-25T11:30:04.000Z"
+      },
+      "sequence": 4
+    },
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-000000000105",
+        "payload": {
+          "generationID": "01980E5A-0000-7000-8000-000000000030",
+          "kind": "generationEnded",
+          "outcome": {
+            "kind": "resolvedOffline",
+            "note": "written by a later LedgerKit"
+          }
+        },
+        "timestamp": "2026-07-25T11:30:05.000Z"
+      },
+      "sequence": 5
+    },
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-000000000106",
+        "payload": {
+          "generationID": "01980E5A-0000-7000-8000-000000000031",
+          "kind": "generationStarted",
+          "messageID": "01980E5A-0000-7000-8000-000000000021",
+          "model": {
+            "model": "on-device",
+            "provider": "apple",
+            "version": "27.0"
+          },
+          "parent": "01980E5A-0000-7000-8000-000000000010"
+        },
+        "timestamp": "2026-07-25T11:30:06.000Z"
+      },
+      "sequence": 6
+    },
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-000000000107",
+        "payload": {
+          "generationID": "01980E5A-0000-7000-8000-000000000031",
+          "kind": "deltaAppended",
+          "text": "a nested error kind we have never heard of"
+        },
+        "timestamp": "2026-07-25T11:30:07.000Z"
+      },
+      "sequence": 7
+    },
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-000000000108",
+        "payload": {
+          "generationID": "01980E5A-0000-7000-8000-000000000031",
+          "kind": "generationEnded",
+          "outcome": {
+            "error": {
+              "kind": "quotaExhausted",
+              "retryAfter": 60000
+            },
+            "kind": "failed"
+          }
+        },
+        "timestamp": "2026-07-25T11:30:08.000Z"
+      },
+      "sequence": 8
+    },
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-000000000109",
+        "payload": {
+          "generationID": "01980E5A-0000-7000-8000-000000000032",
+          "kind": "generationStarted",
+          "messageID": "01980E5A-0000-7000-8000-000000000022",
+          "model": {
+            "model": "on-device",
+            "provider": "apple",
+            "version": "27.0"
+          },
+          "parent": "01980E5A-0000-7000-8000-000000000010"
+        },
+        "timestamp": "2026-07-25T11:30:09.000Z"
+      },
+      "sequence": 9
+    },
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-00000000010A",
+        "payload": {
+          "generationID": "01980E5A-0000-7000-8000-000000000032",
+          "kind": "deltaAppended",
+          "text": "no outcome field at all"
+        },
+        "timestamp": "2026-07-25T11:30:10.000Z"
+      },
+      "sequence": 10
+    },
+    {
+      "event": {
+        "conversationID": "01980E5A-0000-7000-8000-000000000001",
+        "id": "01980E5A-0000-7000-8000-00000000010B",
+        "payload": {
+          "generationID": "01980E5A-0000-7000-8000-000000000032",
+          "kind": "generationEnded"
+        },
+        "timestamp": "2026-07-25T11:30:11.000Z"
+      },
+      "sequence": 11
+    }
+  ]
+}

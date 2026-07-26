@@ -1,0 +1,55 @@
+{
+  "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+  "rows" : [
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000101",
+        "payload" : {
+          "kind" : "conversationCreated"
+        },
+        "timestamp" : "2026-07-25T11:30:01.000Z"
+      },
+      "sequence" : 1
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000102",
+        "payload" : {
+          "content" : "Explain valley folds",
+          "kind" : "userMessageAppended",
+          "messageID" : "01980E5A-0000-7000-8000-000000000010"
+        },
+        "timestamp" : "2026-07-25T11:30:02.000Z"
+      },
+      "sequence" : 2
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000103",
+        "payload" : {
+          "content" : "Explain mountain folds",
+          "kind" : "messageEdited",
+          "original" : "01980E5A-0000-7000-8000-000000000010",
+          "replacement" : "01980E5A-0000-7000-8000-000000000018"
+        },
+        "timestamp" : "2026-07-25T11:30:03.000Z"
+      },
+      "sequence" : 3
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000104",
+        "payload" : {
+          "endpoint" : "01980E5A-0000-7000-8000-000000000018",
+          "kind" : "activePathChanged"
+        },
+        "timestamp" : "2026-07-25T11:30:04.000Z"
+      },
+      "sequence" : 4
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+conversation 01980E5A-0000-7000-8000-000000000001
+genesis yes
+title —
+instructions "You are an origami tutor."
+path 01980E5A-0000-7000-8000-000000000010 > 01980E5A-0000-7000-8000-000000000020
+
+messages
+  01980E5A-0000-7000-8000-000000000010 user complete "Look it up" at=2026-07-25T11:30:04.000Z
+    01980E5A-0000-7000-8000-000000000020 assistant complete "Found it: a valley fold." gen=01980E5A-0000-7000-8000-000000000030 model=apple/on-device/27.0 at=2026-07-25T11:30:05.000Z ended=2026-07-25T11:30:10.000Z stop=[endTurn in=12 out=8 resolved=on-device-27.0.1] tool=[search succeeded 120ms args=— result=—] tool=[fetch failed 35ms args="{\"url\":\"…\"}" result=—]
+
+diagnostics
+  none

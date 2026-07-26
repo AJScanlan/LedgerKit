@@ -1,0 +1,12 @@
+conversation 01980E5A-0000-7000-8000-000000000001
+genesis yes
+title "after the hole"
+instructions —
+path 01980E5A-0000-7000-8000-000000000010 > 01980E5A-0000-7000-8000-000000000020
+
+messages
+  01980E5A-0000-7000-8000-000000000010 user complete "q" at=2026-07-25T11:30:02.000Z
+    01980E5A-0000-7000-8000-000000000020 assistant open "half an answer" gen=01980E5A-0000-7000-8000-000000000030 model=apple/on-device/27.0 at=2026-07-25T11:30:03.000Z
+
+diagnostics
+  seq 5 — sequenceGap(5...5)

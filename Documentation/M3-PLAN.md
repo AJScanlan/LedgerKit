@@ -164,6 +164,27 @@ Corollary adopted for the rest of M3: **mutation-test any sweep whose failure
 mode is subtle.** Three breakages were injected and reverted in Phase 2; the
 monotonicity property was verified to fail before it was trusted to pass.
 
+### D10 — Frozen expectations render `FoldedState`, never `Conversation` *(Phase 3)*
+The plan said the dump would render "a reduced `Conversation`." That is wrong,
+and the reason generalizes: **freeze only what the log alone determines.**
+
+Classification takes a `RecoverabilityMapping` as a second input, and §8
+explicitly *wants* mapping fixes to land and retroactively upgrade affordances
+on historical failures. A frozen corpus of classified state would therefore turn
+every legitimate §8 improvement into a wall of failing fixtures — creating
+pressure to "just re-record," which is exactly how a frozen corpus stops meaning
+anything. Folded state is what I1's first half promises is stable forever, so it
+is what the format commits to. Nothing is lost: `.open` pins the same fact
+`.interrupted` would, and I5's synthesis is covered by the in-memory sweeps.
+
+**Corollary, same phase:** the dump renders via explicit exhaustive switches over
+*case names* — never `description`, never `String(describing:)`. ADR-001 declares
+diagnostic prose non-contractual and free to reword; reflection output is a
+compiler implementation detail. A format frozen forever can depend on neither,
+and the exhaustive switch additionally forces a compiler error when the §6.6
+inventory grows, so a new condition cannot reach a frozen fixture without
+someone deciding how it appears.
+
 ### D6 — Fuzz generators never violate the ordering precondition
 §6.6 (rev 5): reduction *requires* ascending sequence and does not verify it;
 only deltas and tool records are non-idempotent under replay. Truncation and
@@ -369,36 +390,63 @@ would hide.
 
 ---
 
-### Phase 3 — On-disk corpus + version-freeze scaffolding
+### Phase 3 — On-disk corpus + version-freeze scaffolding ✅ *done 2026-07-26 (166 → 175 tests)*
 
 **Goal:** the §10.2 evolution safety net's machinery, ready for M9 to freeze.
 
-- [ ] Corpus file schema (D5): a fixture document = conversation ID + rows of
-      `{sequence, event: <tagged-JSON wire object>}` (+ reserved `raw` form for
-      M4); a sidecar expected-state file in the `ConversationDump` format (D2).
-      Schema documented in `Tests/LedgerKitTests/Corpus/README.md`.
-- [ ] `ConversationDump`: deterministic textual rendering of a reduced
-      `Conversation` (sequence-ordered, no dictionary iteration anywhere —
-      the I1 discipline applies to test infrastructure too).
-- [ ] Writer ("record mode", env-flag- or test-gated): serializes a `Corpus`
-      fixture to the file pair. Used to (re)generate the dev corpus; the frozen
-      corpus is never regenerated — that is its entire point.
-- [ ] Runner: loads every fixture file from the test bundle (`Bundle.module`
-      resources), decodes rows via `LedgerEvent.Record`, reduces, compares dump
-      output. Wire-level row-3 fixtures (all four shapes as raw JSON *within a
-      decodable record*) live here — they complete the `WireFormatTests`
-      coverage end-to-end through the fold.
-- [ ] Round-trip property: decode(fixture) → encode → decode is identity for
-      every dev-corpus file (encoder canonicalization check; note the WireDate
-      millisecond rule — fixture timestamps must be born canonical).
-- [ ] Directory layout: `Corpus/dev/` (regenerable, tracks HEAD) and
-      `Corpus/frozen/` (empty until 0.1.0; CI treats any diff under `frozen/`
-      as failure). Document the M9 freeze procedure in the README.
+- [x] **Schema** (D5) in `CorpusFile.swift`, documented in `Corpus/README.md`:
+      `{conversationID, rows: [{sequence, event}]}`, mirroring the events table
+      so `sequence` sits *outside* the blob exactly as it does in the real key.
+      Gaps need no representation — a missing sequence number is a missing row.
+      The `raw` row form is reserved and **throws** rather than guessing, per
+      D5: synthesising `LoadedEvent`s test-side would freeze fixtures against a
+      reimplementation of the decode boundary.
+- [x] **`StateDump`** — deterministic rendering, explicit stack rather than
+      recursion, no dictionary iteration, and **no `description` or
+      `String(describing:)` anywhere** (see D10's second half).
+- [x] **Record mode** — `LEDGERKIT_RECORD=1`, gated with `.enabled(if:)`.
+      Verified **idempotent**: a second record run leaves zero diffs.
+- [x] **Runner** — reads `Bundle.module`; folds *the file*, not the in-memory
+      fixture, so decode → fold is exercised as a composition rather than the
+      same object being tested twice.
+- [x] **Round-trip + canonical timestamps** — value-identity across all three
+      directories; every row asserted born-canonical, so M4's store inherits a
+      fixture that already fails if it canonicalizes at encode instead.
+- [x] **Directory layout** + M9 freeze procedure in `Corpus/README.md`.
+- [x] **Wire-surface coverage** — *added beyond the plan:* all ten payload
+      discriminators must appear somewhere on disk. A kind absent from the
+      corpus is a kind with no evolution safety net, and this is what makes a
+      new tag arrive *with* a fixture rather than a year later.
 
-**Exit:** dev corpus generated from the Phase 1 registry; runner green;
-freeze procedure documented.
-**Review gate:** review the schema and dump format as if they were public API —
-frozen files outlive everything else in this repo.
+**A third directory, not two (deviation).** The plan had `dev/` and `frozen/`.
+Building it surfaced that the corpus must also contain **bytes this version
+cannot write** — a future payload kind, an outcome whose discriminator we have
+never heard of. Round-tripping those through our encoder would silently rewrite
+them into shapes we already understand, which is the one thing a
+forward-compatibility fixture must not do. Hence `wire/`: hand-authored once,
+never regenerated, only its `.txt` re-recorded.
+
+`wire/tolerantTerminals.json` is the payoff — three generations ending in three
+different row-3 shapes (unknown outcome tag, unknown *nested* error tag, absent
+outcome field). All three land as `.failed(.unrecognized(…))` with distinct
+descriptions, **zero diagnostics**, each with a terminal timestamp. That is the
+whole tolerant-terminal story demonstrated from bytes on disk, which is the only
+form the forward-compatibility claim actually takes.
+
+**Excluded from disk, by construction:** `rich` and `hostile`, each of which
+contains `LoadedEvent.undecodable` rows. Those are *loader outcomes*, not wire
+bytes; they join at M4 via the reserved `raw` form. Their coverage is in-memory,
+where it is unaffected.
+
+**Mutation-tested.** Semantic drift in a recorded `.txt`, and a wire fixture
+whose bytes stop meaning what was recorded — both caught, both restored, suite
+back to green. One real bug was caught by *reading* the generated output before
+trusting it: `Optional("27.0")` was leaking into the model field, which would
+have been frozen into the format forever.
+
+**Exit:** ✅ 8 dev fixtures + 1 wire fixture; 175 green; freeze procedure written.
+**Review gate:** review `Corpus/README.md` and one generated `.txt` as if they
+were public API — frozen files outlive everything else in this repo.
 
 ---
 
@@ -534,6 +582,7 @@ their assertions exist already and mostly move rather than get written.
 | D7 | Classify predicate bridges both layers | **Landed Phase 0** (deviation, reasoned above) |
 | D8 | Corpus = logs worth sweeping; unit tests = rules. No per-row duplication | **Landed Phase 1** (deviation, reasoned above) |
 | D9 | Oracles must be simpler than the fold; else assert a relation | **Landed Phase 2** |
+| D10 | Freeze only what the log determines: dump `FoldedState`, switch on case names | **Landed Phase 3** (deviation, reasoned above) |
 
 ## 7. Status log
 
@@ -544,3 +593,4 @@ their assertions exist already and mostly move rather than get written.
 | 2026-07-25 | **Phase 1 scaffolded** | **161 (159 green)** | 8 fixtures + 8 rule tests; D8 recorded; 2 `TODO(human)` open |
 | 2026-07-26 | **Phase 1 done** | **160** | Handoffs filled; review cleanups applied (1 duplicate test + 2 dead accessors removed) |
 | 2026-07-26 | **Phase 2 done** | **166** | Crash-fuzz complete: 520 gap mutations + 3,289 compound iterations, 0.17 s; D9 recorded; mutation-tested |
+| 2026-07-26 | **Phase 3 done** | **175** | On-disk corpus: 8 dev + 1 hand-authored wire fixture, 3 directories, freeze procedure written; D10 recorded; mutation-tested |

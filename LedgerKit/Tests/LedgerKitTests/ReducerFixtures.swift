@@ -22,9 +22,11 @@ enum Fix {
 
     static let assistantA = MessageID(uuid(0x20))
     static let assistantB = MessageID(uuid(0x21))
+    static let assistantC = MessageID(uuid(0x22))
 
     static let genA = GenerationID(uuid(0x30))
     static let genB = GenerationID(uuid(0x31))
+    static let genC = GenerationID(uuid(0x32))
     static let genGhost = GenerationID(uuid(0x3F))
 
     static let model = ModelDescriptor(provider: "apple", model: "on-device", version: "27.0")

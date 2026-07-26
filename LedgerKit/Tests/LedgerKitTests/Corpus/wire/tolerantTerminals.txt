@@ -1,0 +1,14 @@
+conversation 01980E5A-0000-7000-8000-000000000001
+genesis yes
+title "terminals from the future"
+instructions —
+path 01980E5A-0000-7000-8000-000000000010 > 01980E5A-0000-7000-8000-000000000020
+
+messages
+  01980E5A-0000-7000-8000-000000000010 user complete "q" at=2026-07-25T11:30:02.000Z
+    01980E5A-0000-7000-8000-000000000020 assistant failed "an outcome kind we have never heard of" unrecognized("undecodable outcome: resolvedOffline") gen=01980E5A-0000-7000-8000-000000000030 model=apple/on-device/27.0 at=2026-07-25T11:30:03.000Z ended=2026-07-25T11:30:05.000Z
+    01980E5A-0000-7000-8000-000000000021 assistant failed "a nested error kind we have never heard of" unrecognized("undecodable error: quotaExhausted") gen=01980E5A-0000-7000-8000-000000000031 model=apple/on-device/27.0 at=2026-07-25T11:30:06.000Z ended=2026-07-25T11:30:08.000Z
+    01980E5A-0000-7000-8000-000000000022 assistant failed "no outcome field at all" unrecognized("undecodable outcome: <missing>") gen=01980E5A-0000-7000-8000-000000000032 model=apple/on-device/27.0 at=2026-07-25T11:30:09.000Z ended=2026-07-25T11:30:11.000Z
+
+diagnostics
+  none

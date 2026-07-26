@@ -21,9 +21,14 @@ let package = Package(
         .target(
             name: "LedgerKit"
         ),
+        // `Corpus/` holds the on-disk fixture corpus (SPEC §10.2): logs as wire
+        // JSON plus their expected reduced state. Declared as a resource so the
+        // runner reads it from `Bundle.module`; record mode writes back to the
+        // source tree via `#filePath`, which is a dev-only path.
         .testTarget(
             name: "LedgerKitTests",
-            dependencies: ["LedgerKit"]
+            dependencies: ["LedgerKit"],
+            resources: [.copy("Corpus")]
         ),
     ],
     swiftLanguageModes: [.v6]
