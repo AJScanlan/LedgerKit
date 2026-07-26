@@ -115,10 +115,14 @@ enum StateDump {
         switch error {
         case .modelUnavailable(let reason):
             "modelUnavailable(\(reason.rawValue))"
-        case .contextWindowExceeded:
-            "contextWindowExceeded"
+        case .contextSizeExceeded:
+            "contextSizeExceeded"
         case .guardrailViolation:
             "guardrailViolation"
+        case .refusal:
+            "refusal"
+        case .unsupported(let feature):
+            "unsupported(\(feature.rawValue))"
         case .rateLimited(let retryAfter):
             "rateLimited(\(retryAfter.map { "\($0.wireMilliseconds)ms" } ?? "—"))"
         case .providerFailure(let status, let code, let message):

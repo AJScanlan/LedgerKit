@@ -25,7 +25,10 @@ swift test  --package-path LedgerKitTestSupport
 - Tests use **Swift Testing** (`import Testing`, `@Test`, `#expect`) — not XCTest.
 - `swift test --package-path LedgerKit --filter <TestTypeName>` — matches the **type** name, not the `@Suite("display name")`. Filtering on the display string silently matches 0 tests and reports **success**.
 - ⚠️ **Ignore SourceKit "Cannot find type X in scope" / "No such module 'Testing'" in new files** — the index goes stale constantly here. `swift build` is the only ground truth; don't chase these.
-- Toolchain: Swift 6.3 (Xcode 26.6), **Swift 6 language mode, strict concurrency**.
+- Toolchain: **Xcode 27.0 Beta 4** (build 27A5228h), **macOS 27.0 SDK**, Swift 6 language mode, strict concurrency. Packages deploy to 26 (`.macOS(.v26)`), so iOS/macOS 27 APIs need `@available` guards — they *compile* (the SDK is 27) but the dev machine runs macOS 26, so 27-only code cannot execute here. Gate such tests with `.enabled(if:)`.
+- **`FoundationModels`' iOS/macOS 27 API is readable right now** — don't guess it from WWDC coverage. The authoritative interface is
+  `/Applications/Xcode-27.0.0-Beta.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/FoundationModels.framework/Versions/A/Modules/FoundationModels.swiftmodule/arm64e-apple-macos.swiftinterface`.
+  This closed OQ3 and most of OQ5 at M3; several `Session/` open questions are similarly answerable by reading it.
 - ⚠️ `ISO8601DateFormatter` **rounds** fractional seconds; `Date.ISO8601FormatStyle` **truncates**. Swapping to the (`Sendable`) format style shifts ~74% of timestamps 1 ms and breaks `WireDate.canonical`. The cached formatter's `nonisolated(unsafe)` is deliberate and measured (ADR-001 R-5, ~120 µs/construction) — don't "fix" it.
 - `LedgerKit.xcworkspace` ties together both packages, the `Projection` demo app, `Documentation/`, and a playground. Build the demo app from the workspace in Xcode (scheme `Projection`).
 

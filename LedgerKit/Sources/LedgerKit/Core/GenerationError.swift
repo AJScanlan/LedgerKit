@@ -11,11 +11,35 @@ import Foundation
 /// UI affordance is a function of `Recoverability`, never of raw error
 /// inspection.
 public enum GenerationError: Error, Sendable, Equatable {
-    /// ⚠️ Case names mirror Apple's exactly; verify against the beta at M6
-    /// (OQ5).
+    /// Why the model cannot run at all.
+    ///
+    /// Normalizes `SystemLanguageModel.Availability.UnavailableReason`, **not**
+    /// a `LanguageModelError` case (SPEC rev 6) — availability is a separate
+    /// API the app queries *before* generating. Names mirror it exactly.
     case modelUnavailable(ModelUnavailability)
-    case contextWindowExceeded
+    /// Mirrors `LanguageModelError.contextSizeExceeded`. Named
+    /// `contextWindowExceeded` until SPEC rev 6, which matched no Apple case;
+    /// the old wire tag is reserved forever (ADR-001).
+    case contextSizeExceeded
+    /// A safety system intervened on the content.
     case guardrailViolation
+    /// The model itself declined to answer.
+    ///
+    /// Deliberately distinct from ``guardrailViolation`` even though both
+    /// classify `.terminal` today: Apple keeps them apart, the difference is
+    /// real — a guardrail intervening versus the model declining — and
+    /// collapsing them would discard it permanently to save one case.
+    /// Apple's `Refusal.debugDescription` is not projected: the name says
+    /// debug, and §8's rule is that human detail never classifies.
+    case refusal
+    /// The app asked this model for something it does not do.
+    ///
+    /// Groups Apple's four `unsupported*` cases, which before SPEC rev 6 fell
+    /// through to ``unrecognized`` — the floor whose job is to be loud about
+    /// what the taxonomy failed to anticipate, quietly absorbing four cases it
+    /// had in fact been shown. Grouped rather than lifted because all four
+    /// classify `.terminal` and three of four are configuration errors.
+    case unsupported(UnsupportedFeature)
     /// `retryAfter` is normalized to a duration at normalization time (both
     /// RFC 9110 `Retry-After` forms), so the persisted value is
     /// clock-independent; display math is `terminalTimestamp + retryAfter`.
@@ -32,12 +56,34 @@ public enum GenerationError: Error, Sendable, Equatable {
     case unrecognized(description: String)
 }
 
-/// Why the model can't run at all — mirrors Apple's availability cases
-/// (⚠️ OQ5, pin at M6).
+/// Why the model can't run at all — mirrors
+/// `SystemLanguageModel.Availability.UnavailableReason` exactly (SPEC §8).
+///
+/// `PrivateCloudComputeLanguageModel` publishes a smaller set
+/// (`deviceNotEligible`, `systemNotReady`); its `systemNotReady` normalizes to
+/// ``modelNotReady``.
 public enum ModelUnavailability: String, Sendable, Codable {
     case deviceNotEligible
     case appleIntelligenceNotEnabled
     case modelNotReady
+}
+
+/// Which unsupported-feature failure occurred (SPEC §8) — the nested half of
+/// ``GenerationError/unsupported(_:)``.
+///
+/// One case per Apple `unsupported*` built-in, so the grouping loses no
+/// information. All four classify `.terminal`; the value is for logging and
+/// developer diagnosis, since three of the four say the *app* asked for
+/// something this model cannot do.
+public enum UnsupportedFeature: String, Sendable, Codable {
+    /// Tools, guided generation, or reasoning this model lacks.
+    case capability
+    /// A transcript entry kind or segment the model cannot consume.
+    case transcriptContent
+    /// A schema the model cannot satisfy.
+    case generationGuide
+    /// The prompt's language or locale is out of scope for this model.
+    case languageOrLocale
 }
 
 /// Transport-layer failure classes (SPEC §8): the request never got a model
@@ -51,10 +97,17 @@ public enum TransportFailure: String, Sendable, Codable {
 // MARK: - Wire coding
 
 extension GenerationError: Codable {
+    /// Raw values **are the wire** (ADR-001 R-3): a Swift case rename must keep
+    /// its raw value, and a retired tag is reserved forever rather than reused.
+    /// `contextWindowExceeded` was retired at SPEC rev 6 and is listed in
+    /// ADR-001's reserved table; no upcaster is needed because no released
+    /// version ever wrote it.
     private enum Kind: String {
         case modelUnavailable
-        case contextWindowExceeded
+        case contextSizeExceeded
         case guardrailViolation
+        case refusal
+        case unsupported
         case rateLimited
         case providerFailure
         case transport
@@ -62,7 +115,7 @@ extension GenerationError: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case kind, reason, retryAfter, status, code, message, failure, description
+        case kind, reason, feature, retryAfter, status, code, message, failure, description
     }
 
     public init(from decoder: any Decoder) throws {
@@ -77,10 +130,14 @@ extension GenerationError: Codable {
         switch kind {
         case .modelUnavailable:
             self = .modelUnavailable(try container.decode(ModelUnavailability.self, forKey: .reason))
-        case .contextWindowExceeded:
-            self = .contextWindowExceeded
+        case .contextSizeExceeded:
+            self = .contextSizeExceeded
         case .guardrailViolation:
             self = .guardrailViolation
+        case .refusal:
+            self = .refusal
+        case .unsupported:
+            self = .unsupported(try container.decode(UnsupportedFeature.self, forKey: .feature))
         case .rateLimited:
             self = .rateLimited(
                 retryAfter: (try container.decodeIfPresent(Int64.self, forKey: .retryAfter))
@@ -105,10 +162,15 @@ extension GenerationError: Codable {
         case .modelUnavailable(let reason):
             try container.encode(Kind.modelUnavailable.rawValue, forKey: .kind)
             try container.encode(reason, forKey: .reason)
-        case .contextWindowExceeded:
-            try container.encode(Kind.contextWindowExceeded.rawValue, forKey: .kind)
+        case .contextSizeExceeded:
+            try container.encode(Kind.contextSizeExceeded.rawValue, forKey: .kind)
         case .guardrailViolation:
             try container.encode(Kind.guardrailViolation.rawValue, forKey: .kind)
+        case .refusal:
+            try container.encode(Kind.refusal.rawValue, forKey: .kind)
+        case .unsupported(let feature):
+            try container.encode(Kind.unsupported.rawValue, forKey: .kind)
+            try container.encode(feature, forKey: .feature)
         case .rateLimited(let retryAfter):
             try container.encode(Kind.rateLimited.rawValue, forKey: .kind)
             try container.encodeIfPresent(retryAfter?.wireMilliseconds, forKey: .retryAfter)

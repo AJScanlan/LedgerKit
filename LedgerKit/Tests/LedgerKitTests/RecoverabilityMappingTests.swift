@@ -13,8 +13,13 @@ struct RecoverabilityMappingDefaultTests {
         (.modelUnavailable(.deviceNotEligible), .terminal),
         (.modelUnavailable(.appleIntelligenceNotEnabled), .recoverableUpstream(.enableAppleIntelligence)),
         (.modelUnavailable(.modelNotReady), .recoverableUpstream(.awaitModelDownload)),
-        (.contextWindowExceeded, .recoverableUpstream(.reduceContext)),
+        (.contextSizeExceeded, .recoverableUpstream(.reduceContext)),
         (.guardrailViolation, .terminal),
+        (.refusal, .terminal),
+        (.unsupported(.capability), .terminal),
+        (.unsupported(.transcriptContent), .terminal),
+        (.unsupported(.generationGuide), .terminal),
+        (.unsupported(.languageOrLocale), .terminal),
         (.rateLimited(retryAfter: .seconds(30)), .retryable(after: .seconds(30))),
         (.rateLimited(retryAfter: nil), .retryable(after: nil)),
         (.transport(.timeout), .retryable(after: nil)),
@@ -112,8 +117,12 @@ struct RecoverabilityMappingOverrideTests {
         mapping.guardrailViolation = .retryable(after: nil)
 
         #expect(mapping.recoverability(for: .guardrailViolation) == .retryable(after: nil))
-        #expect(mapping.recoverability(for: .contextWindowExceeded) == .recoverableUpstream(.reduceContext))
+        #expect(mapping.recoverability(for: .contextSizeExceeded) == .recoverableUpstream(.reduceContext))
         #expect(mapping.recoverability(for: .unrecognized(description: "x")) == .terminal)
+        #expect(
+            mapping.recoverability(for: .refusal) == .terminal,
+            "refusal and guardrailViolation are separate slots — that is why they are separate cases"
+        )
     }
 
     @Test("providerCodes supplies §8's per-provider table; unmatched falls to its own slot")

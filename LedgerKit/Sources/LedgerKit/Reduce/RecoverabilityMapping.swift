@@ -38,8 +38,10 @@ public struct RecoverabilityMapping: Sendable, Equatable {
         deviceNotEligible: .terminal,
         appleIntelligenceNotEnabled: .recoverableUpstream(.enableAppleIntelligence),
         modelNotReady: .recoverableUpstream(.awaitModelDownload),
-        contextWindowExceeded: .recoverableUpstream(.reduceContext),
+        contextSizeExceeded: .recoverableUpstream(.reduceContext),
         guardrailViolation: .terminal,
+        refusal: .terminal,
+        unsupported: .terminal,
         transport: .retryable(after: nil),
         providerRateLimited: .retryable(after: nil),
         providerAuthenticationFailure: .recoverableUpstream(.reauthenticate),
@@ -57,8 +59,20 @@ public struct RecoverabilityMapping: Sendable, Equatable {
     public var deviceNotEligible: Recoverability
     public var appleIntelligenceNotEnabled: Recoverability
     public var modelNotReady: Recoverability
-    public var contextWindowExceeded: Recoverability
+    public var contextSizeExceeded: Recoverability
     public var guardrailViolation: Recoverability
+
+    /// The model declined. Separate from ``guardrailViolation`` even though both
+    /// default to `.terminal`, so an app can give "the model won't answer this"
+    /// a different affordance from "a safety system blocked this" without
+    /// having to reclassify both.
+    public var refusal: Recoverability
+
+    /// Every `UnsupportedFeature`. One slot for all four, matching §8's single
+    /// row: they classify alike, and three of the four are configuration errors
+    /// whose audience is the developer, not the user. Widen to a keyed
+    /// dictionary only if a real case appears for treating them differently.
+    public var unsupported: Recoverability
 
     /// Every `TransportFailure` — timeout, connectivity, TLS. §8 has one row for
     /// all three; widen to `[TransportFailure: Recoverability]` if a real case
@@ -120,8 +134,10 @@ public struct RecoverabilityMapping: Sendable, Equatable {
         case .modelUnavailable(.deviceNotEligible): deviceNotEligible
         case .modelUnavailable(.appleIntelligenceNotEnabled): appleIntelligenceNotEnabled
         case .modelUnavailable(.modelNotReady): modelNotReady
-        case .contextWindowExceeded: contextWindowExceeded
+        case .contextSizeExceeded: contextSizeExceeded
         case .guardrailViolation: guardrailViolation
+        case .refusal: refusal
+        case .unsupported: unsupported
         case .rateLimited(let retryAfter): .retryable(after: retryAfter)
         case .transport: transport
         case .providerFailure(let status, let code, _): providerFailure(status: status, code: code)

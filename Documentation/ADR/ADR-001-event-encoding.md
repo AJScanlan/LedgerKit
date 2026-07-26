@@ -92,10 +92,22 @@ Current registry inventory (frozen; additions append here):
 |---|---|
 | `Payload.kind` | `conversationCreated` `userMessageAppended` `instructionsChanged` `generationStarted` `deltaAppended` `toolInvocationRecorded` `generationEnded` `messageEdited` `activePathChanged` `titleChanged` |
 | `Outcome.kind` | `completed` `failed` `cancelled` |
-| `GenerationError.kind` | `modelUnavailable` `contextWindowExceeded` `guardrailViolation` `rateLimited` `providerFailure` `transport` `unrecognized` |
+| `GenerationError.kind` | `modelUnavailable` `contextSizeExceeded` `guardrailViolation` `refusal` `unsupported` `rateLimited` `providerFailure` `transport` `unrecognized` |
 | `ModelUnavailability` (raw string) | `deviceNotEligible` `appleIntelligenceNotEnabled` `modelNotReady` |
+| `UnsupportedFeature` (raw string) | `capability` `transcriptContent` `generationGuide` `languageOrLocale` |
 | `TransportFailure` (raw string) | `timeout` `connectivity` `tls` |
 | `ToolRecord.Status` (raw string) | `succeeded` `failed` |
+
+**Reserved — removed tags, never reusable (opened by SPEC rev 6):**
+
+| Level | Tag | Removed | Why |
+|---|---|---|---|
+| `GenerationError.kind` | `contextWindowExceeded` | SPEC rev 6, M3 | Renamed to `contextSizeExceeded` to mirror Apple's `LanguageModelError` case name exactly (SPEC §8). No released version ever wrote it — v0.1 is untagged and the frozen corpus is empty — so **no upcaster is required**. It is reserved anyway: the registry rule is that a tag which has *ever* named something may never name anything else, and the cheapest moment to honour that is the one where it costs nothing. |
+
+The reserved list is the mechanism that makes R-2's "tags are never reused" auditable
+rather than aspirational. A tag arrives here the moment it stops being current, with the
+revision that retired it and whether an upcaster exists; a reader deciding what a
+strange tag in an old log means should never have to reconstruct that from git history.
 
 ### R-4. Scalar wire forms are pinned in the types, not encoder configuration
 

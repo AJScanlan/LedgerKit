@@ -185,6 +185,38 @@ and the exhaustive switch additionally forces a compiler error when the §6.6
 inventory grows, so a new condition cannot reach a frozen fixture without
 someone deciding how it appears.
 
+### D11 — Conform to Apple's real protocols now, availability-gated *(supersedes D4)*
+D4 said "stub behind an internal protocol at M3, bind at M6," inherited from the
+roadmap's rule that all beta risk lives in M6. That rule was written when the
+conformance surface was unknown. It is now **readable in the installed SDK**, so
+the stub would be a deliberate imitation of an API the compiler can already
+check — a vocabulary validated against a guess, plus reconciliation work at M6,
+plus a double no real consumer can use until then.
+
+Split by availability instead: **the vocabulary and engine are 26+** (they run
+and are tested today); **the conformance is `@available(macOS 27)`** (it compiles
+today, runs when 27 ships or on a 27 VM). The roadmap's principle is honoured in
+substance — the conformance touches ~5 symbols, where M6's driver touches
+transcript seeding, streaming, tool observation, usage and error normalization.
+The blast radius is not comparable.
+
+Owned cost: conformance tests cannot execute on this machine (macOS 26) and are
+gated with `.enabled(if:)`. Compile-checking is still strictly more than the stub
+would have given.
+
+### D12 — `Script.Step` is a struct with static factories, not an enum *(Phase 4)*
+Forced, then preferred. **Forced:** `appendText`'s `tokenCount` has no default,
+and Swift enum cases cannot carry default parameter values — an enum would mean
+either two cases or a wart at every call site. **Preferred:** steps are written
+by consumers and never *read* by them; nobody switches over a script step. So an
+enum buys no exhaustiveness anyone uses, while costing source stability every
+time a step is added. Apple reached the same conclusion for
+`LanguageModelExecutorGenerationChannel.Response.Action`, which is precisely this
+shape.
+
+The general rule, worth keeping: **enums for values consumers destructure,
+structs-with-factories for instructions consumers construct.**
+
 ### D6 — Fuzz generators never violate the ordering precondition
 §6.6 (rev 5): reduction *requires* ascending sequence and does not verify it;
 only deltas and tool records are non-idempotent under replay. Truncation and
@@ -452,40 +484,146 @@ were public API — frozen files outlive everything else in this repo.
 
 ### Phase 4 — `ScriptedLanguageModel` (`LedgerKitTestSupport`)
 
-**Goal:** the deterministic double, engine-complete, conformance-deferred (D4).
+**Goal:** the deterministic double — a real `LanguageModel` conformer with a
+public script vocabulary designed call-site first.
 
-- [ ] Package topology per D3: no LedgerKit dependency; fix the stale
-      `Package.swift` comment.
-- [ ] **Script vocabulary** (public, beta-independent): a `Script` is a
-      sequence of turns; a turn is steps —
-      `.emit(String)` (text delta), `.wait(Duration)`, `.pause(Gate)` (an async
-      gate the test opens — the deterministic alternative to clock waits, and
-      what M5's cancellation chaos will steer with), `.reportUsage(…)`,
-      `.reportMetadata(resolvedModelID: …)`, `.throwError(any Error)`,
-      `.complete`. Multi-turn: one script turn consumed per request;
-      exhaustion policy explicit (default: fail loudly).
-- [ ] **Engine:** consumes a turn, emits into an internal channel abstraction
-      mirroring the known beta shape (metadata → usage → deltas; D4).
-      Cooperative cancellation checked at every step boundary (throws
-      `CancellationError` — ⚠️ verify against beta at M6). Clock injected as
-      stdlib `any Clock<Duration>` (default `ContinuousClock`), so `.wait`
-      is testable without wall-clock and usable in previews with it.
-- [ ] **Cumulative-snapshot view:** helper that accumulates deltas into the
-      cumulative stream shape §7.3 says sessions vend — this is what the M6
-      driver-facing tests will consume, and scripting it now keeps OQ4 honest.
-- [ ] **OQ3 seam:** internal `protocol` pair mirroring model/executor; a doc
-      comment mapping each internal requirement to the observed beta surface,
-      so M6's binding is a checklist, not archaeology.
-- [ ] Test suite in `LedgerKitTestSupportTests`: script playback determinism
-      (two runs, identical emission sequences), cancellation at every step
-      boundary via `.pause`, exhaustion policy, multi-turn.
-- [ ] Doc comment positioning: the "gateway drug" framing — usable by any FM
-      app; zero network, zero Apple Intelligence eligibility, CI-safe.
+> **Premise changed before this phase started.** The toolchain is **Xcode 27.0
+> Beta 4 with the macOS 27 SDK** (CLAUDE.md said 26.6 — corrected), and
+> `LanguageModel` / `LanguageModelExecutor` compile against it. **OQ3 is
+> therefore answerable by reading, not guessing**, and the design below is
+> derived from the SDK's real `.swiftinterface`, not from WWDC coverage. See
+> D11. Copy of the interface used: `FoundationModels.swiftinterface`,
+> `MacOSX27.0.sdk`, 3,583 lines.
+
+**The real protocol surface (verified, not inferred):**
+
+```swift
+public protocol LanguageModel: Sendable {
+  associatedtype Executor: LanguageModelExecutor where Self == Self.Executor.Model
+  var capabilities: LanguageModelCapabilities { get }
+  var executorConfiguration: Self.Executor.Configuration { get }
+}
+public protocol LanguageModelExecutor: Sendable {
+  associatedtype Configuration: Hashable, Sendable
+  associatedtype Model: LanguageModel
+  func prewarm(model: Self.Model, transcript: Transcript)
+  init(configuration: Self.Configuration) throws
+  nonisolated(nonsending) func respond(to: LanguageModelExecutorGenerationRequest,
+                                       model: Self.Model,
+                                       streamingInto: LanguageModelExecutorGenerationChannel) async throws
+}
+// channel: await channel.send(.response(action: .appendText(_:segmentID:tokenCount:)))
+//          … .updateUsage(input:output:metadata:), .updateMetadata(_:)
+//          plus .reasoning(…) and .toolCalls(…) event families
+```
+
+Three facts from the interface that changed the design (and would each have
+produced a wrong API):
+
+1. **`appendText`'s `tokenCount` has no default**, and Swift enum cases cannot
+   carry default parameter values → `Step` must be a **struct with static
+   factories** (D12). Apple's own `Response.Action` is exactly that shape.
+2. **The framework builds the executor from a `Configuration: Hashable &
+   Sendable`** — you never hand it your object → the script and the request
+   recorder must travel *by reference* through the configuration.
+3. **`LanguageModelError` cases carry payload structs**
+   (`case rateLimited(LanguageModelError.RateLimited)`) → raw `.fail(…)` call
+   sites are verbose and want conveniences.
+
+**Decided by Alexander (2026-07-26):** conform now, availability-gated (D11);
+imperative step verbs; `Cue` for the rendezvous.
+
+#### The surface
+
+```swift
+// 26+ — platform-agnostic vocabulary and engine, runs and is tested today
+public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLiteral {
+    public struct Step: Sendable, ExpressibleByStringLiteral {
+        public static func emit(_ text: String, tokenCount: Int = 1) -> Step
+        public static func wait(_ duration: Duration) -> Step
+        public static func waitFor(_ cue: Cue) -> Step
+        public static func reportUsage(input: Int, output: Int,
+                                       cached: Int = 0, reasoning: Int = 0) -> Step
+        public static func reportMetadata(_ values: [String: String]) -> Step
+        public static func fail(_ error: any Error) -> Step
+    }
+}
+
+public final class Cue: Sendable {          // two-sided rendezvous
+    public init()
+    public func reached() async             // test waits for the model to park here
+    public func signal()                    // let it continue
+}
+
+public enum ScriptExhaustion: Sendable { case fail, repeatLast, loop }
+
+// 27+ — the real conformance, compile-checked today
+@available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
+public struct ScriptedLanguageModel: LanguageModel {
+    public init(replying: String)
+    public init(script: Script)
+    public init(scripts: [Script], whenExhausted: ScriptExhaustion = .fail)
+    public init(failingWith: any Error)
+    public var requests: [LanguageModelExecutorGenerationRequest] { get }   // spy, sync
+}
+```
+
+#### Tasks
+
+- [ ] Package topology per D3 (no LedgerKit dependency); fix the stale
+      `Package.swift` platforms comment.
+- [ ] `Script`, `Script.Step`, `Cue`, `ScriptExhaustion` — 26+, no FM import.
+- [ ] Engine: plays a script into a sink; cooperative cancellation checked at
+      every step boundary; clock injectable (`any Clock<Duration>`, default
+      `ContinuousClock`) so `.wait` is real for previews and controllable in
+      tests. `.waitFor(cue)` is the deterministic tool.
+- [ ] `ScriptedLanguageModel` + `ScriptedExecutor` conformance, `@available`
+      27+, with the recorder carried by reference through `Configuration`.
+- [ ] Request spy: `requests` readable synchronously (lock-backed, not `async`)
+      so `#expect(model.requests.count == 1)` needs no `await`.
+- [ ] Tests in `LedgerKitTestSupportTests`: playback determinism (two runs,
+      identical emissions), cancellation at every step boundary via `Cue`,
+      exhaustion policy, multi-turn, clock control. Conformance tests gated
+      with `.enabled(if:)` — they compile now, run on macOS 27.
+- [ ] Doc comments carrying the "gateway drug" framing: zero network, zero
+      Apple Intelligence eligibility, CI-safe on any Mac.
+
+**Deliberately not done:** result builder (array literal reads nearly as well
+and a builder is a non-breaking addition later); `.reasoning` / `.toolCalls`
+channel families (LedgerKit v0.1 records neither — N8, OQ9); conveniences for
+every `LanguageModelError` payload (add on demand).
 
 **Exit:** `swift test --package-path LedgerKitTestSupport` green; engine
-deterministic; OQ3 checklist written.
-**Review gate:** review the public script vocabulary — it is TestSupport's API
-surface and should survive the M6 binding unchanged.
+deterministic; conformance compiles.
+**Review gate:** review the public vocabulary as API — it is a long-lived
+contract and likely a consumer's first impression of the project.
+
+#### Recorded for M6
+
+- **§7.3 confirmed, with a nuance worth a rev-6 sentence:** the *executor*
+  writes deltas (`appendText`); `ResponseStream.Snapshot` reads *cumulative*
+  (`content: Content.PartiallyGenerated`). Both true — the framework
+  accumulates. §7.3 describes the driver's seat and stands.
+- **A free end-to-end property for M6:** script delta → framework accumulates →
+  snapshot → driver diffs → `deltaAppended`. The driver's diff must recover
+  exactly the deltas the script emitted.
+- `LanguageModelError` case inventory (**closes most of OQ5**):
+  `contextSizeExceeded`, `rateLimited`, `guardrailViolation`, `refusal`,
+  `unsupportedCapability`, `unsupportedTranscriptContent`,
+  `unsupportedGenerationGuide`, `unsupportedLanguageOrLocale`, `timeout` —
+  each with an associated payload struct. Note **`refusal`**, which §8's
+  `GenerationError` does not currently mention.
+- `LanguageModelExecutorGenerationRequest` carries `id`, `transcript`,
+  `enabledToolDefinitions`, `schema`, `generationOptions`, `contextOptions`,
+  `metadata` — the rehydration assertion surface for OQ1.
+- `Snapshot` gained `usage` and `transcriptEntries` at 27 (feeds §7.7).
+
+#### Flagged, not acted on
+
+**`LedgerKitTestSupport` is a poor name for the "gateway drug" pitch** — nobody
+installs *LedgerKitTestSupport* to get a scripted Foundation Models double.
+SPEC §10.1 names the product, so renaming is a rev-6 conversation, not an
+implementation decision.
 
 ---
 
@@ -576,13 +714,15 @@ their assertions exist already and mostly move rather than get written.
 | D1 | Corpus registry in `LedgerKitTests`; sweeps iterate it | **Accepted** · landed Phase 0 |
 | D2 | No third-party test deps; own `ConversationDump` format | **Accepted** · applies Phase 3 |
 | D3 | TestSupport does not depend on LedgerKit (topology one-way door) | **Accepted** · applies Phase 4 |
-| D4 | OQ3: engine now, internal seam, M6 adapter | **Accepted** · applies Phase 4 |
+| D4 | OQ3: engine now, internal seam, M6 adapter | ~~Accepted~~ · **superseded by D11** |
 | D5 | On-disk schema `(sequence, raw JSON)`; rows 1–2 defer to M4 | **Accepted** · applies Phase 3 |
 | D6 | Fuzz generators remove-only; never reorder/duplicate | **Accepted** · applies Phase 2 |
 | D7 | Classify predicate bridges both layers | **Landed Phase 0** (deviation, reasoned above) |
 | D8 | Corpus = logs worth sweeping; unit tests = rules. No per-row duplication | **Landed Phase 1** (deviation, reasoned above) |
 | D9 | Oracles must be simpler than the fold; else assert a relation | **Landed Phase 2** |
 | D10 | Freeze only what the log determines: dump `FoldedState`, switch on case names | **Landed Phase 3** (deviation, reasoned above) |
+| D11 | Conform to the real FM protocols now, availability-gated | **Approved 2026-07-26** (supersedes D4) |
+| D12 | `Script.Step` is a struct with static factories, not an enum | **Approved 2026-07-26** |
 
 ## 7. Status log
 
@@ -594,3 +734,4 @@ their assertions exist already and mostly move rather than get written.
 | 2026-07-26 | **Phase 1 done** | **160** | Handoffs filled; review cleanups applied (1 duplicate test + 2 dead accessors removed) |
 | 2026-07-26 | **Phase 2 done** | **166** | Crash-fuzz complete: 520 gap mutations + 3,289 compound iterations, 0.17 s; D9 recorded; mutation-tested |
 | 2026-07-26 | **Phase 3 done** | **175** | On-disk corpus: 8 dev + 1 hand-authored wire fixture, 3 directories, freeze procedure written; D10 recorded; mutation-tested |
+| 2026-07-26 | **SPEC rev 6 drafted + implemented** | **175** | §8 taxonomy reconciled (`contextSizeExceeded`, `refusal`, `unsupported`), §7.3 stream-sides, §10.1 provisional name; ADR-001 gains a reserved-tag table; OQ3 + OQ5 closed. **Ratifies at the M3 boundary.** |

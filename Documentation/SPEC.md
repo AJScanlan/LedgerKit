@@ -1,9 +1,9 @@
 # LedgerKit v0.1 — Design Specification
 
-**Status:** **Ratified — rev 5** (2026-07-25, at the M2 boundary)
-**Date:** 2026-07-25 (rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
+**Status:** **Draft — rev 6** (opened 2026-07-26 during M3; **ratifies at the M3 boundary**). Rev 5 was ratified 2026-07-25 at the M2 boundary.
+**Date:** 2026-07-26 (rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
 **Targets:** iOS 27 / macOS 27 (Foundation Models `LanguageModel` protocol as inference substrate)
-**Changes from rev 4:** Appendix C.
+**Changes from rev 5:** Appendix D.
 
 ---
 
@@ -65,7 +65,7 @@ The single most important design input. Anything in the left column is a non-goa
 
 - **N1.** No networking, no providers, no API-key handling. (Apple + vendor packages.)
 - **N2.** No prompt templating, personas, or skills. (Utilities package.)
-- **N3.** No compaction awareness. In-session compaction is invisible to LedgerKit in v0.1; rehydration materializes the full active path. Accepted consequence, stated honestly (rev 4): a rebuilt session sees more context than the compacted live session it replaces — and may therefore *exceed the window that compaction was hiding*. On-device budgets are small (reported ~4k shared tokens — ⚠️ verify against the beta), so a long on-device conversation can be unregenerable after process death: rehydration fails with `contextWindowExceeded`, which classifies to `recoverableUpstream(.reduceContext)` (§8), and the app-side escape is a utilities compaction pass before retry. The failure is graceful and typed, not silent — but it is a failure, and pretending the consequence is merely "sees more context" undersold it. Compaction bookkeeping arrives in v0.3, and the event carries the summary text (§12) so rehydration and audit can reproduce what the model saw.
+- **N3.** No compaction awareness. In-session compaction is invisible to LedgerKit in v0.1; rehydration materializes the full active path. Accepted consequence, stated honestly (rev 4): a rebuilt session sees more context than the compacted live session it replaces — and may therefore *exceed the window that compaction was hiding*. On-device budgets are small (reported ~4k shared tokens — ⚠️ verify against the beta), so a long on-device conversation can be unregenerable after process death: rehydration fails with `contextSizeExceeded` (rev 6 name), which classifies to `recoverableUpstream(.reduceContext)` (§8), and the app-side escape is a utilities compaction pass before retry. The failure is graceful and typed, not silent — but it is a failure, and pretending the consequence is merely "sees more context" undersold it. Compaction bookkeeping arrives in v0.3, and the event carries the summary text (§12) so rehydration and audit can reproduce what the model saw.
 - **N4.** No RAG, embeddings, or search.
 - **N5.** No sync. The event log is designed to permit log-shipping later; nothing is built.
 - **N6.** No UI components. State machine + observation only.
@@ -355,7 +355,9 @@ The throw channel (§11) is exactly the complement — failures *before* the app
 
 ### 7.3 Streaming reduction
 
-FM streams *cumulative snapshots*, not deltas. The driver diffs successive snapshots and emits `deltaAppended` with the suffix. For plain text, snapshots are append-only, so prefix-diffing is sound; assert the prefix property in debug. **Release behavior on violation:** the driver fails the generation — `generationEnded(.failed(.unrecognized("driver: non-prefix snapshot")))`, terminal — and never emits a reconstructed or corrupt delta. A wrong transcript is worse than a dead one. (Guided-generation partials are *not* prefix-stable — one reason N8 exists.)
+FM streams *cumulative snapshots*, not deltas. The driver diffs successive snapshots and emits `deltaAppended` with the suffix. For plain text, snapshots are append-only, so prefix-diffing is sound; assert the prefix property in debug.
+
+**Which side of the stream you are on decides what you see (rev 6 — verified against the iOS 27 SDK, not inferred).** The two halves genuinely differ, and this paragraph exists because the sentence above reads as flatly contradicting Apple's provider-authoring guidance if you have only seen the other side. A **provider writes deltas**: `LanguageModelExecutor.respond(to:model:streamingInto:)` sends `.response(action: .appendText(_:segmentID:tokenCount:))` *fragments* into its channel. A **consumer reads cumulative state**: `LanguageModelSession.ResponseStream` vends `Snapshot` values whose `content` is the partially-generated whole. The framework accumulates in between. LedgerKit's driver is a consumer, so prefix-diffing is both correct and the only strategy available to it, and the ledger's `deltaAppended` events reconstruct *by subtraction* the fragments the provider originally sent. `ScriptedLanguageModel` (§10.1) sits on the **provider** side — which makes the round trip an end-to-end property the corpus can assert: scripted fragment → framework accumulation → snapshot → driver diff → `deltaAppended` must recover exactly the fragments the script emitted. **Release behavior on violation:** the driver fails the generation — `generationEnded(.failed(.unrecognized("driver: non-prefix snapshot")))`, terminal — and never emits a reconstructed or corrupt delta. A wrong transcript is worse than a dead one. (Guided-generation partials are *not* prefix-stable — one reason N8 exists.)
 
 **Non-text stream content (rev 4):** provider streams can vend more than text — response metadata, usage updates, and *custom segments* (reasoning, provider-specific segments like search results). **v0.1 records text deltas only.** Non-text segments are ignored — neither persisted nor rehydrated (N11, OQ9) — deliberately and loudly in the docs, not as an accident of the diff loop. Usage and resolved model identity are the two exceptions, captured at completion into `StopInfo` (§7.7, §7.8).
 
@@ -395,15 +397,24 @@ The driver takes `any LanguageModel` at init. On-device ↔ Claude package ↔ C
 
 The contract that makes error handling a design feature instead of an afterthought. UI affordance is a function of `Recoverability`, never of raw error inspection.
 
-**Anchor on Apple's enum, not per-provider empirics.** Apple steers providers toward the built-in `LanguageModelError` cases, reserving custom errors for service-specific failures. `GenerationError` is therefore defined as a *total normalization of Apple's built-in taxonomy* first, with `providerFailure`/`transport` as the custom-error tail and `unrecognized` as the floor. (⚠️ verify the built-in case inventory against the beta — §14.)
+**Anchor on Apple's enum, not per-provider empirics.** Apple steers providers toward the built-in `LanguageModelError` cases, reserving custom errors for service-specific failures. `GenerationError` is therefore defined as a *total normalization of Apple's built-in taxonomy* first, with `providerFailure`/`transport` as the custom-error tail and `unrecognized` as the floor.
+
+**The inventory is no longer ⚠️ (rev 6).** OQ5 asked for the built-in case list "including exact case *names*." It has been read directly from the installed macOS 27 SDK's `FoundationModels.swiftinterface` rather than inferred from documentation, and rev 6 reconciles this section against it. Three things were wrong: one name did not match, one case had no home, and four cases fell through to `unrecognized` — which made the word *total* above false.
 
 ```swift
 public enum GenerationError: Error, Sendable, Codable {
     case modelUnavailable(ModelUnavailability)   // deviceNotEligible, appleIntelligenceNotEnabled,
-                                                 // modelNotReady — mirror Apple's case names
-                                                 // exactly (rev 4; ⚠️ §14 OQ5)
-    case contextWindowExceeded
+                                                 // modelNotReady — mirrors
+                                                 // SystemLanguageModel.Availability.UnavailableReason
+                                                 // exactly. Note (rev 6) this is an *availability*
+                                                 // API, not a LanguageModelError case — see below.
+    case contextSizeExceeded                     // rev 6: renamed from contextWindowExceeded, which
+                                                 // matched no Apple name
     case guardrailViolation
+    case refusal                                 // rev 6: the model declined to answer. Apple keeps
+                                                 // this distinct from a guardrail intervening, and
+                                                 // so does this taxonomy.
+    case unsupported(UnsupportedFeature)         // rev 6: the four `unsupported*` built-ins, grouped
     case rateLimited(retryAfter: Duration?)
     case providerFailure(status: Int?, code: String?, message: String?)
         // status:  HTTP status, when the failure crossed an HTTP boundary; else nil
@@ -412,6 +423,36 @@ public enum GenerationError: Error, Sendable, Codable {
     case transport(TransportFailure)             // timeout, connectivity, TLS — the "network, not model" bucket
     case unrecognized(description: String)       // loud, never silently swallowed
 }
+
+public enum UnsupportedFeature: Sendable, Codable {
+    case capability          // tools / guided generation / reasoning this model lacks
+    case transcriptContent   // an entry kind or segment the model cannot consume
+    case generationGuide     // a schema the model cannot satisfy
+    case languageOrLocale    // the prompt's language is out of scope for this model
+}
+```
+
+**Coverage of the built-in taxonomy, stated so "total" is checkable (rev 6):**
+
+| `LanguageModelError` case | `GenerationError` | Note |
+|---|---|---|
+| `contextSizeExceeded` | `contextSizeExceeded` | 1:1 |
+| `rateLimited` | `rateLimited(retryAfter:)` | 1:1 |
+| `guardrailViolation` | `guardrailViolation` | 1:1 |
+| `refusal` | `refusal` | 1:1 |
+| `unsupportedCapability` | `unsupported(.capability)` | grouped |
+| `unsupportedTranscriptContent` | `unsupported(.transcriptContent)` | grouped |
+| `unsupportedGenerationGuide` | `unsupported(.generationGuide)` | grouped |
+| `unsupportedLanguageOrLocale` | `unsupported(.languageOrLocale)` | grouped |
+| `timeout` | `transport(.timeout)` | **the one deliberate non-1:1** — lift rule 2 below |
+
+**Why the four `unsupported*` cases are grouped rather than lifted to top-level cases.** Every one of them classifies `terminal`, and three of the four are *configuration* errors — the app asked this model for something it does not do — rather than conditions a user can act on. Four top-level cases would buy four identical table rows, four mapping slots nobody overrides differently, and four more cases in the enum every consumer switches over, in exchange for information the nested value already carries losslessly. Grouping keeps §8's table and `MessageState`'s exhaustive switch (§11, the showpiece) proportional to the *affordances* that exist, which is what this taxonomy is for.
+
+**Why `refusal` is not grouped with `guardrailViolation`.** They classify identically today, which is exactly the argument that tempted rev 6 to merge them. They stay apart because Apple keeps them apart and rule 1 below is a 1:1 promise — and because the distinction is real and may yet earn different affordances: a guardrail is a system intervening on content, a refusal is the model itself declining. Collapsing them would discard that, permanently, to save one enum case.
+
+**Neither carries Apple's `debugDescription`.** `LanguageModelError.Refusal` and its siblings carry a `debugDescription` and a `metadata` dictionary. Neither is projected: the field's own name says debug, §8's standing rule is that human-readable detail never participates in classification, and `guardrailViolation` has set this precedent since rev 1. The driver logs it at normalization time (§7.2). If a future revision wants refusal text on screen it is an additive change to *that* case — but it is a wire change, so it happens deliberately or not at all.
+
+**`modelUnavailable` does not come from `LanguageModelError` at all (rev 6).** It normalizes `SystemLanguageModel.Availability.UnavailableReason` — `deviceNotEligible`, `appleIntelligenceNotEnabled`, `modelNotReady` — which is an availability API the app queries *before* generating. The names match exactly, as rev 4 promised. `PrivateCloudComputeLanguageModel` has its own smaller reason set (`deviceNotEligible`, `systemNotReady`); `systemNotReady` normalizes to `.modelNotReady`. Recorded because §8 claims totality over Apple's taxonomy, and a reader checking that claim against `LanguageModelError` alone would find this case unaccounted for and conclude the claim was sloppy.
 
 public enum Recoverability: Sendable {            // derived, never persisted — no Codable
     case retryable(after: Duration?)     // transient — offer Retry / auto-backoff
@@ -453,8 +494,10 @@ Default classification mapping (ships in LedgerKit; apps override per-case; over
 | `modelUnavailable(.deviceNotEligible)` | `terminal` |
 | `modelUnavailable(.appleIntelligenceNotEnabled)` | `recoverableUpstream(.enableAppleIntelligence)` |
 | `modelUnavailable(.modelNotReady)` | `recoverableUpstream(.awaitModelDownload)` |
-| `contextWindowExceeded` | `recoverableUpstream(.reduceContext)` |
+| `contextSizeExceeded` | `recoverableUpstream(.reduceContext)` |
 | `guardrailViolation` | `terminal` |
+| `refusal` | `terminal` |
+| `unsupported(*)` | `terminal` (and logged loudly) — three of the four are configuration errors, so the developer is the audience |
 | `rateLimited(after)` | `retryable(after)` |
 | `transport(*)` | `retryable(nil)` |
 | `providerFailure`, status 5xx | `retryable(nil)` |
@@ -468,7 +511,7 @@ Default classification mapping (ships in LedgerKit; apps override per-case; over
 
 Nil rationale: an unclassifiable provider failure retried blind risks retry loops on permanent faults; `terminal` still leaves Regenerate as the manual retry, which is the safer default. If a provider family turns out to emit nil-status transients, that's a mapping override keyed on `code` — and a fixture (§10).
 
-**"Logged loudly" has no home in `classify` (rev 5).** Four rows above carry that annotation, and the classification layer is a pure function that cannot log (§6.3). The annotation is therefore a claim about *where the loudness belongs*, not a requirement on the mapping. Three of the four — `unrecognized`, nil-status/nil-code `providerFailure`, and a 429 that reached classification unlifted — are detectable at **normalization** time in the driver (§7.2, M6), which is both where those values are minted and where a logger exists. The fourth, an unmatched provider `code`, is visible only to classification, and only in an app that supplied a `providerCodes` table in the first place — so it is that app's to notice, against a table it wrote. Deliberately **not** solved by adding provenance to classification's return type: that would complicate the one signature every consumer calls, permanently and source-breakingly, to report a condition the caller can already detect from its own input.
+**"Logged loudly" has no home in `classify` (rev 5).** Several rows above carry that annotation — `unsupported(*)` joined them in rev 6, and it belongs firmly in the normalization-time group below, since a model being asked for a capability it lacks is a fact about the *app's configuration* that the driver is the first and best place to shout about. The classification layer is a pure function that cannot log (§6.3). The annotation is therefore a claim about *where the loudness belongs*, not a requirement on the mapping. Three of the four — `unrecognized`, nil-status/nil-code `providerFailure`, and a 429 that reached classification unlifted — are detectable at **normalization** time in the driver (§7.2, M6), which is both where those values are minted and where a logger exists. The fourth, an unmatched provider `code`, is visible only to classification, and only in an app that supplied a `providerCodes` table in the first place — so it is that app's to notice, against a table it wrote. Deliberately **not** solved by adding provenance to classification's return type: that would complicate the one signature every consumer calls, permanently and source-breakingly, to report a condition the caller can already detect from its own input.
 
 Normalization risk, revised: anchoring on the built-in enum shrinks the empirical surface to each provider's custom tail. Still isolate the mapping in one file per provider family, fixture-test it (§10), and expect it to churn. This is where real-world adoption feedback accrues; treat mapping-gap issues as gold.
 
@@ -492,7 +535,7 @@ Normalization risk, revised: anchoring on the built-in enum shrinks the empirica
 
 The test story *is* the differentiation — "how do you even test an FM app?" currently has no good public answer.
 
-1. **`ScriptedLanguageModel`** — conforms to Apple's `LanguageModel` protocol (model + executor pair — ⚠️ verify conformance surface against beta). Plays a script: emit snapshot, wait, throw, complete. Powers unit tests, SwiftUI previews, demo screenshots, and CI on Intel Macs with zero Apple Intelligence eligibility. Because the protocol is Apple's, this double is useful to *any* FM app, not just LedgerKit consumers — ship it as a separate product (`LedgerKitTestSupport`) and let it be the gateway drug.
+1. **`ScriptedLanguageModel`** — conforms to Apple's `LanguageModel` protocol (model + executor pair — ⚠️ verify conformance surface against beta). Plays a script: emit snapshot, wait, throw, complete. Powers unit tests, SwiftUI previews, demo screenshots, and CI on Intel Macs with zero Apple Intelligence eligibility. Because the protocol is Apple's, this double is useful to *any* FM app, not just LedgerKit consumers — ship it as a separate product and let it be the gateway drug. **The product name `LedgerKitTestSupport` is provisional (rev 6)** and is the working name only. It actively undercuts the positioning it exists to serve: nobody installs a package called *LedgerKitTestSupport* to get a deterministic Foundation Models double, and the name advertises a dependency the product deliberately does not have (it must not depend on LedgerKit, or LedgerKit's own test target could never import it). Renaming is cheap while pre-1.0 and expensive after, so the decision is deferred only until a better name presents itself — no later than the `0.1.0` tag (§13 DoD-5).
 2. **Golden logs:** fixture event logs → expected reduced state, snapshot-tested. Doubles as living documentation of semantics. Hostile fixtures mirror the §6.6 table row-for-row: second genesis, second bare nil-parent append, delta-after-end, tool-record-after-end, assistant-message edit, replacement-ID collision, `activePathChanged` to a never-existent endpoint, envelope `conversationID` mismatch, unknown payload kind — each asserting the exact `diagnostics` residue. Plus the tolerant-terminal fixture asserting the *opposite*: an unknown nested outcome lands as `failed(.unrecognized)` and does **not** quarantine (§6.1). Rev 4 additions, mirroring the §6.6 non-rules: a **mid-log gap** fixture (one diagnostic per contiguous gap; a gap swallowing a terminal yields `.interrupted`), the **cascade** fixture (a quarantined `generationStarted` orphans its deltas, tool records, and terminal into rows 9–10 residue — exact diagnostics asserted), and **role-adjacency non-rule** fixtures (assistant-parent `generationStarted` and consecutive user siblings reduce *without* quarantine — wire headroom proven, not assumed). Root-message edit graduates from impossible (rev 2) to a golden fixture. **Version-frozen corpus:** fixture logs written by each released version are frozen in CI forever — the standard evolution safety net; if per-version decode ever gets hairy, the idiom to reach for is *upcasters* (decode-time old-shape → current-shape transforms) so the reducer stays single-shape (ADR-001).
 3. **Crash-point fuzzing:** for every fixture log, truncate at *every* prefix and assert the reducer yields a valid state with correct `.interrupted` synthesis (I5) and no traps (I2). Rev 4 adds the **interior-gap variant**: knock out interior slices, not just suffixes, and assert I2's gap diagnostics alongside I5's synthesis. Cheap, brutal, and the single highest-value suite in the package.
 4. **Cancellation chaos:** drive `ScriptedLanguageModel` streams, cancel at randomized points — including via `store.cancelGeneration(in:)` racing natural completion, and Task-cancellation straddling the §7.2 boundary (pre-append ⇒ throws, post-append ⇒ returns `.cancelled`) — assert exactly one terminal outcome (I3) and partial-content retention.
@@ -611,9 +654,9 @@ Resolved items from rev 1 have been folded into the spec body (rev 2's Appendix 
 
 1. **Transcript seeding:** initializer shape for materializing a transcript into a `LanguageModelSession` in iOS 27 (iOS 26 had `LanguageModelSession(transcript:)`).
 2. **Tool-activity observation:** what iOS 27 exposes for observing tool invocations on the response/stream (feeds §7.6) — and whether transcript entries for tool exchanges can be constructed app-side (feeds the v0.2 transcript-fidelity item, §12).
-3. **`LanguageModel` conformance surface:** exact model + executor requirements, so `ScriptedLanguageModel` conforms to the real thing, not a guess.
+3. ~~**`LanguageModel` conformance surface:** exact model + executor requirements, so `ScriptedLanguageModel` conforms to the real thing, not a guess.~~ **Resolved at M3 (rev 6)** by reading the installed macOS 27 SDK: `LanguageModel` requires `associatedtype Executor`, `capabilities`, `executorConfiguration`; `LanguageModelExecutor` requires `associatedtype Configuration: Hashable & Sendable`, `associatedtype Model`, `prewarm(model:transcript:)`, `init(configuration:) throws`, and `respond(to:model:streamingInto:) async throws`. `ScriptedLanguageModel` conforms for real, gated `@available(macOS 27)`. Re-verify per beta.
 4. **Snapshot stream element types:** what the cumulative-snapshot stream vends (feeds §7.3 prefix-diffing).
-5. **Built-in `LanguageModelError` inventory:** the case list `GenerationError` must totally cover (§8) — including exact case *names* (iOS 26 surfaced `appleIntelligenceNotEnabled`; the 1:1 normalization claim earns matching names).
+5. ~~**Built-in `LanguageModelError` inventory:** the case list `GenerationError` must totally cover (§8) — including exact case *names*.~~ **Resolved at M3 (rev 6)**, from the SDK interface: `contextSizeExceeded`, `rateLimited`, `guardrailViolation`, `refusal`, `unsupportedCapability`, `unsupportedTranscriptContent`, `unsupportedGenerationGuide`, `unsupportedLanguageOrLocale`, `timeout` — each carrying a payload struct. §8 is reconciled against this list and now states its coverage as a table. Re-verify per beta; a *new* built-in case is the one change that would reopen this.
 6. **Session single-flight surface:** the exact error/behavior when a second request hits a responding session (feeds §6.5/§7.2). iOS 26 evidence: it surfaced *as* `GenerationError.rateLimited` — single-source, verify; this is why §7.2 gates on `isResponding` and treats a leak as a driver defect rather than letting it normalize as `retryable`.
 7. **Context-management & KV-cache APIs:** confirm the new iOS 27 context APIs stop at the session boundary — this is the sherlock check for §2.
 8. **`ModelDescriptor` derivation, narrowed (rev 4):** the resolved identity now comes from response metadata (§7.8); the residual question is whether the *requested* descriptor is derivable from `any LanguageModel`'s configuration surface or must be app-supplied at driver init.
@@ -664,3 +707,16 @@ Rev 5 is a **clarifying** revision, opened by the M1 completion audit and closed
 - **Row ordering recorded as a non-rule (§6.6).** Reduction requires ascending sequence and neither verifies nor repairs violations; only deltas and tool records are non-idempotent under replay, everything else quarantines or is last-write-wins. Named because the non-rules paragraph exists so the inventory's completeness claim stays true, and this was the remaining unaddressed condition — reachable today only by fuzz generators and by v0.3 import/log-shipping tooling.
 - **Smaller.** `Message` gains `generationID` (assistant only) — I7 already made the binding 1:1, and the folded layer *needs* it to route deltas after a snapshot resume, so the map is not reconstructible from a snapshot without it; projecting it publicly costs nothing and helps audit. `QuarantinedEvent.reason` becomes the closed `QuarantineReason` enum rather than a bare `String`, so §6.6's "single inventory" claim is compiler-checked and fixtures assert cases instead of prose ADR-001 declares non-contractual; the rendered string survives as `CustomStringConvertible`. §6.6 gains the input corollary: reduction consumes rows that may be undecodable, because rows 1–2 cannot originate inside a fold over already-decoded events.
 - rev 3 → rev 4 map: see Appendix B.
+
+## Appendix D — Changes from rev 5
+
+Rev 6 is opened by **M3**, and its character is different from every revision before it: rev 5 and earlier reasoned about Apple's API from documentation and WWDC coverage, because that was all there was. **Rev 6 is the first revision written against the installed SDK.** Xcode 27 with the macOS 27 SDK is on the build machine, `FoundationModels.swiftinterface` is 3,583 readable lines, and two of §14's nine open questions turned out to be answerable by opening a file. Where this revision changes something, it is almost always because the real interface disagreed with a reasonable inference — which is the argument for checking the others the same way (M6's list, §14).
+
+**Ratifies at the M3 boundary.** No invariant weakens, no event kind is added or removed, and the reducer's semantics are untouched. One change *is* wire-affecting and is called out as such.
+
+- **§8's taxonomy reconciled against the real `LanguageModelError` (OQ5 closed).** The claim that `GenerationError` is a "total normalization of Apple's built-in taxonomy" was false in three ways, all now fixed. (1) **`contextWindowExceeded` → `contextSizeExceeded`** — the old name matched no Apple case, which quietly broke the rule that built-ins "map 1:1 first" and that names are mirrored exactly. **This is a wire change**: the discriminator is renamed and the old tag is reserved forever in ADR-001's registry. It is free now — pre-1.0, no released logs exist and the frozen corpus (§10.2) is still empty — and would not be free later, which is precisely why it happens in the revision that noticed it. (2) **`refusal` added**: Apple distinguishes the model *declining* from a *guardrail intervening*, and so does this taxonomy; they classify identically today, and are kept apart anyway because the distinction is real and may yet earn different affordances. (3) **`unsupported(UnsupportedFeature)` added**, grouping the four `unsupported*` built-ins that previously fell through to `unrecognized` — the floor, whose whole job is to be loud about things the taxonomy failed to anticipate, and which was quietly absorbing four cases the taxonomy *had* been shown. Grouped rather than lifted because all four classify `terminal` and three of four are configuration errors; §8 records that reasoning so a later reader does not "fix" it. §8 also gains a coverage table, so "total" is now a checkable claim rather than an adjective.
+- **`modelUnavailable`'s provenance stated (§8).** It normalizes `SystemLanguageModel.Availability.UnavailableReason`, not a `LanguageModelError` case — an availability API queried *before* generating. The names match exactly, as rev 4 promised; what was missing was any indication of where they come from, so a reader auditing §8's totality against `LanguageModelError` alone would find the case unaccounted for and conclude the section was sloppy. PCC's smaller reason set is noted too (`systemNotReady` → `.modelNotReady`).
+- **§7.3: which side of the stream you are on (the sentence that would have cost an evening).** A *provider* writes deltas (`appendText` fragments into the executor's channel); a *consumer* reads cumulative snapshots (`ResponseStream.Snapshot.content`); the framework accumulates in between. Rev 5's "FM streams cumulative snapshots, not deltas" is correct from the driver's seat and reads as flatly wrong from a provider author's, and `ScriptedLanguageModel` is a provider — so the package contains both seats and needed the distinction written down. It also names a free end-to-end property for M6: scripted fragment → accumulation → snapshot → driver diff → `deltaAppended` must recover exactly what the script emitted.
+- **OQ3 closed (§14).** The `LanguageModel` / `LanguageModelExecutor` requirements are recorded verbatim. `ScriptedLanguageModel` conforms to the real protocols, gated `@available(macOS 27)`, rather than to an internal imitation — the imitation was only ever justified by the surface being unknown. The engine and script vocabulary stay platform-agnostic, so M3's "verifiable on any Mac" property survives intact.
+- **§10.1: `LedgerKitTestSupport` is a provisional name.** It undercuts the positioning it exists to serve — nobody installs *LedgerKitTestSupport* to get a Foundation Models test double — and it advertises a dependency the product deliberately does not have. Renaming is cheap pre-1.0 and expensive after; the decision is deferred no later than the `0.1.0` tag.
+- rev 4 → rev 5 map: see Appendix C.
