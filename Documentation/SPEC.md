@@ -454,6 +454,7 @@ public enum UnsupportedFeature: Sendable, Codable {
 
 **`modelUnavailable` does not come from `LanguageModelError` at all (rev 6).** It normalizes `SystemLanguageModel.Availability.UnavailableReason` — `deviceNotEligible`, `appleIntelligenceNotEnabled`, `modelNotReady` — which is an availability API the app queries *before* generating. The names match exactly, as rev 4 promised. `PrivateCloudComputeLanguageModel` has its own smaller reason set (`deviceNotEligible`, `systemNotReady`); `systemNotReady` normalizes to `.modelNotReady`. Recorded because §8 claims totality over Apple's taxonomy, and a reader checking that claim against `LanguageModelError` alone would find this case unaccounted for and conclude the claim was sloppy.
 
+```swift
 public enum Recoverability: Sendable {            // derived, never persisted — no Codable
     case retryable(after: Duration?)     // transient — offer Retry / auto-backoff
     case recoverableUpstream(RequiredAction)  // caller must change something first

@@ -568,25 +568,48 @@ public struct ScriptedLanguageModel: LanguageModel {
 }
 ```
 
-#### Tasks
+#### Tasks — ✅ done 2026-07-26 (21 tests; LedgerKit still 175)
 
-- [ ] Package topology per D3 (no LedgerKit dependency); fix the stale
-      `Package.swift` platforms comment.
-- [ ] `Script`, `Script.Step`, `Cue`, `ScriptExhaustion` — 26+, no FM import.
-- [ ] Engine: plays a script into a sink; cooperative cancellation checked at
-      every step boundary; clock injectable (`any Clock<Duration>`, default
-      `ContinuousClock`) so `.wait` is real for previews and controllable in
-      tests. `.waitFor(cue)` is the deterministic tool.
-- [ ] `ScriptedLanguageModel` + `ScriptedExecutor` conformance, `@available`
-      27+, with the recorder carried by reference through `Configuration`.
-- [ ] Request spy: `requests` readable synchronously (lock-backed, not `async`)
-      so `#expect(model.requests.count == 1)` needs no `await`.
-- [ ] Tests in `LedgerKitTestSupportTests`: playback determinism (two runs,
-      identical emissions), cancellation at every step boundary via `Cue`,
-      exhaustion policy, multi-turn, clock control. Conformance tests gated
-      with `.enabled(if:)` — they compile now, run on macOS 27.
-- [ ] Doc comments carrying the "gateway drug" framing: zero network, zero
-      Apple Intelligence eligibility, CI-safe on any Mac.
+- [x] Package topology per D3; the stale `Package.swift` comment replaced with
+      the reasoning (cycle, direction of need at M5/M6, product honesty).
+- [x] `Script`, `Script.Step`, `ScriptExhaustion`, `ScriptExhausted` — 26+.
+- [x] `Cue` — an actor; **both** sides await, and `park()` throws
+      `CancellationError`, without which cancelling a parked model would
+      deadlock the very suites the type exists for.
+- [x] `ScriptPlayer` + `ScriptSink` (internal) — 26+, clock injected.
+- [x] **`ScriptCursor` extracted (unplanned, and the best structural call of
+      the phase).** Exhaustion is pure bookkeeping over values that have nothing
+      to do with Foundation Models; leaving it inside the 27-only layer would
+      have made every policy compile-only on this machine. Moved down, it is
+      *executed* today.
+- [x] `ScriptedLanguageModel` + `ScriptedLanguageModelExecutor`, `@available`
+      27+, playbook carried by reference through `Configuration`.
+- [x] Request spy: `requests` / `responseCount`, `Mutex`-backed and synchronous.
+- [x] 21 tests. Conformance tests report **skipped**, not passed, on macOS 26.
+- [x] Doc comments carrying the positioning and the provider-vs-consumer
+      stream distinction (SPEC §7.3).
+
+**Two initializers, deliberately.** `init(script:)` and
+`init(scripts:whenExhausted:)`. The proposed `replying:` and `failingWith:`
+sugar was dropped: `script: "text"` and `script: [.fail(error)]` already say
+those things, and a second spelling for one idea is a permanent tax on everyone
+reading call sites. Conveniences are easy to add later and impossible to remove.
+
+**Mutation-tested, and it found a real hole.** Breaking `Cue.park()` was caught
+by three tests. Deleting the player's between-step `try Task.checkCancellation()`
+was caught by **none** — every step that suspends already throws on cancellation
+by itself, so the whole suite proved only that `Cue` works, while a script of
+pure `.emit` steps would have ignored cancellation entirely. Closed with
+`cancellationIsCheckedBetweenSteps`, which parks inside the *sink* and releases
+it normally, putting the player back at a step boundary with the task already
+cancelled — the only place that check is observable. Re-running the mutation now
+fails exactly that test.
+
+**Skipped ≠ passed.** Swift Testing rejects `@available` newer than the
+deployment target on `@Test`/`@Suite`, and the obvious workaround —
+`guard #available … else { return }` — turns five conformance tests into silent
+green ticks. Used `.enabled(if:)` instead, so they report as *skipped* and the
+run output tells the truth about what was verified.
 
 **Deliberately not done:** result builder (array literal reads nearly as well
 and a builder is a non-breaking addition later); `.reasoning` / `.toolCalls`
@@ -735,3 +758,4 @@ their assertions exist already and mostly move rather than get written.
 | 2026-07-26 | **Phase 2 done** | **166** | Crash-fuzz complete: 520 gap mutations + 3,289 compound iterations, 0.17 s; D9 recorded; mutation-tested |
 | 2026-07-26 | **Phase 3 done** | **175** | On-disk corpus: 8 dev + 1 hand-authored wire fixture, 3 directories, freeze procedure written; D10 recorded; mutation-tested |
 | 2026-07-26 | **SPEC rev 6 drafted + implemented** | **175** | §8 taxonomy reconciled (`contextSizeExceeded`, `refusal`, `unsupported`), §7.3 stream-sides, §10.1 provisional name; ADR-001 gains a reserved-tag table; OQ3 + OQ5 closed. **Ratifies at the M3 boundary.** |
+| 2026-07-26 | **Phase 4 done** | **175 + 21** | `ScriptedLanguageModel` conforms to the real FM protocols; engine 26+, conformance 27+; mutation testing found and closed a cancellation hole |
