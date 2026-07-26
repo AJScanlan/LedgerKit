@@ -1,14 +1,16 @@
 # M4 Implementation Plan — SQLite store, snapshots, index
 
-**Status:** In progress · opened 2026-07-26 at the M3 boundary · **Phases 0–4
-done** (266 tests green); **Phase 5 next** — the wrap-up: SPEC rev 7 drafted from
-§6 and ratified, ADRs recorded closed, ROADMAP + CLAUDE.md updated.
+**Status:** ✅ **COMPLETE** — opened 2026-07-26 at the M3 boundary, closed the same
+day. **All six phases done, 266 tests green** (245 `LedgerKit` + 21 `Understudy`),
+both packages warning-free. Every roadmap exit criterion met; SPEC **rev 7
+ratified**; ADR-003 Accepted and ADR-001 fully closed. **Next milestone: M5** — the
+`ConversationStore` actor and turn verbs; §7 below is the handoff list.
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M4 section) · [SPEC.md](./SPEC.md) §9, §6.6, §6.3, §10.6 · [ADR-003](./ADR/ADR-003-persistence-dependency.md) (ratifies here) · [ADR-001](./ADR/ADR-001-event-encoding.md) (D-1/D-2/D-3 close here)
 **Baseline:** M0–M3 done and audited, SPEC **rev 6 ratified**, **196 tests green**
 (175 `LedgerKit` + 21 in the test-double package — `LedgerKitTestSupport` at
 baseline, **`Understudy`** since Phase 0), both packages warning-free.
-**Spec work:** **rev 7 drafts early in this milestone and ratifies at the M4
-boundary.** Its full inventory is §6 of this plan. The one wire-affecting item
+**Spec work:** ✅ **rev 7 drafted and ratified at the M4 boundary** (2026-07-26,
+Appendix E; amendments now open rev 8). Its inventory was §6 of this plan. The one wire-affecting item
 (D17) was approved and **implemented at Phase 4**; §6 item 11 is now a *record* of
 what shipped rather than a proposal, and every other §6 item is still undrafted.
 
@@ -213,7 +215,7 @@ one version there is nothing to route. It is the hook an upcaster hangs from, an
 the first version bump is what gives it both a switch and a test. The corpus
 `version` field lands with Phase 2's row-form work.
 
-### D17 — `contextSizeExceeded` gains an optional payload *(pending rev 7 approval; Phase 4)*
+### D17 — `contextSizeExceeded` gains an optional payload *(**approved and landed** at Phase 4; recorded in SPEC rev 7 §8)*
 The recommendation from the audit, restated so the wire reasoning survives:
 Apple's error carries `contextSize` and `tokenCount`; the `.reduceContext`
 affordance wants "how far over" (N3 makes overflow a headline failure on-device);
@@ -835,17 +837,30 @@ are warning-free again.
 
 ### Phase 5 — Wrap-up
 
-- [ ] **SPEC rev 7 ratified** at the M4 boundary (new appendix, "Changes from
+- [x] **SPEC rev 7 ratified** at the M4 boundary (new appendix, "Changes from
       rev 6" header; every §6 item below dispositioned — landed, deferred, or
-      rejected with reasoning).
-- [ ] ADR-003 → Accepted; ADR-001 D-1/D-2/D-3 recorded closed with outcomes.
-- [ ] ROADMAP: M4 struck through with audit note; **OQ tracker updated** —
+      rejected with reasoning). **Done 2026-07-26**: Appendix E; all 14 §6 items
+      plus 7 M4-implementation items. **Drafted to a scratch file and reviewed
+      item by item before `SPEC.md` was touched**, then the draft was retired
+      rather than left to drift — worth repeating at rev 8.
+- [x] ADR-003 → Accepted; ADR-001 D-1/D-2/D-3 recorded closed with outcomes.
+      (Phases 1 and 4; ADR-001 now has **no** open questions.)
+- [x] ROADMAP: M4 struck through with audit note; **OQ tracker updated** —
       OQ1/2/4/6/7/8/9 marked closed-by-reading with their M6 empirical residues
-      (§2's table is the source).
-- [ ] CLAUDE.md: status paragraph rewritten (M4 done, Understudy landed,
+      (§2's table is the source). The tracker now leads with the four
+      *behavioural* residues in a table, since "all nine closed" is otherwise
+      easy to misread as "nothing left to verify per beta." M6's and M7's
+      sections were updated in the same pass — M6's OQ annotations became
+      closures-plus-residues, and M7 now knows P2's harness is waiting for it.
+- [x] CLAUDE.md: status paragraph rewritten (M4 done, Understudy landed,
       commands updated, M5 next); new landmarks recorded (WireJSON, loader,
-      snapshot versions, registry manifest).
-- [ ] Both packages green, warning-free; traceability below filled.
+      snapshot versions, registry manifest). **Three stale claims fixed while
+      there**, each of which would have misled a future session: it named the
+      spec as rev 5, said amendments open rev 6, and claimed
+      `Store/Persistence.swift` had "no GRDB wiring" — contradicted by its own
+      architecture section twenty lines above.
+- [x] Both packages green, warning-free; traceability below filled — all ten
+      rows now name their evidence rather than a phase number.
 
 ---
 
@@ -959,7 +974,7 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | D15 | One production `WireJSON` encoder; corpus files stay pretty; bytes pinned against `WireJSON` | **Accepted** · applies Phase 1 |
 | D16 | Schema-version placement (column-only vs column+blob) | **Resolved: column-only** 2026-07-26 (Alexander) · ADR-001 D-2 closed |
 | D19 | `events.payload` is TEXT (readable via `sqlite3`/`json1`); snapshots stay BLOB | **Accepted** 2026-07-26 · landed Phase 1 |
-| D17 | `contextSizeExceeded` optional payload | **Landed** 2026-07-26 (approved by Alexander at the Phase 4 instruction) · additive on the wire, source-breaking in Swift (cases take no default arguments) · SPEC rev 7 item 11 still to draft in Phase 5 |
+| D17 | `contextSizeExceeded` optional payload | **Landed** 2026-07-26 (approved by Alexander at the Phase 4 instruction) · additive on the wire, source-breaking in Swift (cases take no default arguments) · recorded in SPEC rev 7 §8 (Phase 5) |
 | D18 | P1 splits exhaustive, D6 generator discipline carries forward | **Accepted** · applied Phase 4 |
 | D20 | ADR-001 D-3 closes as a **manifest test coupled to the exhaustive inventories** — the manifest cannot see a deleted case, so `Wire.allKinds`/`allErrors` went `internal` and removal is a compile error | **Accepted** 2026-07-26 · landed Phase 4 |
 
@@ -972,6 +987,7 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | 2026-07-26 | **Phase 0 done (D13)** | **200** (179 + 21) | Breaking-surface pass: four inits internal, `MessageContent`, `.failed` labels, `GenerationError` description (+4 tests, mutation-tested), both config types → structs with factories. Zero warnings. Playground label-fixed; its rewrite carried as a follow-up |
 | 2026-07-26 | **Phase 1 done (GRDB wiring)** | **223** (202 + 21) | GRDB 7.11.1, three `STRICT` tables, six verbs, `WireJSON`, `LedgerSchema`'s two versions, two-stage loader (pulled forward from Phase 2). D16 → column-only, D19 recorded. **ADR-003 Accepted; ADR-001 D-1/D-2 closed.** 4 mutations injected, all caught, all reverted |
 | 2026-07-26 | **Phase 2 done (corpus integration)** | **226** (205 + 21) | `raw` rows implemented through the production loader; `rich`/`hostile` on disk (M3 handoffs 1–2 closed); `wire/undecodableRows` authored; store↔corpus equivalence sweep. Corpus now *depends on* the loader. 4 mutations caught. **Rev 7 gains item 14** (§6.6 has no case for "known kind, malformed body") |
-| 2026-07-26 | **Phase 5: SPEC rev 7 ratified** | **266** (245 + 21) | Appendix E; OQ1/2/4/6/7/8/9 closed by reading; §6.6 row 2 widened (+ its rendering reworded — non-contractual, zero fixture churn); N8a added. **One M4-PLAN §2 row found wrong while drafting** (`Transcript.Entry` vs `Transcript.Segment`) — corrected above with the confirmed citation list. Remaining: ROADMAP strike-through + OQ tracker, §8 traceability |
+| 2026-07-26 | **Phase 5: SPEC rev 7 ratified** | **266** (245 + 21) | Appendix E; OQ1/2/4/6/7/8/9 closed by reading; §6.6 row 2 widened (+ its rendering reworded — non-contractual, zero fixture churn); N8a added. **One M4-PLAN §2 row found wrong while drafting** (`Transcript.Entry` vs `Transcript.Segment`) — corrected above with the confirmed citation list. Also swept the spec for markers the revision had just made self-contradictory and found two (§6.2's usage ⚠️, §6.5's iOS 26 `rateLimited` guess) |
+| 2026-07-26 | **Phase 5 done — M4 complete** | **266** (245 + 21) | ROADMAP: M4 struck through, boundary-audit note, M5 handoffs, OQ tracker rewritten around the four *behavioural* residues; M6/M7 sections updated; CLAUDE.md corrected (three stale claims); §8 traceability filled. **All exit criteria met** |
 | 2026-07-26 | **Phase 4 done (P1, P2 scaffolding, D-3, D17)** | **266** (245 + 21) | P1 through the real store at every flush boundary (fold *and* classify levels); P2's predicate + `LiveOverlay` parameterization, swept at every truncation with the empty live set, with seven tests of the predicate itself; `Registry/tags.json` + `RegistryTests` closing **ADR-001 D-3** (and retiring `CorpusFileTests`' duplicate registry); **D17** widened `contextSizeExceeded` with `dev/` provably byte-identical. 6 mutations caught. Four stale `try` warnings cleaned up |
 | 2026-07-26 | **Phase 3 done (snapshots + cold open)** | **239** (218 + 21) | `Snapshot` coding + the four-condition discard policy + `foldedState(of:)` as a composition above the seam. P3 through the **codec** (all fixtures — the sweep that reaches diagnostics) and through the **store** (replayable, real SQLite). **Cold open: 10,004 events → 3 rows replayed, ~28 ms**, measured on the resume path via a counting wrapper. 4 mutations caught. Suite 0.18 s → 0.58 s, all of it appending |
