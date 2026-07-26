@@ -214,7 +214,7 @@ struct FolderTreeTests {
         #expect(state.rootChildren == [Fix.userA])
         #expect(state.activePath == [Fix.userA], "nil parent == nil endpoint, so auto-extend fires")
         #expect(state.messages[Fix.userA]?.role == .user)
-        #expect(state.messages[Fix.userA]?.state == .complete(Content(text: "Explain valley folds")))
+        #expect(state.messages[Fix.userA]?.state == .complete(MessageContent(text: "Explain valley folds")))
         #expect(state.reasons.isEmpty)
     }
 
@@ -244,7 +244,7 @@ struct FolderTreeTests {
         let state = log.folded()
         #expect(state.reasons == [.messageIDAlreadyUsed(Fix.userA)])
         #expect(
-            state.messages[Fix.userA]?.state == .complete(Content(text: "Explain valley folds")),
+            state.messages[Fix.userA]?.state == .complete(MessageContent(text: "Explain valley folds")),
             "the original content must survive"
         )
     }
@@ -267,7 +267,7 @@ struct FolderTreeTests {
         let state = log.folded()
         #expect(state.messages[Fix.edited]?.parent == Fix.userA)
         #expect(state.messages[Fix.userA]?.children == [Fix.userB, Fix.edited])
-        #expect(state.messages[Fix.edited]?.state == .complete(Content(text: "second, revised")))
+        #expect(state.messages[Fix.edited]?.state == .complete(MessageContent(text: "second, revised")))
         #expect(state.reasons.isEmpty)
     }
 
@@ -522,7 +522,7 @@ struct FolderGenerationLifecycleTests {
         var log = streaming()
         let sequence = log.append(.generationEnded(Fix.genA, .completed(Fix.stopInfo)))
         let state = log.folded()
-        #expect(state.messages[Fix.assistantA]?.state == .complete(Content(text: "A valley fold")))
+        #expect(state.messages[Fix.assistantA]?.state == .complete(MessageContent(text: "A valley fold")))
         #expect(state.messages[Fix.assistantA]?.stopInfo == Fix.stopInfo)
         #expect(state.messages[Fix.assistantA]?.terminalTimestamp == log.timestamp(at: sequence))
     }
@@ -575,7 +575,7 @@ struct FolderGenerationLifecycleTests {
         log.append(.deltaAppended(Fix.genA, text: " — and more"))
         let state = log.folded()
         #expect(state.reasons == [.generationAlreadyTerminated(Fix.genA)])
-        #expect(state.messages[Fix.assistantA]?.state == .complete(Content(text: "A valley fold")))
+        #expect(state.messages[Fix.assistantA]?.state == .complete(MessageContent(text: "A valley fold")))
     }
 
     @Test("a tool record after the terminal quarantines — the audit trail is immutable too (I4)")
@@ -595,7 +595,7 @@ struct FolderGenerationLifecycleTests {
         log.append(.generationEnded(Fix.genA, .cancelled))
         let state = log.folded()
         #expect(state.reasons == [.duplicateTerminal(Fix.genA)])
-        #expect(state.messages[Fix.assistantA]?.state == .complete(Content(text: "A valley fold")))
+        #expect(state.messages[Fix.assistantA]?.state == .complete(MessageContent(text: "A valley fold")))
     }
 
     @Test("a delta naming a generation that never started quarantines (row 9)")

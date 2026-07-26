@@ -41,7 +41,7 @@ struct MessageTreeTests {
             role: role,
             parent: parent,
             children: children,
-            state: .complete(Content(text: "")),
+            state: .complete(MessageContent(text: "")),
             timestamp: Date(timeIntervalSince1970: 0)
         )
     }

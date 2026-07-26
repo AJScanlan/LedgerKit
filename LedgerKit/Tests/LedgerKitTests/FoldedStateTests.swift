@@ -23,7 +23,7 @@ private enum Fold {
     static let timestamp = Date(timeIntervalSince1970: 1_784_979_047.371)
 
     static let allStates: [FoldedMessageState] = [
-        .complete(Content(text: "A valley fold brings the paper toward you.")),
+        .complete(MessageContent(text: "A valley fold brings the paper toward you.")),
         .open(partial: "A valley fol"),
         .failed(partial: "A valley", .rateLimited(retryAfter: .seconds(30))),
         .failed(partial: "", .modelUnavailable(.appleIntelligenceNotEnabled)),
@@ -65,7 +65,7 @@ private enum Fold {
                     id: user,
                     role: .user,
                     children: [assistant],
-                    state: .complete(Content(text: "Explain valley folds")),
+                    state: .complete(MessageContent(text: "Explain valley folds")),
                     timestamp: timestamp
                 ),
                 assistant: FoldedMessage(
@@ -148,13 +148,13 @@ struct FoldedStateTests {
 
     @Test("state accessors: text spans all cases, isOpen is the I4 gate")
     func stateAccessors() {
-        #expect(FoldedMessageState.complete(Content(text: "done")).text == "done")
+        #expect(FoldedMessageState.complete(MessageContent(text: "done")).text == "done")
         #expect(FoldedMessageState.open(partial: "part").text == "part")
         #expect(FoldedMessageState.cancelled(partial: "part").text == "part")
         #expect(FoldedMessageState.failed(partial: "part", .guardrailViolation).text == "part")
 
         #expect(FoldedMessageState.open(partial: "").isOpen)
-        #expect(!FoldedMessageState.complete(Content(text: "")).isOpen)
+        #expect(!FoldedMessageState.complete(MessageContent(text: "")).isOpen)
         #expect(!FoldedMessageState.cancelled(partial: "").isOpen)
     }
 

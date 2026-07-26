@@ -370,3 +370,59 @@ struct NoPersistencePathTests {
         #expect(!(value is any Decodable))
     }
 }
+
+/// `GenerationError`'s log-facing rendering (M4 Phase 0).
+///
+/// Lives beside the wire fixtures because `Wire.allErrors` is the module's only
+/// exhaustive inventory of the taxonomy, and duplicating it is how a future case
+/// silently escapes coverage.
+///
+/// **These tests deliberately assert structure and payload propagation, never
+/// prose.** ADR-001 declares the strings non-contractual and free to reword, so a
+/// test matching on wording would freeze exactly what the ADR promises is loose —
+/// the same argument that made `QuarantineReason` a typed enum with fixtures
+/// asserting cases.
+@Suite("Error diagnostics")
+struct ErrorDiagnosticsTests {
+
+    @Test("every case renders something", arguments: Wire.allErrors)
+    func describesEveryCase(_ error: GenerationError) {
+        // The compiler already forces a new case to be *handled*; what it cannot
+        // catch is a case handled with a placeholder or an empty string.
+        #expect(!error.description.isEmpty)
+    }
+
+    @Test("assembled renderings carry no dangling separators", arguments: Wire.allErrors)
+    func noDanglingSeparators(_ error: GenerationError) {
+        // `providerFailure` is the one case whose rendering is *assembled* from
+        // optional parts, so it is the one that can produce "provider failure: "
+        // with nothing after it. Asserted over the whole inventory rather than
+        // that case alone, so a future assembled case inherits the check.
+        let description = error.description
+        #expect(!description.hasSuffix(":"))
+        #expect(!description.contains("::"))
+        #expect(description.trimmingCharacters(in: .whitespaces) == description)
+    }
+
+    @Test("the loud floor passes its payload through")
+    func unrecognizedCarriesItsDescription() {
+        // Triage greps for this. `unrecognized` exists to be loud, and a
+        // rendering that swallowed the detail would defeat the case's entire
+        // purpose — including the `"driver:"` convention (§8), which is only
+        // useful if it survives to the log line.
+        #expect(GenerationError.unrecognized(description: "driver: session busy")
+            .description.contains("driver: session busy"))
+    }
+
+    @Test("a provider failure surfaces the identifier classification used")
+    func providerFailureCarriesStatusAndCode() {
+        // `code` is the provider's stable machine-readable identifier and the
+        // only classification input besides `status` (§8) — so both belong in the
+        // line a developer reads when a mapping override is missing.
+        let description = GenerationError
+            .providerFailure(status: 503, code: "overloaded_error", message: "Overloaded")
+            .description
+        #expect(description.contains("503"))
+        #expect(description.contains("overloaded_error"))
+    }
+}

@@ -130,16 +130,40 @@ public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLi
 }
 
 /// What a model does once its scripts run out.
-public enum ScriptExhaustion: Sendable {
+///
+/// A struct with static factories rather than an `enum`, for the same reason
+/// ``Script/Step`` is one: a policy is *written* by the test that passes it and
+/// never *read* by anyone outside this package, so an enum's exhaustiveness
+/// buys nothing here — while costing source stability if a fourth policy ever
+/// earns its place.
+public struct ScriptExhaustion: Sendable, Equatable {
+
+    /// Internal, so the player gets an exhaustive `switch` — which is precisely
+    /// where exhaustiveness is worth having, and precisely where it costs no
+    /// consumer anything.
+    enum Policy: Sendable, Equatable {
+        case fail
+        case repeatLast
+        case loop
+    }
+
+    let policy: Policy
+
+    private init(_ policy: Policy) {
+        self.policy = policy
+    }
+
     /// Throw ``ScriptExhausted``. The default: a test that asks for more
     /// responses than it scripted has a bug in the test or in the code, and
     /// either way silence is the wrong answer.
-    case fail
+    public static let fail = Self(.fail)
+
     /// Replay the last script forever. For previews and demos, where "keep
     /// saying something" beats correctness.
-    case repeatLast
+    public static let repeatLast = Self(.repeatLast)
+
     /// Start again from the first script.
-    case loop
+    public static let loop = Self(.loop)
 }
 
 /// Thrown when a model is asked to respond and has no script left

@@ -6,6 +6,15 @@ import UIKit
 // Note: passing a v4 UUID where v7 is desired is deliberately unpreventable —
 // decode must accept whatever UUIDs are in historical logs, so v7-ness is a
 // property of the generator (IDGenerator), not the type.
+//
+// ⚠️ This file hand-assembles a tree, which only compiles because of the
+// `@testable` import above: as of M4 Phase 0 the derived-state initializers are
+// internal, because they can express states no log can produce (M4-PLAN D13).
+// A real consumer builds a short log and calls
+// `Conversation(reducing:loadedFrom:)` instead — which is the better example,
+// since it exercises the actual semantics. Rewriting this file that way is a
+// deliberate follow-up rather than part of Phase 0: playgrounds are not built by
+// `swift build`, so the change could not be compile-verified here.
 
 let initialUserMessageID = MessageID(UUID())
 let botResponseMessageID = MessageID(UUID())
@@ -38,7 +47,11 @@ let nodes: [MessageID: Message] = [
         id: erroredResponseMessageID,
         role: .assistant,
         parent: initialUserMessageID,
-        state: .failed(partial: "", .rateLimited(retryAfter: nil), .retryable(after: nil)),
+        state: .failed(
+            partial: "",
+            error: .rateLimited(retryAfter: nil),
+            recoverability: .retryable(after: nil)
+        ),
         timestamp: .now.advanced(by: 10)
     ),
     followUpUserMessageID: .init(

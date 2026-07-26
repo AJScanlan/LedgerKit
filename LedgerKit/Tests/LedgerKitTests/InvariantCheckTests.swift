@@ -26,7 +26,7 @@ struct InvariantCheckTests {
         generationID: GenerationID? = nil,
         parent: MessageID? = nil,
         children: [MessageID] = [],
-        state: FoldedMessageState = .complete(Content(text: "x")),
+        state: FoldedMessageState = .complete(MessageContent(text: "x")),
         stopInfo: StopInfo? = nil,
         terminalTimestamp: Date? = nil
     ) -> FoldedMessage {

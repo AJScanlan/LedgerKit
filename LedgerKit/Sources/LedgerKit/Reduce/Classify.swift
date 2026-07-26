@@ -123,7 +123,11 @@ extension MessageState {
             // `overlay_live` on the projection side (§7.4).
             self = .interrupted(partial: partial)
         case .failed(let partial, let error):
-            self = .failed(partial: partial, error, mapping.recoverability(for: error))
+            self = .failed(
+                partial: partial,
+                error: error,
+                recoverability: mapping.recoverability(for: error)
+            )
         case .cancelled(let partial):
             self = .cancelled(partial: partial)
         }

@@ -254,7 +254,7 @@ struct Folder {
                 id: id,
                 role: .user,
                 parent: parent,
-                state: .complete(Content(text: content)),
+                state: .complete(MessageContent(text: content)),
                 timestamp: timestamp
             )
         )
@@ -281,7 +281,7 @@ struct Folder {
                 id: replacement,
                 role: .user,
                 parent: target.parent,
-                state: .complete(Content(text: content)),
+                state: .complete(MessageContent(text: content)),
                 timestamp: timestamp
             )
         )
@@ -306,7 +306,7 @@ struct Folder {
         let partial = partials.removeValue(forKey: generation) ?? ""
         switch outcome {
         case .completed(let stopInfo):
-            state.messages[messageID]?.state = .complete(Content(text: partial))
+            state.messages[messageID]?.state = .complete(MessageContent(text: partial))
             state.messages[messageID]?.stopInfo = stopInfo
         case .failed(let error):
             state.messages[messageID]?.state = .failed(partial: partial, error)

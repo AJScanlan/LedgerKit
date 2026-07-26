@@ -94,6 +94,57 @@ public enum TransportFailure: String, Sendable, Codable {
     case tls
 }
 
+// MARK: - Diagnostics
+
+extension GenerationError: CustomStringConvertible {
+
+    /// Log-facing prose, following ``QuarantineReason``'s precedent:
+    /// **non-contractual by ADR-001** — reword freely, and never match on it.
+    /// Switch on the cases; that is what they are for.
+    ///
+    /// This exists so the alternative doesn't happen. Without it, an app
+    /// rendering a failed bubble's detail disclosure reaches for
+    /// `String(describing:)`, which is compiler-generated reflection output —
+    /// and Hyrum's Law then freezes *that* into shipped UI, where a future case
+    /// rename becomes a visible regression in somebody else's product. A stated
+    /// non-contractual rendering is the cheaper thing to own.
+    ///
+    /// Note what is deliberately *not* here: any classification hint. UI
+    /// affordance is a function of ``Recoverability``, never of error text or
+    /// error inspection (SPEC §8).
+    public var description: String {
+        switch self {
+        case .modelUnavailable(let reason):
+            "model unavailable: \(reason.rawValue)"
+        case .contextSizeExceeded:
+            "context size exceeded"
+        case .guardrailViolation:
+            "guardrail violation"
+        case .refusal:
+            "the model declined to answer"
+        case .unsupported(let feature):
+            "unsupported by this model: \(feature.rawValue)"
+        case .rateLimited(let retryAfter):
+            retryAfter.map { "rate limited, retry after \($0)" } ?? "rate limited"
+        case .providerFailure(let status, let code, let message):
+            // Assembled from the parts that are present, in decreasing
+            // reliability: status classifies, code identifies, message explains
+            // and is the only free-text member.
+            (["provider failure"]
+                + [status.map { "status \($0)" }, code.map { "code \($0)" }, message]
+                .compactMap(\.self))
+                .joined(separator: ": ")
+        case .transport(let failure):
+            "transport failure: \(failure.rawValue)"
+        case .unrecognized(let description):
+            // Already prose, and already loud — pass it through rather than
+            // wrapping it in a second layer of ours. Driver-originated values
+            // carry the `"driver:"` prefix that makes them self-identifying.
+            "unrecognized: \(description)"
+        }
+    }
+}
+
 // MARK: - Wire coding
 
 extension GenerationError: Codable {

@@ -159,7 +159,7 @@ struct FoldedMessage: Sendable, Equatable, Codable {
 /// No `Recoverability` either: it is derived at classification time and stored
 /// nowhere, so mapping fixes retroactively upgrade historical failures (§8).
 enum FoldedMessageState: Sendable, Equatable, Codable {
-    case complete(Content)
+    case complete(MessageContent)
     /// Started, not terminated. **Not** a claim about why.
     case open(partial: String)
     case failed(partial: String, GenerationError)

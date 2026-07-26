@@ -56,7 +56,7 @@ struct CorpusTests {
         #expect(state.messages[Fix.assistantA]?.children == [Fix.userB, Fix.edited])
         #expect(state.messages[Fix.edited]?.children == [Fix.assistantB])
         #expect(state.activePath == [Fix.userA, Fix.assistantA, Fix.edited, Fix.assistantB])
-        #expect(state.messages[Fix.assistantA]?.state == .complete(Content(text: "one two")))
+        #expect(state.messages[Fix.assistantA]?.state == .complete(MessageContent(text: "one two")))
         #expect(state.messages[Fix.assistantB]?.state == .open(partial: "partial"))
         #expect(state.title == "Origami, revised")
     }
@@ -73,7 +73,7 @@ struct CorpusTests {
         #expect(conversation.messages[Fix.assistantA]?.state == .interrupted(partial: "A valley fol"))
         #expect(
             conversation.messages[Fix.assistantB]?.state
-                == .complete(Content(text: "A valley fold brings the paper down."))
+                == .complete(MessageContent(text: "A valley fold brings the paper down."))
         )
         #expect(conversation.activePath == [Fix.userA, Fix.assistantB], "the visible thread is the regeneration")
         #expect(

@@ -51,8 +51,8 @@ struct ClassifyTests {
             log.reduced().messages[Fix.assistantA]?.state
                 == .failed(
                     partial: "",
-                    .providerFailure(status: 401, code: nil, message: "nope"),
-                    .recoverableUpstream(.reauthenticate)
+                    error: .providerFailure(status: 401, code: nil, message: "nope"),
+                    recoverability: .recoverableUpstream(.reauthenticate)
                 ),
             "the zero-token reauth bubble — §7.2's whole reason for the outcome boundary"
         )
@@ -62,7 +62,7 @@ struct ClassifyTests {
     func terminalStatesProjectDirectly() {
         #expect(
             Log.withCompletedTurn().reduced().messages[Fix.assistantA]?.state
-                == .complete(Content(text: "A valley fold"))
+                == .complete(MessageContent(text: "A valley fold"))
         )
 
         var cancelled = Log.withUserMessage()
@@ -193,14 +193,18 @@ struct ClassifyDeterminismTests {
 
         #expect(
             log.reduced().messages[Fix.assistantA]?.state
-                == .failed(partial: "", .guardrailViolation, .terminal)
+                == .failed(partial: "", error: .guardrailViolation, recoverability: .terminal)
         )
 
         var corrected = RecoverabilityMapping.default
         corrected.guardrailViolation = .recoverableUpstream(.reduceContext)
         #expect(
             log.reduced(mapping: corrected).messages[Fix.assistantA]?.state
-                == .failed(partial: "", .guardrailViolation, .recoverableUpstream(.reduceContext))
+                == .failed(
+                    partial: "",
+                    error: .guardrailViolation,
+                    recoverability: .recoverableUpstream(.reduceContext)
+                )
         )
     }
 

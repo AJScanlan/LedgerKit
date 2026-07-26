@@ -23,13 +23,45 @@ import Foundation
 ///   by the `ConversationStore` actor (M5) and test doubles.
 
 /// How a `ConversationStore` persists its ledger (SPEC §11).
-public enum PersistenceConfiguration: Sendable {
+///
+/// ```swift
+/// let store = try ConversationStore(persistence: .sqlite(url: dbURL))
+/// ```
+///
+/// A struct with static factories rather than an `enum`, applying the rule M3
+/// settled for `Script.Step`: **enums for values consumers destructure,
+/// structs-with-factories for instructions consumers construct.** Nobody
+/// switches over a persistence configuration — it is handed to a store and read
+/// only below the seam — while the set of things it configures is certain to
+/// grow: §9 alone names file protection and two snapshot cadences. As an enum,
+/// each of those reshapes the type; as a struct, each is additive. Call sites are
+/// identical either way, which is what makes this free to get right now and
+/// awkward to change later.
+public struct PersistenceConfiguration: Sendable {
+
+    /// The backend selection. Internal, so the public shape above stays additive
+    /// while M4's wiring still gets the exhaustive `switch` it wants — the
+    /// asymmetry the rule above describes: enum within, struct without.
+    enum Backend: Sendable, Equatable {
+        case sqlite(url: URL)
+        case inMemory
+    }
+
+    let backend: Backend
+
+    private init(_ backend: Backend) {
+        self.backend = backend
+    }
+
     /// A single SQLite database file — the production shape (§9).
-    case sqlite(url: URL)
+    public static func sqlite(url: URL) -> Self {
+        Self(.sqlite(url: url))
+    }
+
     /// Ephemeral, for tests and previews — the persistence counterpart of
-    /// `ScriptedLanguageModel` (tenet 5). Maps to an in-memory
-    /// `DatabaseQueue` at M4.
-    case inMemory
+    /// `ScriptedLanguageModel` (tenet 5). Maps to an in-memory `DatabaseQueue`
+    /// at M4.
+    public static let inMemory = Self(.inMemory)
 }
 
 /// One row of the `conversations` index projection (SPEC §9, G9): the
@@ -43,7 +75,12 @@ public struct ConversationSummary: Sendable, Identifiable, Equatable {
     public var title: String?
     public var lastEventAt: Date
 
-    public init(id: ConversationID, createdAt: Date, title: String? = nil, lastEventAt: Date) {
+    /// Store-side assembly. **Internal on purpose (M4 Phase 0):** this is a read
+    /// model, so the store is the only thing entitled to mint one — a
+    /// consumer-built summary would assert index facts (`lastEventAt`,
+    /// `createdAt`) that no log backs. Consumers read the list; they never
+    /// compose it.
+    init(id: ConversationID, createdAt: Date, title: String? = nil, lastEventAt: Date) {
         self.id = id
         self.createdAt = createdAt
         self.title = title

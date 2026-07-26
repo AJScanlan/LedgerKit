@@ -26,7 +26,14 @@ public struct Conversation: Sendable, Identifiable, Equatable {
     }
 
 
-    public init(
+    /// Reducer-side assembly (`classify`). **Internal on purpose (M4 Phase 0):**
+    /// a `Conversation` *is* the fold of a log, and the public way to make one is
+    /// to say so — ``init(reducing:loadedFrom:mapping:)``. A memberwise
+    /// initializer additionally admits states no log can produce: an
+    /// `activePath` that is not a chain, an endpoint absent from `messages`,
+    /// diagnostics unrelated to the events that made the tree. Tenet 2's "the log
+    /// is the truth" is only structurally true if the log is the sole way in.
+    init(
         id: ConversationID,
         title: String? = nil,
         instructions: String? = nil,
@@ -60,7 +67,11 @@ public struct QuarantinedEvent: Sendable, Equatable, Codable {
     /// declares non-contractual. The rendered sentence is `description`.
     public var reason: QuarantineReason
 
-    public init(sequence: Int64, eventID: EventID? = nil, reason: QuarantineReason) {
+    /// Reducer-side assembly. **Internal on purpose (M4 Phase 0):** diagnostics
+    /// are the reducer's account of what it skipped, and a consumer-fabricated
+    /// one would be a claim about a reduction that never happened. Reading them
+    /// off ``Conversation/diagnostics`` is the whole intended traffic.
+    init(sequence: Int64, eventID: EventID? = nil, reason: QuarantineReason) {
         self.sequence = sequence
         self.eventID = eventID
         self.reason = reason

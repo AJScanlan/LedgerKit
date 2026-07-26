@@ -34,7 +34,7 @@ final class ScriptCursor: Sendable {
 
             if index < scripts.count { return scripts[index] }
 
-            switch exhaustion {
+            switch exhaustion.policy {
             case .fail:
                 throw ScriptExhausted(scripted: scripts.count, requested: index + 1)
             case .repeatLast:
