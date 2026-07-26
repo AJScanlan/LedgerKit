@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import LedgerKitTestSupport
+@testable import Understudy
 
 // The engine, tested where it runs: `Script`, `ScriptCursor`, `Cue` and
 // `ScriptPlayer` carry no Foundation Models types, so everything here executes

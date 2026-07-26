@@ -8,7 +8,7 @@
       location = "group:Projection/Projection.xcodeproj">
    </FileRef>
    <FileRef
-      location = "group:LedgerKitTestSupport">
+      location = "group:Understudy">
    </FileRef>
    <FileRef
       location = "group:LedgerKit">

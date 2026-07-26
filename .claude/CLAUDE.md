@@ -18,8 +18,8 @@ There is **no `Package.swift` at the repo root.** Two independent SPM packages l
 ```bash
 swift build --package-path LedgerKit
 swift test  --package-path LedgerKit
-swift build --package-path LedgerKitTestSupport
-swift test  --package-path LedgerKitTestSupport
+swift build --package-path Understudy
+swift test  --package-path Understudy
 ```
 
 - Tests use **Swift Testing** (`import Testing`, `@Test`, `#expect`) — not XCTest.
@@ -49,7 +49,7 @@ Three products, one workspace:
   - `Store/` — SQLite persistence + snapshots + index, the `ConversationStore` actor, and the turn verbs (§9, §6.5, §11).
   - `Session/` — the `GenerationDriver`, the one OS-coupled module (§7). **All iOS-27-beta risk (the ⚠️ / OQ1–9 items) is isolated here and nowhere else.**
   - `Projection/` — the `@MainActor @Observable` read side + `overlay_live` (§6.2, §7.4).
-- **`LedgerKitTestSupport/`** — ships `ScriptedLanguageModel`, a deterministic `LanguageModel` test double. A separate product on purpose ("the gateway drug" — useful to any Foundation Models app, and lets the whole library test with zero network and zero Apple Intelligence eligibility).
+- **`Understudy/`** — ships `ScriptedLanguageModel`, a deterministic `LanguageModel` test double. A separate product on purpose ("the gateway drug" — useful to any Foundation Models app, and lets the whole library test with zero network and zero Apple Intelligence eligibility). Named `LedgerKitTestSupport` through M3; renamed at M4 Phase 0 (M4-PLAN D14), so older notes and SPEC rev ≤6 still say the old name.
 - **`Projection/`** (top-level Xcode app) — the demo (kill-mid-stream recovery + one-line provider swap).
 
 ⚠️ **Naming collision to keep straight:** the top-level `Projection/` *app* is distinct from `LedgerKit/Sources/LedgerKit/Projection/` (the internal observable-projection layer). Older notes may call the demo app "Scroll" — it is `Projection`.
@@ -71,16 +71,16 @@ Reducer test harness (`Log` builder, `Fix` identifiers, `reasons` accessors) liv
 - **Never cut, even under time pressure:** invariants I1–I7 and property tests P1–P3, interruption recovery, and `ScriptedLanguageModel`.
 - **Testing *is* the product differentiation:** golden-log fixtures (snapshot-tested), hostile fixtures mirroring the §6.6 quarantine table row-for-row, crash-point fuzzing (truncate every fixture at every prefix — "the single highest-value suite"), and property tests P1–P3.
 - **Persistence backend is deliberately undecided** (GRDB vs. raw sqlite3, behind a small protocol) — don't bikeshed it early. **SwiftData is explicitly the wrong shape** for an append-only log; don't reach for it.
-- **Status:** M0–M3 done and **audited**, **196 tests green** (175 `LedgerKit` + 21 `LedgerKitTestSupport`), **SPEC rev 6 ratified** (2026-07-26; amendments now open rev 7). `Core/` and `Reduce/` are complete. Public reduction entry point is `Conversation(reducing:loadedFrom:mapping:)` — there is no top-level `reduce`. `Store/Persistence.swift` is the *seam only* — no GRDB wiring; its `events` verb returns `[LoadedEvent]`, which is what makes M4's two-stage decode implementable above the seam. `Session/` and `Projection/` are still empty. **Next: M4** (SQLite store, snapshots, index) — plan in `Documentation/M4-PLAN.md`; decision numbering continues M3's at D13.
+- **Status:** M0–M3 done and **audited**, **196 tests green** (175 `LedgerKit` + 21 `Understudy`), **SPEC rev 6 ratified** (2026-07-26; amendments now open rev 7). `Core/` and `Reduce/` are complete. Public reduction entry point is `Conversation(reducing:loadedFrom:mapping:)` — there is no top-level `reduce`. `Store/Persistence.swift` is the *seam only* — no GRDB wiring; its `events` verb returns `[LoadedEvent]`, which is what makes M4's two-stage decode implementable above the seam. `Session/` and `Projection/` are still empty. **Next: M4** (SQLite store, snapshots, index) — plan in `Documentation/M4-PLAN.md`; decision numbering continues M3's at D13.
 - **M4 is planned, not started** (see `Documentation/M4-PLAN.md` before touching anything):
-  - **Phase 0 is a breaking-surface pass** decided at the M3 boundary audit: derived-state memberwise inits go internal, `Content` → `MessageContent`, `MessageState.failed` gains labels, `PersistenceConfiguration` becomes a struct with factories, and **`LedgerKitTestSupport` is renamed `Understudy`** (directory, package, product, module — every command and path in this file that says `LedgerKitTestSupport` changes when that lands; update this file then).
+  - **Phase 0 is a breaking-surface pass** decided at the M3 boundary audit: derived-state memberwise inits go internal, `Content` → `MessageContent`, `MessageState.failed` gains labels, and `PersistenceConfiguration` becomes a struct with factories. **The `LedgerKitTestSupport` → `Understudy` rename is the one Phase 0 item already landed** (D14, its own commit); the rest are still to do.
   - **SPEC rev 7 drafts during M4 and ratifies at the M4 boundary.** Draft it from M4-PLAN §6 (the inventory), never from memory. The M3 audit pre-answered OQ1/2/4/6/7/8/9 by reading the SDK interface — the fact table with citations is M4-PLAN §2. One item is wire-affecting and needs approval: `contextSizeExceeded(contextSize:tokenCount:)` (M4-PLAN D17).
   - ⚠️ Two SDK facts that contradict older spec prose: the provider channel has `replaceTextSegment`, so §7.3's plain-text prefix property is provider behavior, not an API guarantee; and the busy-session error is now the typed `LanguageModelSession.Error.concurrentRequests`, superseding the iOS 26 "surfaces as `rateLimited`" evidence (the §7.2 gate stays).
 - **M3 landed** (see `Documentation/M3-PLAN.md` for the decision log D1–D12 and per-phase audit notes):
   - **Test harness.** `Corpus.swift` is the fixture registry every sweep iterates — add a fixture there and it inherits truncation, interior-gap, compound and P3 coverage for free. `InvariantChecks.swift` holds the two predicates (`invariantProblems(in: FoldedState)` and the bridging `(in:foldedFrom:)`, which asserts the `.open ⇒ .interrupted` correspondence). `InvariantCheckTests.swift` tests *the predicates* — don't delete it; a vacuous predicate would silently gut the fuzz suite.
   - **Crash-fuzzing is exhaustive, not randomised** — fixtures are ≤22 rows, so there is no seed to manage and failures reproduce by re-running.
   - **On-disk corpus** in `Tests/LedgerKitTests/Corpus/`: `dev/` regenerable via `LEDGERKIT_RECORD=1 swift test --package-path LedgerKit`, `wire/` hand-authored and **never** regenerated, `frozen/` empty until 0.1.0 and a diff there is always a regression. Read `Corpus/README.md` before touching any of it. Dumps render `FoldedState`, *not* `Conversation`, so §8 mapping changes cannot break frozen fixtures.
-  - **`LedgerKitTestSupport`** ships `Script` / `Script.Step` / `Cue` / `ScriptExhaustion` (platform-agnostic, 26+) and `ScriptedLanguageModel` conforming to Apple's real protocols (`@available(macOS 27)`). It **must not** depend on LedgerKit — LedgerKit's *test* target imports it at M5/M6. Its product name is provisional (SPEC §10.1).
+  - **`Understudy`** ships `Script` / `Script.Step` / `Cue` / `ScriptExhaustion` (platform-agnostic, 26+) and `ScriptedLanguageModel` conforming to Apple's real protocols (`@available(macOS 27)`). It **must not** depend on LedgerKit — LedgerKit's *test* target imports it at M5/M6. The name is settled as of M4 Phase 0 (SPEC §10.1's provisional-name clause resolves in rev 7).
 - **Mutation-test anything whose failure mode is subtle.** Inject a deliberate breakage, confirm the suite catches it, revert. It has repeatedly found holes that looked like coverage — most sharply in Phase 4, where deleting the script player's between-step cancellation check left the entire suite green, because every *suspending* step already throws on cancellation by itself. Suspension points mask each other.
 
 ## Conventions & workflow preferences

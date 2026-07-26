@@ -1,7 +1,7 @@
 import Foundation
 import FoundationModels
 import Testing
-@testable import LedgerKitTestSupport
+@testable import Understudy
 
 // The Foundation Models conformance. These **compile** on the current toolchain
 // (Xcode 27 / macOS 27 SDK) and **run** on macOS 27; on an older OS they report

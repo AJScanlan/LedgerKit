@@ -3,7 +3,8 @@
 **Status:** Planned · opened 2026-07-26 at the M3 boundary.
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M4 section) · [SPEC.md](./SPEC.md) §9, §6.6, §6.3, §10.6 · [ADR-003](./ADR/ADR-003-persistence-dependency.md) (ratifies here) · [ADR-001](./ADR/ADR-001-event-encoding.md) (D-1/D-2/D-3 close here)
 **Baseline:** M0–M3 done and audited, SPEC **rev 6 ratified**, **196 tests green**
-(175 `LedgerKit` + 21 `LedgerKitTestSupport`), both packages warning-free.
+(175 `LedgerKit` + 21 in the test-double package — `LedgerKitTestSupport` at
+baseline, **`Understudy`** since Phase 0), both packages warning-free.
 **Spec work:** **rev 7 drafts early in this milestone and ratifies at the M4
 boundary.** Its full inventory is §6 of this plan. One item is wire-affecting
 (D17) and needs approval before Phase 4 implements it.
@@ -214,10 +215,26 @@ D17 task.
 **Goal:** every breaking API change lands before the surface gains callers;
 the package the ecosystem meets first gets its real name.
 
-- [ ] **Understudy rename (D14):** directory `LedgerKitTestSupport/` →
-      `Understudy/`; package name, product, module, test-target imports; Xcode
-      scheme; workspace file reference; CLAUDE.md commands + collision notes;
-      ROADMAP living references. Historical docs untouched.
+- [x] **Understudy rename (D14)** — ✅ **done 2026-07-26, as its own commit** so
+      the mechanical rename stays reviewable apart from the semantic API changes
+      below. Directory (`git mv`, so `--follow` history survives all ten files),
+      package/product/target names, `Sources/Understudy/`,
+      `Tests/UnderstudyTests/`, both `@testable import`s, the shared `.xcscheme`
+      (file + three blueprint identifiers) and its user-state plist, the
+      workspace `FileRef`, CLAUDE.md (commands, architecture, status, M3
+      landmarks), and this plan. `swift build`/`swift test --package-path
+      Understudy` green, **21 tests**, warning-free.
+      **Split of treatment, deliberate:** operational text (commands, paths,
+      architecture, status) was renamed; **historical narrative was not** —
+      M3-PLAN, SPEC rev ≤6, and the ROADMAP's struck-through M0/M3 records keep
+      `LedgerKitTestSupport` as a matter of record, with one forward-pointing
+      note added in the ROADMAP's M3 section so no reader is misled. Rewriting a
+      completed milestone's record to match a later decision would falsify the
+      log, which is the same instinct tenet 2 applies to conversations.
+      **Zero source files needed touching** — no doc comment in the five
+      sources ever named the package, which is what D14 meant by minimal blast
+      radius; the only remaining mention is `Package.swift`'s new provenance
+      comment.
 - [ ] Internal-ize `Message.init`, `Conversation.init`, `QuarantinedEvent.init`,
       `ConversationSummary.init` (D13). Playground/tests unaffected
       (`@testable`).
@@ -472,7 +489,7 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | # | Decision | Status |
 |---|---|---|
 | D13 | Contract hygiene precedes store work (audit pass, Phase 0) | **Accepted** 2026-07-26 |
-| D14 | `LedgerKitTestSupport` → `Understudy`; one name everywhere | **Accepted** 2026-07-26 (Alexander) |
+| D14 | `LedgerKitTestSupport` → `Understudy`; one name everywhere | **Landed** 2026-07-26 (accepted by Alexander; own commit) |
 | D15 | One production `WireJSON` encoder; corpus files stay pretty; bytes pinned against `WireJSON` | **Accepted** · applies Phase 1 |
 | D16 | Schema-version placement (column-only vs column+blob) | **Open** — decide at Phase 1 gate |
 | D17 | `contextSizeExceeded` optional payload | **Pending rev 7 approval** — implement Phase 4 |
@@ -483,3 +500,4 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | Date | Phase | Tests | Note |
 |---|---|---|---|
 | 2026-07-26 | Plan drafted | 196 | Sourced from the M3 boundary audit; D13–D15/D18 accepted, D16 open, D17 pending rev 7 |
+| 2026-07-26 | **Phase 0: Understudy rename (D14)** | **196** (175 + 21) | Rename only, as its own commit — no semantic changes. Historical docs deliberately left naming the old package |
