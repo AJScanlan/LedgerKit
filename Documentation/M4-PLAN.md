@@ -1,7 +1,8 @@
 # M4 Implementation Plan — SQLite store, snapshots, index
 
-**Status:** In progress · opened 2026-07-26 at the M3 boundary · **Phases 0–2
-done** (226 tests green); **Phase 3 next** (snapshots + cold open).
+**Status:** In progress · opened 2026-07-26 at the M3 boundary · **Phases 0–3
+done** (239 tests green); **Phase 4 next** (P1, P2 scaffolding, the ADR-001 D-3
+registry manifest, and D17 if rev 7 approves it).
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M4 section) · [SPEC.md](./SPEC.md) §9, §6.6, §6.3, §10.6 · [ADR-003](./ADR/ADR-003-persistence-dependency.md) (ratifies here) · [ADR-001](./ADR/ADR-001-event-encoding.md) (D-1/D-2/D-3 close here)
 **Baseline:** M0–M3 done and audited, SPEC **rev 6 ratified**, **196 tests green**
 (175 `LedgerKit` + 21 in the test-double package — `LedgerKitTestSupport` at
@@ -564,26 +565,87 @@ behaviour so it cannot drift unnoticed.
 
 **Goal:** the §9 fast path, provably equivalent to replay (P3 is the law here).
 
-- [ ] `Snapshot` payload = `WireJSON`-encoded `FoldedState` (synthesized
+- [x] `Snapshot` payload = `WireJSON`-encoded `FoldedState` (synthesized
       `Codable` — disposable by design; the *version fields* are the contract).
-      `reducerVersion` / `schemaVersion` constants live beside the reducer.
-- [ ] **Discard-on-mismatch without decoding** (version fields ride outside the
-      payload). A payload that fails to decode despite matching versions is
-      *treated as* a mismatch — discarded, logged, never fatal, never migrated.
-- [ ] Resume path: `latestSnapshot` → decode → `fold(resuming:after:with:)`
-      over the suffix read. One reduction path; the primitive already exists.
-- [ ] **P3 against the real store:** snapshot at every split of every corpus
-      fixture, resume equals full replay **including diagnostics** — the
-      in-memory sweep re-run through persistence.
-- [ ] **Cold-open criterion:** build a synthetic 10k-event log; assert the
-      resumed fold **replays exactly the post-snapshot suffix** (row count, a
-      deterministic assertion), and record — not assert — the wall-time.
-- [ ] Corrupt-snapshot fixtures: truncated payload, wrong versions, valid
-      payload/stale sequence.
+      `reducerVersion` / `schemaVersion` constants live in `LedgerSchema`.
+- [x] **Discard-on-mismatch without decoding** (version fields ride outside the
+      payload). **Four conditions, one branch** — either version disagrees, the
+      payload does not decode, the payload names a different conversation than its
+      key, or `upToSequence < 1`. Never fatal, never migrated. Logging is deferred
+      to M5 for the same reason §8 defers "logged loudly" to normalization: the
+      obligation belongs to the layer that has a logger.
+- [x] Resume path: `latestSnapshot` → decode → `fold(resuming:after:with:)` over
+      the suffix read, as `PersistenceStore.foldedState(of:)`. An **extension, not
+      a seventh verb** — ADR-003 rule 4 caps the seam at six requirements, and this
+      is a composition of three of them, so policy stays above the seam and no
+      backend can override it.
+- [x] **P3 against the real store**, and against the codec — see below; these are
+      two distinct sweeps, and only one of them can reach diagnostics.
+- [x] **Cold-open criterion: 10,004 events, 3 rows replayed, ~28 ms.** Measured on
+      the resume path itself via a counting `PersistenceStore` wrapper, not by a
+      separate read that would only prove *a* suffix read is cheap.
+- [x] Corrupt-snapshot fixtures: truncated payload, both version mismatches,
+      foreign payload, impossible sequence — plus a **control** asserting a
+      current checkpoint *is* usable, without which every one of those could pass
+      because nothing is ever usable.
 
-**Exit:** cold open ≤ one generation's suffix, by construction and by test.
+**Exit:** ✅ cold open ≤ one generation's suffix, by construction and by test.
+**239 green** (218 + 21).
 **Review gate:** snapshot policy read against §9 line by line (best-effort,
 diagnostics persisted, `.open` stored open).
+
+**Status: ✅ done 2026-07-26.**
+
+**Two P3 sweeps, because one cannot cover what the other does.** M3 already swept
+P3 at every split of every fixture — but entirely in memory, handing a live
+`FoldedState` straight back to `fold(resuming:)`. The new sweeps add the two
+things that make it a persistence property:
+
+- **Through the codec** (`SnapshotCodecTests`) — *all* fixtures, all splits. No
+  `append` is involved, so gaps and byte-built rows are fine, which matters
+  because `rich` and `hostile` are the only fixtures with **diagnostics**. This is
+  the sweep that enforces §9's "snapshots must persist diagnostics", and it counts
+  its residue-carrying checkpoints (≥10) so the claim cannot go vacuous.
+- **Through the store** (`SnapshotStoreTests`) — replayable fixtures only, all
+  splits, real SQLite. Split 0 runs first, while no checkpoint exists, because
+  `save` replaces and the pure-replay path is otherwise unreachable.
+
+**`after:` is load-bearing, not bookkeeping.** The resume passes
+`snapshot.upToSequence` as `after:`, and the codec sweep passes *the last folded
+row's sequence* — not the row count, which is a different number the moment a log
+has a gap. Getting it wrong is how a hole straddling the checkpoint boundary
+silently closes; mutation-testing it to `0` fails the store sweep immediately.
+
+**Mutation-tested, all four caught, all reverted** (file diffed byte-identical
+afterwards):
+
+| Mutation | Caught by |
+|---|---|
+| Snapshot drops `diagnostics` | codec sweep, on both the round-trip and the resume |
+| Resume reads from `upToSequence` (off by one, so deltas double) | store sweep |
+| Version + sequence guards removed | all three discard tests |
+| `after: 0` — checkpoint boundary lost | store sweep |
+
+The off-by-one is the one worth naming: re-reading the checkpoint's last row is
+harmless for every payload kind *except* `deltaAppended` and
+`toolInvocationRecorded`, which accumulate (§6.6's ordering precondition). It
+would have doubled a message's text at exactly the splits where the last folded
+row was a delta, and left every other split green.
+
+**The cold-open test asserts the recovery shape, not just an equal state.** First
+draft parented the interrupted turn to `nil`, which quarantines under I6 and
+cascades — so it would have measured three diagnostics while claiming to measure
+crash recovery. Now the turn is a legitimate continuation, and the assertion is
+`.open(partial: "half an ans")` with **zero** diagnostics: DoD-1's mechanism
+reached *through a snapshot resume*, which is the path that could silently fail
+here, since the generation→message routing map has to be rebuilt from
+`FoldedMessage.generationID` rather than replayed.
+
+**Cost owned:** the suite went 0.18 s → 0.58 s, essentially all of it *appending*
+10k records (the resume itself is 28 ms). Worth it — the roadmap's exit criterion
+names 10k, and a criterion tested at 100 events is not the criterion. The
+comparison test was trimmed to 100 generations, since proving "reads everything"
+needs no particular size.
 
 ---
 
@@ -753,3 +815,4 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | 2026-07-26 | **Phase 0 done (D13)** | **200** (179 + 21) | Breaking-surface pass: four inits internal, `MessageContent`, `.failed` labels, `GenerationError` description (+4 tests, mutation-tested), both config types → structs with factories. Zero warnings. Playground label-fixed; its rewrite carried as a follow-up |
 | 2026-07-26 | **Phase 1 done (GRDB wiring)** | **223** (202 + 21) | GRDB 7.11.1, three `STRICT` tables, six verbs, `WireJSON`, `LedgerSchema`'s two versions, two-stage loader (pulled forward from Phase 2). D16 → column-only, D19 recorded. **ADR-003 Accepted; ADR-001 D-1/D-2 closed.** 4 mutations injected, all caught, all reverted |
 | 2026-07-26 | **Phase 2 done (corpus integration)** | **226** (205 + 21) | `raw` rows implemented through the production loader; `rich`/`hostile` on disk (M3 handoffs 1–2 closed); `wire/undecodableRows` authored; store↔corpus equivalence sweep. Corpus now *depends on* the loader. 4 mutations caught. **Rev 7 gains item 14** (§6.6 has no case for "known kind, malformed body") |
+| 2026-07-26 | **Phase 3 done (snapshots + cold open)** | **239** (218 + 21) | `Snapshot` coding + the four-condition discard policy + `foldedState(of:)` as a composition above the seam. P3 through the **codec** (all fixtures — the sweep that reaches diagnostics) and through the **store** (replayable, real SQLite). **Cold open: 10,004 events → 3 rows replayed, ~28 ms**, measured on the resume path via a counting wrapper. 4 mutations caught. Suite 0.18 s → 0.58 s, all of it appending |
