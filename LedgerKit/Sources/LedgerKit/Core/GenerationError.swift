@@ -20,7 +20,25 @@ public enum GenerationError: Error, Sendable, Equatable {
     /// Mirrors `LanguageModelError.contextSizeExceeded`. Named
     /// `contextWindowExceeded` until SPEC rev 6, which matched no Apple case;
     /// the old wire tag is reserved forever (ADR-001).
-    case contextSizeExceeded
+    ///
+    /// Both payload fields mirror Apple's error, which carries `contextSize` and
+    /// `tokenCount`, and both are optional because a provider outside the
+    /// on-device path may report neither. They exist for one affordance: N3 makes
+    /// window overflow a headline failure on-device, and
+    /// `recoverableUpstream(.reduceContext)` is far more actionable when the app
+    /// can say *how far over* (M4-PLAN D17).
+    ///
+    /// **Not a tag retirement.** The `contextSizeExceeded` discriminator is
+    /// unchanged, the fields encode as absent keys when nil (ADR-001 R-4), and
+    /// keyed containers skip unknown extras — so pre-widening logs decode with
+    /// both fields nil, and a pre-widening reader ignores them. The two field keys
+    /// join R-2's permanent registry, which is what makes this the *cheap*
+    /// direction of an additive change rather than a free one.
+    ///
+    /// Classification ignores the payload entirely, exactly as `rateLimited`'s
+    /// slot does not consult its duration for anything but display: §8 maps the
+    /// *case*, and a number cannot change what the user can do about it.
+    case contextSizeExceeded(contextSize: Int?, tokenCount: Int?)
     /// A safety system intervened on the content.
     case guardrailViolation
     /// The model itself declined to answer.
@@ -116,8 +134,14 @@ extension GenerationError: CustomStringConvertible {
         switch self {
         case .modelUnavailable(let reason):
             "model unavailable: \(reason.rawValue)"
-        case .contextSizeExceeded:
-            "context size exceeded"
+        case .contextSizeExceeded(let contextSize, let tokenCount):
+            // Assembled from the parts that are present, like `providerFailure`
+            // below — the two numbers are independently optional, and a rendering
+            // that printed "limit —" would be noise in a log line.
+            (["context size exceeded"]
+                + [tokenCount.map { "\($0) tokens" }, contextSize.map { "limit \($0)" }]
+                .compactMap(\.self))
+                .joined(separator: ": ")
         case .guardrailViolation:
             "guardrail violation"
         case .refusal:
@@ -165,8 +189,12 @@ extension GenerationError: Codable {
         case unrecognized
     }
 
+    /// Union of all field keys across kinds; each one is wire contract forever
+    /// (ADR-001 R-2), and `kind` may never name a payload field (R-1).
+    /// `contextSize` / `tokenCount` joined at M4 Phase 4 (D17).
     private enum CodingKeys: String, CodingKey {
         case kind, reason, feature, retryAfter, status, code, message, failure, description
+        case contextSize, tokenCount
     }
 
     public init(from decoder: any Decoder) throws {
@@ -182,7 +210,14 @@ extension GenerationError: Codable {
         case .modelUnavailable:
             self = .modelUnavailable(try container.decode(ModelUnavailability.self, forKey: .reason))
         case .contextSizeExceeded:
-            self = .contextSizeExceeded
+            // `decodeIfPresent` on both, so a log written before D17 widened this
+            // case decodes with nils rather than throwing. That is the whole
+            // additive claim, and `wire/contextSizeExceededLegacy` pins it from
+            // bytes so it stays true by test rather than by assumption.
+            self = .contextSizeExceeded(
+                contextSize: try container.decodeIfPresent(Int.self, forKey: .contextSize),
+                tokenCount: try container.decodeIfPresent(Int.self, forKey: .tokenCount)
+            )
         case .guardrailViolation:
             self = .guardrailViolation
         case .refusal:
@@ -213,8 +248,10 @@ extension GenerationError: Codable {
         case .modelUnavailable(let reason):
             try container.encode(Kind.modelUnavailable.rawValue, forKey: .kind)
             try container.encode(reason, forKey: .reason)
-        case .contextSizeExceeded:
+        case .contextSizeExceeded(let contextSize, let tokenCount):
             try container.encode(Kind.contextSizeExceeded.rawValue, forKey: .kind)
+            try container.encodeIfPresent(contextSize, forKey: .contextSize)
+            try container.encodeIfPresent(tokenCount, forKey: .tokenCount)
         case .guardrailViolation:
             try container.encode(Kind.guardrailViolation.rawValue, forKey: .kind)
         case .refusal:

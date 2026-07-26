@@ -36,10 +36,17 @@ let package = Package(
         // JSON plus their expected reduced state. Declared as a resource so the
         // runner reads it from `Bundle.module`; record mode writes back to the
         // source tree via `#filePath`, which is a dev-only path.
+        //
+        // `Registry/` holds `tags.json`, the discriminator registry (ADR-001 D-3,
+        // M4 Phase 4). Separate from the corpus on purpose: the corpus is a set of
+        // example logs, this is the *inventory* of every tag and field key those
+        // logs may legally contain. Hand-edited, never recorded — there is no
+        // record-mode branch that can rewrite it, which is the same reasoning that
+        // keeps `frozen/` unwritable.
         .testTarget(
             name: "LedgerKitTests",
             dependencies: ["LedgerKit"],
-            resources: [.copy("Corpus")]
+            resources: [.copy("Corpus"), .copy("Registry")]
         ),
     ],
     swiftLanguageModes: [.v6]

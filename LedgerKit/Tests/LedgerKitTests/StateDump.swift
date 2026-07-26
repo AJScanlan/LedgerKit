@@ -115,8 +115,9 @@ enum StateDump {
         switch error {
         case .modelUnavailable(let reason):
             "modelUnavailable(\(reason.rawValue))"
-        case .contextSizeExceeded:
-            "contextSizeExceeded"
+        case .contextSizeExceeded(let contextSize, let tokenCount):
+            "contextSizeExceeded(size=\(contextSize.map(String.init) ?? "—")"
+                + " tokens=\(tokenCount.map(String.init) ?? "—"))"
         case .guardrailViolation:
             "guardrailViolation"
         case .refusal:

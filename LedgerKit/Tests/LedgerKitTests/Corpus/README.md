@@ -26,12 +26,13 @@ would silently rewrite them into shapes we already understand, which is the one
 thing a forward-compatibility fixture must not do. So they are authored by hand
 and the writer never touches them.
 
-Two fixtures live there:
+Three fixtures live there:
 
 | Fixture | What it proves |
 |---|---|
 | `tolerantTerminals` | Three §6.6-row-3 shapes — unknown outcome tag, unknown *nested* error tag, absent outcome field — all land as `.failed(.unrecognized(…))` with **zero** diagnostics and a terminal timestamp. The whole tolerant-terminal story, from bytes |
 | `undecodableRows` | Rows 1 and 2 from bytes: a truncated row and a wrong-typed envelope field lose identity; a future payload kind keeps it and names itself; a non-object payload keeps identity with no legible tag. Reduction continues past all five, and the title proves it |
+| `contextSizeExceededLegacy` | That widening an error case's payload was **additive** (M4-PLAN D17). Three turns: one written *before* `contextSizeExceeded` gained `contextSize`/`tokenCount` (the fields decode as nil), one written after, and one written by a *later* version carrying a field this build has never heard of. Zero diagnostics, one affordance — a widened case is not a new kind, and an unknown field is not an unknown tag |
 
 `undecodableRows` also pins one thing it does not endorse: a payload kind this
 version **does** know, carrying a body that will not decode, is reported as

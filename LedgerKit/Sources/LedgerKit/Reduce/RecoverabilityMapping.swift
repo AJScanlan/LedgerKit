@@ -134,6 +134,9 @@ public struct RecoverabilityMapping: Sendable, Equatable {
         case .modelUnavailable(.deviceNotEligible): deviceNotEligible
         case .modelUnavailable(.appleIntelligenceNotEnabled): appleIntelligenceNotEnabled
         case .modelUnavailable(.modelNotReady): modelNotReady
+        // Payload deliberately unbound (D17): `contextSize`/`tokenCount` say how
+        // far over the window the request was, which is display and telemetry.
+        // What the user can *do* is unchanged, so classification must not see it.
         case .contextSizeExceeded: contextSizeExceeded
         case .guardrailViolation: guardrailViolation
         case .refusal: refusal

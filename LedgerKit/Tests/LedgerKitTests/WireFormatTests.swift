@@ -4,7 +4,16 @@ import Testing
 
 // MARK: - Fixtures
 
-private enum Wire {
+/// The module's exhaustive inventory of the wire surface — every payload kind,
+/// every outcome, every error.
+///
+/// **Internal rather than file-private (M4 Phase 4)** so the registry-manifest
+/// test (`RegistryTests`, ADR-001 D-3) reads the same inventory these round-trips
+/// do. A second copy would be a second thing to keep exhaustive, and the whole
+/// value of an inventory is that it is the *only* one: because every case is named
+/// here, deleting a case from the enum fails to compile *this*, which is what makes
+/// "a tag cannot be silently removed" a compiler guarantee rather than a habit.
+enum Wire {
     static let eventID = EventID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000A")!)
     static let conversationID = ConversationID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000B")!)
     static let messageID = MessageID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000C")!)
@@ -12,6 +21,24 @@ private enum Wire {
     static let generationID = GenerationID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000E")!)
 
     static let model = ModelDescriptor(provider: "apple", model: "on-device", version: "27.0")
+
+    /// A fixed millisecond-precision stamp — the wire form's own precision, so
+    /// this record is born canonical (ADR-001 R-5).
+    static let timestamp: Date = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: "2026-07-18T09:30:00.000Z")!
+    }()
+
+    /// One envelope. Lives here rather than in `EnvelopeTests` because the
+    /// registry test observes the *envelope's* field keys from it (R-2 covers
+    /// those too), and the byte-pinning test below is the other reader.
+    static let record = LedgerEvent.Record(
+        id: eventID,
+        conversationID: conversationID,
+        timestamp: timestamp,
+        payload: .userMessageAppended(messageID, content: "Explain valley folds", parent: nil)
+    )
 
     static let stopInfo = StopInfo(
         stopReason: "endTurn",
@@ -26,6 +53,23 @@ private enum Wire {
         argumentsJSON: #"{"q":"folds"}"#,
         resultJSON: "{}"
     )
+
+    /// Both `ToolRecord.Status` raw values, every optional populated.
+    ///
+    /// Fully populated on purpose: the registry test derives the *observed* field
+    /// keys by encoding these, and `encodeIfPresent` omits nil — so a fixture with
+    /// a nil field would hide that key from the inventory, and a silently removed
+    /// key would then look registered-but-unobserved rather than failing.
+    static let allToolRecords: [ToolRecord] = [
+        toolRecord,
+        ToolRecord(
+            name: "fetch",
+            status: .failed,
+            duration: .milliseconds(35),
+            argumentsJSON: #"{"url":"…"}"#,
+            resultJSON: "null"
+        ),
+    ]
 
     /// One of every payload kind, with associated values populated.
     static let allKinds: [LedgerEvent.Payload] = [
@@ -49,14 +93,28 @@ private enum Wire {
         .instructionsChanged(nil),
         .generationStarted(generationID, messageID, parent: nil, model: model),
         .generationEnded(generationID, .failed(.rateLimited(retryAfter: nil))),
+        .generationEnded(generationID, .failed(.contextSizeExceeded(contextSize: nil, tokenCount: nil))),
         .titleChanged(nil),
+    ]
+
+    /// Every `Outcome` — the third tagged level, and the one whose tags the
+    /// tolerant-terminal rule (§6.6 row 3) probes by name.
+    static let allOutcomes: [Outcome] = [
+        .completed(stopInfo),
+        .completed(StopInfo()),
+        .failed(.guardrailViolation),
+        .cancelled,
     ]
 
     static let allErrors: [GenerationError] = [
         .modelUnavailable(.deviceNotEligible),
         .modelUnavailable(.appleIntelligenceNotEnabled),
         .modelUnavailable(.modelNotReady),
-        .contextSizeExceeded,
+        // Both D17 forms: populated, and the field-less shape a pre-widening log
+        // holds. The nil form is not merely a nil-optional case here — it is the
+        // *old bytes*, which is why `wire/contextSizeExceededLegacy` exists too.
+        .contextSizeExceeded(contextSize: 4_096, tokenCount: 5_120),
+        .contextSizeExceeded(contextSize: nil, tokenCount: nil),
         .guardrailViolation,
         .refusal,
         .unsupported(.capability),
@@ -104,11 +162,9 @@ struct WireRoundTripTests {
         #expect(try roundTrip(error) == error)
     }
 
-    @Test("all Outcome cases")
-    func outcomeRoundTrips() throws {
-        for outcome: Outcome in [.completed(Wire.stopInfo), .completed(StopInfo()), .failed(.guardrailViolation), .cancelled] {
-            #expect(try roundTrip(outcome) == outcome)
-        }
+    @Test("all Outcome cases", arguments: Wire.allOutcomes)
+    func outcomeRoundTrips(_ outcome: Outcome) throws {
+        #expect(try roundTrip(outcome) == outcome)
     }
 
     @Test("ToolRecord duration is integer milliseconds on the wire")
@@ -126,6 +182,71 @@ struct WireRoundTripTests {
         #expect(object["retryAfter"] as? Int == 30_000)
     }
 
+    @Test("contextSizeExceeded's payload is two optional named keys (D17)")
+    func contextSizeExceededWireForm() throws {
+        // Named keys, not positional: two same-typed `Int?`s are exactly the
+        // transposition hazard ADR-001 R-2 exists for, and a swapped limit and
+        // usage count would decode cleanly into a nonsense claim.
+        let json = String(decoding: try WireJSON.encoder().encode(
+            GenerationError.contextSizeExceeded(contextSize: 4_096, tokenCount: 5_120)
+        ), as: UTF8.self)
+        #expect(json == #"{"contextSize":4096,"kind":"contextSizeExceeded","tokenCount":5120}"#)
+    }
+
+    @Test("the pre-widening form is byte-identical to a nil-payload encode (D17)")
+    func contextSizeExceededStaysAdditive() throws {
+        // The additive claim, in the direction that matters. A log written before
+        // D17 holds exactly `{"kind":"contextSizeExceeded"}`; this build must
+        // *write* those same bytes when it has no numbers, or the widening
+        // silently changed what an old shape looks like and the reserved-tag rule
+        // would have been the wrong instrument to reach for.
+        let json = String(decoding: try WireJSON.encoder().encode(
+            GenerationError.contextSizeExceeded(contextSize: nil, tokenCount: nil)
+        ), as: UTF8.self)
+        #expect(json == #"{"kind":"contextSizeExceeded"}"#)
+
+        let decoded = try JSONDecoder().decode(
+            GenerationError.self,
+            from: Data(#"{"kind":"contextSizeExceeded"}"#.utf8)
+        )
+        #expect(decoded == .contextSizeExceeded(contextSize: nil, tokenCount: nil))
+    }
+
+    @Test("one field present decodes without the other (D17)")
+    func contextSizeExceededDecodesPartially() throws {
+        // Providers differ, and the fields are independently optional — so the
+        // half-populated shape must not be a decode error. Asserted in both
+        // directions because `decodeIfPresent` on one key and `decode` on the
+        // other is the plausible slip, and it would only fail on real provider
+        // data.
+        let sizeOnly = try JSONDecoder().decode(
+            GenerationError.self,
+            from: Data(#"{"kind":"contextSizeExceeded","contextSize":4096}"#.utf8)
+        )
+        #expect(sizeOnly == .contextSizeExceeded(contextSize: 4_096, tokenCount: nil))
+
+        let tokensOnly = try JSONDecoder().decode(
+            GenerationError.self,
+            from: Data(#"{"kind":"contextSizeExceeded","tokenCount":5120}"#.utf8)
+        )
+        #expect(tokensOnly == .contextSizeExceeded(contextSize: nil, tokenCount: 5_120))
+    }
+
+    @Test("the retired contextWindowExceeded tag is not decodable (ADR-001 reserved)")
+    func retiredTagStaysRetired() {
+        // The reserved table's only entry, asserted as *behaviour*. D17 widened
+        // this case's payload, which is precisely the change that might tempt
+        // someone to "restore compatibility" by teaching the decoder the old
+        // name — the one thing the registry forbids, because a tag that has ever
+        // named something may never name anything else.
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(
+                GenerationError.self,
+                from: Data(#"{"kind":"contextWindowExceeded"}"#.utf8)
+            )
+        }
+    }
+
     @Test("unknown sibling fields are ignored (additive headroom)")
     func extraFieldsTolerated() throws {
         let payload = try decodePayload(
@@ -139,20 +260,7 @@ struct WireRoundTripTests {
 
 @Suite("Envelope")
 struct EnvelopeTests {
-    private static let timestamp: Date = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: "2026-07-18T09:30:00.000Z")!
-    }()
-
-    private var record: LedgerEvent.Record {
-        LedgerEvent.Record(
-            id: Wire.eventID,
-            conversationID: Wire.conversationID,
-            timestamp: Self.timestamp,
-            payload: .userMessageAppended(Wire.messageID, content: "Explain valley folds", parent: nil)
-        )
-    }
+    private var record: LedgerEvent.Record { Wire.record }
 
     @Test("Record round-trips")
     func recordRoundTrips() throws {
@@ -196,7 +304,7 @@ struct EnvelopeTests {
             "timestamp":"2026-07-18T09:30:00Z"}
             """
         let decoded = try JSONDecoder().decode(LedgerEvent.Record.self, from: Data(json.utf8))
-        #expect(decoded.timestamp == Self.timestamp)
+        #expect(decoded.timestamp == Wire.timestamp)
     }
 }
 

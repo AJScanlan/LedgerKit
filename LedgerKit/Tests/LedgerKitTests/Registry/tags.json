@@ -1,0 +1,126 @@
+{
+  "note": "The discriminator registry (ADR-001 R-1/R-2/R-3, D-3), checked in so that reuse, rename or silent removal of a wire tag fails a test instead of a customer's log. Every string here is permanent: a tag or field key that has ever named something may never name anything else. To ADD: append the new tag or key, and land a corpus fixture containing it in the same change. To REMOVE: move the tag to `reserved` with the revision that retired it; never delete a line. RegistryTests checks this file against what the codecs actually produce, in both directions.",
+  "revision": "M4 Phase 4, 2026-07-26",
+  "discriminatorKey": "kind",
+  "tags": {
+    "payload": [
+      "activePathChanged",
+      "conversationCreated",
+      "deltaAppended",
+      "generationEnded",
+      "generationStarted",
+      "instructionsChanged",
+      "messageEdited",
+      "titleChanged",
+      "toolInvocationRecorded",
+      "userMessageAppended"
+    ],
+    "outcome": [
+      "cancelled",
+      "completed",
+      "failed"
+    ],
+    "error": [
+      "contextSizeExceeded",
+      "guardrailViolation",
+      "modelUnavailable",
+      "providerFailure",
+      "rateLimited",
+      "refusal",
+      "transport",
+      "unrecognized",
+      "unsupported"
+    ],
+    "modelUnavailability": [
+      "appleIntelligenceNotEnabled",
+      "deviceNotEligible",
+      "modelNotReady"
+    ],
+    "unsupportedFeature": [
+      "capability",
+      "generationGuide",
+      "languageOrLocale",
+      "transcriptContent"
+    ],
+    "transportFailure": [
+      "connectivity",
+      "timeout",
+      "tls"
+    ],
+    "toolStatus": [
+      "failed",
+      "succeeded"
+    ]
+  },
+  "reserved": [
+    {
+      "level": "error",
+      "tag": "contextWindowExceeded",
+      "removed": "SPEC rev 6, M3",
+      "upcaster": false,
+      "why": "Renamed to contextSizeExceeded to mirror Apple's LanguageModelError case name exactly (SPEC §8). No released version ever wrote it, so no upcaster is required; it is reserved anyway, because the cheapest moment to honour the never-reuse rule is the one where it costs nothing."
+    }
+  ],
+  "fieldKeys": {
+    "envelope": [
+      "conversationID",
+      "id",
+      "payload",
+      "timestamp"
+    ],
+    "payload": [
+      "content",
+      "endpoint",
+      "generationID",
+      "instructions",
+      "messageID",
+      "model",
+      "original",
+      "outcome",
+      "parent",
+      "record",
+      "replacement",
+      "text",
+      "title"
+    ],
+    "outcome": [
+      "error",
+      "stopInfo"
+    ],
+    "error": [
+      "code",
+      "contextSize",
+      "description",
+      "failure",
+      "feature",
+      "message",
+      "reason",
+      "retryAfter",
+      "status",
+      "tokenCount"
+    ],
+    "toolRecord": [
+      "argumentsJSON",
+      "duration",
+      "name",
+      "resultJSON",
+      "status"
+    ],
+    "stopInfo": [
+      "resolvedModelID",
+      "stopReason",
+      "usage"
+    ],
+    "tokenUsage": [
+      "cachedInputTokens",
+      "inputTokens",
+      "outputTokens",
+      "reasoningTokens"
+    ],
+    "modelDescriptor": [
+      "model",
+      "provider",
+      "version"
+    ]
+  }
+}

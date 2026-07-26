@@ -1,11 +1,14 @@
 # ADR-001 — Tagged-JSON event encoding & the discriminator registry
 
-**Status:** Draft · opened 2026-07-18 at M1 · updated 2026-07-19 (M1 wire types landed) · ratifies at M9
+**Status:** Draft · opened 2026-07-18 at M1 · updated 2026-07-19 (M1 wire types landed) ·
+**D-1/D-2 closed at M4 Phase 1, D-3 closed at M4 Phase 4** (no open questions remain) ·
+ratifies at M9
 **Spec:** §6.1 (envelope/payload, tolerant terminals, gaps), §6.6 (quarantine table), §9
 (persistence & versioning), §10 (test corpus), §13 DoD-5
 **Code:** `Core/LedgerEvent.swift`, `Core/Outcome.swift`, `Core/GenerationError.swift`,
 `Core/ToolRecord.swift`, `Core/WireCoding.swift` · pinned by
-`Tests/LedgerKitTests/WireFormatTests.swift`
+`Tests/LedgerKitTests/WireFormatTests.swift` and, since M4 Phase 4, by the registry
+manifest `Tests/LedgerKitTests/Registry/tags.json` + `RegistryTests.swift` (D-3)
 
 > **Scope note.** §6.6 says its table "is owned by ADR-001." This ADR owns the *decision
 > and reasoning*; the normative twelve rows stay in §6.6 as the single copy. Reproducing
@@ -74,6 +77,13 @@ protect same-typed pairs. Named keys protect all of them at zero wire cost.
 
 **Consequence:** the field keys are wire contract alongside the tags — `messageID`,
 `parent`, `original`, `replacement`, etc. are as permanent as the kinds themselves.
+Since M4 Phase 4 they are enumerated in the registry manifest (D-3) and checked
+against what the codecs actually encode, so "permanent" is a test rather than a
+sentence. `contextSize` and `tokenCount` joined at M4 Phase 4 (M4-PLAN D17) — the
+first keys added since M1, and a worked example of the additive direction: the
+`contextSizeExceeded` tag is unchanged, nil fields encode as absent keys, and
+`wire/contextSizeExceededLegacy` pins the pre-widening bytes so they stay decodable
+by test rather than by assumption.
 
 **Cost:** larger blobs than a positional array. Judged worth it — these are chat logs, and
 SQLite compresses poorly-entropic key repetition well enough.
@@ -86,7 +96,9 @@ the implementation shape: each codec declares a private `Kind: String` enum whos
 values are the wire**; a future Swift case rename keeps the old raw value and burns
 nothing.
 
-Current registry inventory (frozen; additions append here):
+Current registry inventory (frozen; additions append here). **Since M4 Phase 4 this table
+has an executable twin** — `Tests/LedgerKitTests/Registry/tags.json` (D-3) — and the two
+must be edited together; the manifest is what CI reads, this is what a human reads:
 
 | Level | Tags |
 |---|---|
@@ -269,13 +281,48 @@ it yet, by design.** With one version there is nothing to route. It is the hook 
 upcaster and invalidates nothing, a reducer bump discards snapshots and migrates nothing. A
 single "schema version" could only have had one of those behaviours.
 
-### D-3. Registry enforcement *(was OQ-5)*
+### ~~D-3. Registry enforcement *(was OQ-5)*~~ — **closed at M4 Phase 4: a manifest test**
 
 Is "tags are never reused" a convention, a test over a checked-in manifest, or a
 compile-time construct? A test reading a frozen `tags.json` (mirroring the R-3 inventory,
 plus the R-1 reserved-`kind` rule and R-2's field keys) is the cheap version and fails
 loudly on accidental reuse. Now that the registry exists in code, this fits naturally into
 M3's version-frozen-corpus scaffolding rather than waiting for M9.
+
+**Resolved (2026-07-26): the manifest test.** `Tests/LedgerKitTests/Registry/tags.json`
+holds every tag at every level, every field key at every level, and the reserved table;
+`RegistryTests` checks it against what the codecs *encode*, in both directions. Scoped
+small deliberately — a manifest, not a code generator.
+
+The answer turned out to be **all three mechanisms, each covering what the others
+cannot**, which is worth recording because it is the reason a single mechanism looked
+insufficient:
+
+| Failure | Caught by |
+|---|---|
+| A tag or key **renamed** | manifest ≠ observed, in both directions |
+| A tag or key **added** without a registry entry | observed ⊄ manifest |
+| A case **deleted** | the *compiler* — `Wire.allKinds` / `allErrors` name every case, so removal fails to build |
+| A retired tag made **live again** | the reserved table, plus a decode attempt that must throw |
+
+The third row is the one that made a pure manifest test insufficient: nothing observes a
+tag that no longer exists, so a deletion is invisible to a both-directions comparison
+unless something independently insists the case is still there. The exhaustive test
+inventories are that something, and coupling the registry test to them (rather than
+giving it its own list) is what buys it.
+
+**Known limit, stated rather than papered over.** For the four raw-value enums Swift
+offers no reflection over cases, so an *addition* is caught only because every case
+appears in an inventory that a reviewer of a new case would have to touch. `CaseIterable`
+would close the gap and is deliberately not added: it would be public API bought for a
+test. The nested enums are additionally observed *through their parent's* encoded field
+(`reason`, `feature`, `failure`, `status`), which recovers the both-directions check for
+everything reachable from `Wire.allErrors`.
+
+**One duplicate retired in the same change:** `CorpusFileTests` had its own hard-coded
+copy of the ten payload kinds. It now reads the manifest. A second copy of a registry can
+only drift from the first, and then the test enforcing the registry is the one asserting
+the stale answer.
 
 ## Consequences
 

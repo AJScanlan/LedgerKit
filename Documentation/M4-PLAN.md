@@ -1,15 +1,16 @@
 # M4 Implementation Plan — SQLite store, snapshots, index
 
-**Status:** In progress · opened 2026-07-26 at the M3 boundary · **Phases 0–3
-done** (239 tests green); **Phase 4 next** (P1, P2 scaffolding, the ADR-001 D-3
-registry manifest, and D17 if rev 7 approves it).
+**Status:** In progress · opened 2026-07-26 at the M3 boundary · **Phases 0–4
+done** (266 tests green); **Phase 5 next** — the wrap-up: SPEC rev 7 drafted from
+§6 and ratified, ADRs recorded closed, ROADMAP + CLAUDE.md updated.
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M4 section) · [SPEC.md](./SPEC.md) §9, §6.6, §6.3, §10.6 · [ADR-003](./ADR/ADR-003-persistence-dependency.md) (ratifies here) · [ADR-001](./ADR/ADR-001-event-encoding.md) (D-1/D-2/D-3 close here)
 **Baseline:** M0–M3 done and audited, SPEC **rev 6 ratified**, **196 tests green**
 (175 `LedgerKit` + 21 in the test-double package — `LedgerKitTestSupport` at
 baseline, **`Understudy`** since Phase 0), both packages warning-free.
 **Spec work:** **rev 7 drafts early in this milestone and ratifies at the M4
-boundary.** Its full inventory is §6 of this plan. One item is wire-affecting
-(D17) and needs approval before Phase 4 implements it.
+boundary.** Its full inventory is §6 of this plan. The one wire-affecting item
+(D17) was approved and **implemented at Phase 4**; §6 item 11 is now a *record* of
+what shipped rather than a proposal, and every other §6 item is still undrafted.
 
 > **How to use this document.** This plan persists across sessions, agents, and
 > compactions — it is the working memory for M4. Update the checkboxes and the
@@ -653,31 +654,125 @@ needs no particular size.
 
 **Goal:** the §10.6 obligations M4 owns, plus the one wire change rev 7 approves.
 
-- [ ] **P1 (fold/tail equivalence):** `reduce(persisted ++ unflushedTail) ==
+- [x] **P1 (fold/tail equivalence):** `reduce(persisted ++ unflushedTail) ==
       reduce(logAfterFlush)` — exhaustive over every fixture × every split
       (D18). This is the shape the M5 store actor will live by
       (`append` returns the tail so the actor folds forward); prove it now.
-- [ ] **P2 scaffolding only:** parameterize the projection-equivalence harness
+      `FoldForwardTests.swift`, three tests: the fold level, the **classified**
+      level (§10.6 states P1 over `reduce`, and `classify` is where I5's
+      finalization lives), and the many-small-flushes composition.
+- [x] **P2 scaffolding only:** parameterize the projection-equivalence harness
       over a live set, test with the empty set (≡ fold identity). The overlay
       itself is M7's; the harness existing is what "scaffolding" means.
-- [ ] **D17, if rev 7 approves:** widen `contextSizeExceeded`; optional named
+      `ProjectionChecks.swift` (the predicate + `LiveSet`/`LiveOverlay`/
+      `identityOverlay`) and `ProjectionCheckTests.swift` (the sweep + seven
+      tests *of the predicate*).
+- [x] **D17, if rev 7 approves:** widen `contextSizeExceeded`; optional named
       keys; `RecoverabilityMapping` untouched; ADR-001 R-2 registry gains
       `contextSize`/`tokenCount`; `LEDGERKIT_RECORD=1` regenerates `dev/`; a
       `wire/` fixture pins the field-less old form forever.
-- [ ] **Registry enforcement (ADR-001 D-3):** a test over a checked-in
+      **Approved by Alexander 2026-07-26** as part of the Phase 4 instruction;
+      the *SPEC* text (rev 7 item 11) still lands in Phase 5's drafting session,
+      which is the only thing left of D17.
+- [x] **Registry enforcement (ADR-001 D-3):** a test over a checked-in
       `tags.json` mirroring R-3's inventory — payload kinds, outcome kinds,
       error kinds, raw-value enums, R-2 field keys, and the reserved table.
       Fails loudly on reuse, rename, or silent removal. (Scoped small: a
       manifest test, not a code generator.)
-- [ ] Mutation-test the suites whose failure mode is subtle (the M3 practice,
+- [x] Mutation-test the suites whose failure mode is subtle (the M3 practice,
       now standing policy): break sequence assignment (skip a number), break
       snapshot version checking (accept mismatched), break the loader's
       envelope-first order (drop identity), break index maintenance (update on
-      deltas) — each must be caught, then reverted.
+      deltas) — each must be caught, then reverted. **Six injected, six caught**
+      (table below), every file diffed byte-identical against its backup after.
 
-**Exit:** P1/P3 green corpus-wide against the store; registry test green.
+**Exit:** ✅ P1/P3 green corpus-wide against the store; registry test green.
+**266 green** (245 `LedgerKit` + 21 `Understudy`), zero warnings.
 **Review gate:** rev 7 draft review against §6 below — the drafting session
 should start from that list, not from memory.
+
+**Status: ✅ done 2026-07-26.**
+
+**P1 is not P3 with different words, and the distinction is the reason it needed a
+store.** Both split a log; P3 puts a *checkpoint* through a boundary and resumes,
+while P1 puts the **tail** through one — or rather asks whether it needs to. Its
+whole question is whether the values `append` handed back are interchangeable with
+the bytes a re-read decodes, and in memory those are the same array, so only a real
+store can answer it. The failure modes it owns are therefore the store's: a sequence
+assigned wrongly in a *second* transaction, a timestamp that does not survive its own
+encoding (ADR-001 R-5), an encoder asymmetric in one direction. Each would leave the
+M5 actor's in-memory state quietly disagreeing with its own database — the worst
+available shape, since both halves look fine alone.
+
+**Three sub-properties, deliberately separate:** `append`'s return equals what a read
+returns (per split, not once per fixture — that is where a `MAX(sequence)+1` slip in a
+second transaction shows); the fold-forward equals the replay; and the *classified*
+reduction agrees too, because a flush landing mid-generation must not finalize
+differently from a full replay or the shortcut could manufacture a phantom crash.
+
+**P2's scaffolding is a parameterization, not a stub.** The overlay is an argument
+(`LiveOverlay`), so M7 changes what is passed in and not one assertion. `identityOverlay`
+is not a placeholder either — it is the literally correct overlay for an empty live
+set, which is the state every cold open lands in, so §10.6's "crash recovery is P2's
+degenerate case" is testable *today*. The sweep runs it over every fixture at every
+truncation (a truncation is a crash) and counts the `.interrupted` messages it saw, so
+the claim cannot go vacuous.
+
+**The predicate has its own tests, which is the `InvariantCheckTests` argument
+transplanted:** a predicate returning `[]` for everything would make that sweep pass
+while enforcing nothing — and the sweep is the part still running at M7. So seven tests
+feed it deliberately wrong projections (faked `.streaming` with nothing live; a live
+generation left dead; the wrong partial; a live set naming a terminated generation; an
+overlay that edits the title or drops a message) plus a control. Gutting
+`projectionProblems` to `return []` fails six of them.
+
+**A `referenceOverlay` exists in the test target and is deliberately not shipped.**
+Without *some* satisfying overlay, clauses 1 and 3 would only ever be shown failing
+inputs, and a predicate nothing can satisfy passes the same way a correct one does.
+It is a control in `SnapshotDiscardTests`' sense; M7's real `overlay_live` replaces the
+argument, never the predicate.
+
+**D-3's answer turned out to be three mechanisms, not one**, and the reason is worth
+keeping: a both-directions manifest comparison cannot see a *deleted* case, because
+nothing observes a tag that no longer exists. What closes it is coupling the registry
+test to `Wire`'s exhaustive inventories (now `internal` for exactly this), so removal
+fails to **compile**. Renames and unregistered additions are the manifest's;
+reuse is caught twice — once as bookkeeping, once by requiring a reserved tag to
+*throw* on decode, which is the half that survives someone "restoring compatibility"
+in the decoder.
+
+**One duplicate retired:** `CorpusFileTests` held its own hard-coded copy of the ten
+payload kinds and now reads the manifest. A second copy of a registry can only drift
+from the first — and then the test enforcing the registry is the one asserting the
+stale answer.
+
+**D17 landed additive, and the corpus proved it rather than the commit message
+claiming it:** `dev/` is byte-identical after `LEDGERKIT_RECORD=1`, because no existing
+fixture uses the case and the nil form encodes to the pre-widening bytes exactly. The
+cost that is *not* free is Swift-side — enum cases cannot have default parameter
+values, so every construction site must now spell both labels. Three test files, today;
+that number only grows.
+
+**Mutation-tested, all six caught, all reverted** (every file diffed byte-identical
+against its backup afterwards):
+
+| Mutation | Caught by |
+|---|---|
+| A retired tag made live again (`Kind.contextSizeExceeded = "contextWindowExceeded"`) | 8 tests, incl. **both** halves of the reserved check and the D17 legacy fixture |
+| A registered field key renamed (`endpoint` → `pathEndpoint`) | the registry's field-key check, plus every `dev/` byte comparison |
+| The manifest gutted (a level emptied, the reserved table cleared) | the level check, the corpus-coverage check, **and** both non-vacuity floors |
+| `append` returns a sequence it did not write | P1's fold-forward equality **and** its return-equals-read sub-property |
+| `append` skips a sequence number | P1 (`replayed == whole`), cold open, store equivalence |
+| `projectionProblems` returns `[]` unconditionally | six of the seven P2 predicate tests |
+
+The first is the one to dwell on: it is *tag reuse*, the single thing ADR-001 forbids
+outright, and it was caught by a test that reads a JSON file and by a test that expects a
+decode to throw. Either alone would have been enough this time; neither alone covers the
+other's failure mode.
+
+**Also fixed in passing:** four `try` markers left over from Phase 2 (when
+`CorpusDocument.loadedEvents()` stopped throwing) were emitting warnings. Both packages
+are warning-free again.
 
 ---
 
@@ -740,8 +835,12 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
     (`attachment` added, 27+); text-only user content
     (`userMessageAppended(content: String)`) is recorded as an owned v0.1
     scoping decision with additive headroom, not an accident of iOS 26 shapes.
-11. **D17** — `contextSizeExceeded(contextSize: Int?, tokenCount: Int?)`: the
-    wire item; approve or record deliberate omission (§3 D17 has the analysis).
+11. **D17** — ✅ **shipped at Phase 4**, so rev 7 *records* rather than proposes:
+    `contextSizeExceeded(contextSize: Int?, tokenCount: Int?)`, absent-key
+    optionals, tag unchanged, classification untouched. §8's code block and its
+    coverage table both need the new payload; note the 1:1 row now carries
+    Apple's two fields. Mention `wire/contextSizeExceededLegacy` as the pin on
+    the pre-widening form.
 12. **§10.1** — the provisional name resolves: **Understudy**. Strike the stale
     OQ3 ⚠️ in the same section.
 13. **Footnote** — `Refusal.explanation` is on-demand generation
@@ -785,12 +884,12 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 |---|---|---|
 | §6.6 rows 1–2 from disk (`raw` form + wire fixtures) | Phase 2 | ☐ |
 | Diagnostic identity through production loader | Phase 2 | ☐ |
-| P1 exhaustive over corpus | Phase 4 | ☐ |
+| P1 exhaustive over corpus | `FoldForwardTests` — every replayable fixture × every flush boundary, fold and classify levels | ☑ |
 | P3 against real store, diagnostics included | Phase 3 | ☐ |
 | Cold-open ≤ one generation suffix (rows replayed) | Phase 3 | ☐ |
 | Index maintained on non-delta appends only | Phase 1 | ☐ |
 | Timestamps born canonical at the store | Phase 1 + corpus | ☐ |
-| Registry manifest (ADR-001 D-3) | Phase 4 | ☐ |
+| Registry manifest (ADR-001 D-3) | `Registry/tags.json` + `RegistryTests` (10 tests) | ☑ |
 | No public memberwise inits on derived state | Phase 0 | ☐ |
 | Understudy renamed, both packages green | Phase 0 | ☐ |
 
@@ -803,8 +902,9 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | D15 | One production `WireJSON` encoder; corpus files stay pretty; bytes pinned against `WireJSON` | **Accepted** · applies Phase 1 |
 | D16 | Schema-version placement (column-only vs column+blob) | **Resolved: column-only** 2026-07-26 (Alexander) · ADR-001 D-2 closed |
 | D19 | `events.payload` is TEXT (readable via `sqlite3`/`json1`); snapshots stay BLOB | **Accepted** 2026-07-26 · landed Phase 1 |
-| D17 | `contextSizeExceeded` optional payload | **Pending rev 7 approval** — implement Phase 4 |
-| D18 | P1 splits exhaustive, D6 generator discipline carries forward | **Accepted** · applies Phase 4 |
+| D17 | `contextSizeExceeded` optional payload | **Landed** 2026-07-26 (approved by Alexander at the Phase 4 instruction) · additive on the wire, source-breaking in Swift (cases take no default arguments) · SPEC rev 7 item 11 still to draft in Phase 5 |
+| D18 | P1 splits exhaustive, D6 generator discipline carries forward | **Accepted** · applied Phase 4 |
+| D20 | ADR-001 D-3 closes as a **manifest test coupled to the exhaustive inventories** — the manifest cannot see a deleted case, so `Wire.allKinds`/`allErrors` went `internal` and removal is a compile error | **Accepted** 2026-07-26 · landed Phase 4 |
 
 ## 10. Status log
 
@@ -815,4 +915,5 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | 2026-07-26 | **Phase 0 done (D13)** | **200** (179 + 21) | Breaking-surface pass: four inits internal, `MessageContent`, `.failed` labels, `GenerationError` description (+4 tests, mutation-tested), both config types → structs with factories. Zero warnings. Playground label-fixed; its rewrite carried as a follow-up |
 | 2026-07-26 | **Phase 1 done (GRDB wiring)** | **223** (202 + 21) | GRDB 7.11.1, three `STRICT` tables, six verbs, `WireJSON`, `LedgerSchema`'s two versions, two-stage loader (pulled forward from Phase 2). D16 → column-only, D19 recorded. **ADR-003 Accepted; ADR-001 D-1/D-2 closed.** 4 mutations injected, all caught, all reverted |
 | 2026-07-26 | **Phase 2 done (corpus integration)** | **226** (205 + 21) | `raw` rows implemented through the production loader; `rich`/`hostile` on disk (M3 handoffs 1–2 closed); `wire/undecodableRows` authored; store↔corpus equivalence sweep. Corpus now *depends on* the loader. 4 mutations caught. **Rev 7 gains item 14** (§6.6 has no case for "known kind, malformed body") |
+| 2026-07-26 | **Phase 4 done (P1, P2 scaffolding, D-3, D17)** | **266** (245 + 21) | P1 through the real store at every flush boundary (fold *and* classify levels); P2's predicate + `LiveOverlay` parameterization, swept at every truncation with the empty live set, with seven tests of the predicate itself; `Registry/tags.json` + `RegistryTests` closing **ADR-001 D-3** (and retiring `CorpusFileTests`' duplicate registry); **D17** widened `contextSizeExceeded` with `dev/` provably byte-identical. 6 mutations caught. Four stale `try` warnings cleaned up |
 | 2026-07-26 | **Phase 3 done (snapshots + cold open)** | **239** (218 + 21) | `Snapshot` coding + the four-condition discard policy + `foldedState(of:)` as a composition above the seam. P3 through the **codec** (all fixtures — the sweep that reaches diagnostics) and through the **store** (replayable, real SQLite). **Cold open: 10,004 events → 3 rows replayed, ~28 ms**, measured on the resume path via a counting wrapper. 4 mutations caught. Suite 0.18 s → 0.58 s, all of it appending |

@@ -49,7 +49,7 @@ struct CorpusFileTests {
                 CorpusDocument.self,
                 from: CorpusFiles.read(CorpusFiles.logFile(CorpusFiles.wire, name))
             )
-            let state = fold(try document.loadedEvents(), for: document.conversationID)
+            let state = fold(document.loadedEvents(), for: document.conversationID)
             try CorpusFiles.write(
                 Data(StateDump.render(state).utf8),
                 to: CorpusFiles.dumpFile(CorpusFiles.wire, name)
@@ -84,7 +84,7 @@ struct CorpusFileTests {
                 CorpusDocument.self,
                 from: CorpusFiles.read(CorpusFiles.logFile(CorpusFiles.dev, name))
             )
-            let state = fold(try document.loadedEvents(), for: document.conversationID)
+            let state = fold(document.loadedEvents(), for: document.conversationID)
             let expected = try String(decoding: CorpusFiles.read(CorpusFiles.dumpFile(CorpusFiles.dev, name)), as: UTF8.self)
             #expect(StateDump.render(state) == expected, "\(name) reduced differently than recorded")
         }
@@ -107,7 +107,7 @@ struct CorpusFileTests {
                 CorpusDocument.self,
                 from: CorpusFiles.read(CorpusFiles.logFile(CorpusFiles.wire, name))
             )
-            let state = fold(try document.loadedEvents(), for: document.conversationID)
+            let state = fold(document.loadedEvents(), for: document.conversationID)
             let expected = try String(decoding: CorpusFiles.read(CorpusFiles.dumpFile(CorpusFiles.wire, name)), as: UTF8.self)
             #expect(StateDump.render(state) == expected, "\(name) reduced differently than recorded")
         }
@@ -125,7 +125,7 @@ struct CorpusFileTests {
                 CorpusDocument.self,
                 from: CorpusFiles.read(CorpusFiles.logFile(CorpusFiles.frozen, name))
             )
-            let state = fold(try document.loadedEvents(), for: document.conversationID)
+            let state = fold(document.loadedEvents(), for: document.conversationID)
             let expected = try String(decoding: CorpusFiles.read(CorpusFiles.dumpFile(CorpusFiles.frozen, name)), as: UTF8.self)
             #expect(StateDump.render(state) == expected, "FROZEN fixture \(name) changed meaning")
         }
@@ -247,17 +247,64 @@ struct CorpusFileTests {
         #expect(state.reasons.contains(.unknownPayloadKind(nil)))
     }
 
+    @Test("the pre-widening contextSizeExceeded form still decodes (D17)", .enabled(if: !CorpusFiles.isRecording))
+    func widenedErrorPayloadStaysBackwardCompatible() throws {
+        // D17 widened `contextSizeExceeded` to carry `contextSize`/`tokenCount`.
+        // The claim is that this was *additive*: the tag is unchanged, so bytes
+        // written before the widening still decode — with nils — and nothing about
+        // the reduced state moves except the two numbers.
+        //
+        // `WireFormatTests` pins that at the codec. This pins it where it is
+        // actually earned: from bytes on disk, in a log, through the fold, in the
+        // three shapes an app's history really contains after an upgrade — one
+        // written before, one after, and one by a *later* version that added a
+        // field we have never heard of.
+        let document = try JSONDecoder().decode(
+            CorpusDocument.self,
+            from: CorpusFiles.read(CorpusFiles.logFile(CorpusFiles.wire, "contextSizeExceededLegacy"))
+        )
+        let state = fold(document.loadedEvents(), for: document.conversationID)
+
+        // Nothing quarantined: a widened case is not a new kind, and an unknown
+        // *field* is not an unknown tag (ADR-001 R-2's additive headroom).
+        #expect(state.diagnostics.isEmpty)
+
+        let errors = state.messages.values
+            .sorted { "\($0.id)" < "\($1.id)" }
+            .compactMap { message -> GenerationError? in
+                if case .failed(_, let error) = message.state { error } else { nil }
+            }
+        #expect(errors == [
+            .contextSizeExceeded(contextSize: nil, tokenCount: nil),
+            .contextSizeExceeded(contextSize: 4_096, tokenCount: 5_120),
+            .contextSizeExceeded(contextSize: 4_096, tokenCount: 5_120),
+        ])
+
+        // And the affordance is identical across all three, which is the point of
+        // keeping the payload out of classification (§8).
+        let conversation = Conversation(reducing: document.loadedEvents(), loadedFrom: document.conversationID)
+        var classified = 0
+        for id in state.messages.keys.sorted(by: { "\($0)" < "\($1)" }) {
+            guard case .failed(_, _, let recoverability) = conversation.messages[id]?.state else { continue }
+            #expect(recoverability == .recoverableUpstream(.reduceContext))
+            classified += 1
+        }
+        #expect(classified == 3, "all three overflow shapes must reach classification")
+    }
+
     @Test("the corpus covers every payload kind in the discriminator registry", .enabled(if: !CorpusFiles.isRecording))
     func corpusCoversTheWireSurface() throws {
         // The corpus exists to protect *encoding* evolution, so a payload kind
         // absent from it is a kind with no evolution safety net at all. ADR-001
         // calls the registry permanent; this is the check that a new tag arrives
         // with a fixture rather than a year later.
-        let registry: Set<String> = [
-            "conversationCreated", "userMessageAppended", "instructionsChanged",
-            "generationStarted", "deltaAppended", "toolInvocationRecorded",
-            "generationEnded", "messageEdited", "activePathChanged", "titleChanged",
-        ]
+        //
+        // Read from `Registry/tags.json` since M4 Phase 4 (ADR-001 D-3) rather than
+        // re-listed here. A second copy of the registry could drift from the first,
+        // and then *this* test would be the one asserting the stale answer — which
+        // is the failure mode a registry exists to prevent, committed by the test
+        // that enforces it.
+        let registry = try TagRegistry.load().registeredTags("payload")
 
         var covered: Set<String> = []
         for directory in [CorpusFiles.dev, CorpusFiles.wire, CorpusFiles.frozen] {

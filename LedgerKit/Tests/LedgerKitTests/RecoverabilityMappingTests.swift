@@ -13,7 +13,11 @@ struct RecoverabilityMappingDefaultTests {
         (.modelUnavailable(.deviceNotEligible), .terminal),
         (.modelUnavailable(.appleIntelligenceNotEnabled), .recoverableUpstream(.enableAppleIntelligence)),
         (.modelUnavailable(.modelNotReady), .recoverableUpstream(.awaitModelDownload)),
-        (.contextSizeExceeded, .recoverableUpstream(.reduceContext)),
+        // Both D17 payload forms, mapping to the same row: classification reads
+        // the case, never the numbers, so a populated payload must not be able to
+        // reach a different affordance from an absent one.
+        (.contextSizeExceeded(contextSize: nil, tokenCount: nil), .recoverableUpstream(.reduceContext)),
+        (.contextSizeExceeded(contextSize: 4_096, tokenCount: 5_120), .recoverableUpstream(.reduceContext)),
         (.guardrailViolation, .terminal),
         (.refusal, .terminal),
         (.unsupported(.capability), .terminal),
@@ -117,7 +121,10 @@ struct RecoverabilityMappingOverrideTests {
         mapping.guardrailViolation = .retryable(after: nil)
 
         #expect(mapping.recoverability(for: .guardrailViolation) == .retryable(after: nil))
-        #expect(mapping.recoverability(for: .contextSizeExceeded) == .recoverableUpstream(.reduceContext))
+        #expect(
+            mapping.recoverability(for: .contextSizeExceeded(contextSize: nil, tokenCount: nil))
+                == .recoverableUpstream(.reduceContext)
+        )
         #expect(mapping.recoverability(for: .unrecognized(description: "x")) == .terminal)
         #expect(
             mapping.recoverability(for: .refusal) == .terminal,
