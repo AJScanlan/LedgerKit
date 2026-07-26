@@ -1,6 +1,11 @@
 # M3 Implementation Plan — Test corpus + `ScriptedLanguageModel`
 
-**Status:** Phase 0 not started
+**Status:** ✅ **M3 complete — 2026-07-26.** All five phases done, 196 tests green
+(175 `LedgerKit` + 21 `LedgerKitTestSupport`), SPEC rev 6 ratified at the
+boundary. Retained as the record of *why* M3 looks the way it does — the
+decision log (D1–D12) and the per-phase audit notes are the durable part. Next
+milestone: **M4** (SQLite store, snapshots, index); its inherited obligations are
+in §4.
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M3 section) · [SPEC.md](./SPEC.md) §10, §6.6, §6.1, §6.3
 **Baseline:** M0–M2 done and audited, SPEC rev 5 ratified, 143 tests green (LedgerKit package).
 
@@ -549,24 +554,30 @@ public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLi
     }
 }
 
-public final class Cue: Sendable {          // two-sided rendezvous
+public actor Cue {                          // two-sided rendezvous
     public init()
+    public var isReached: Bool { get }
     public func reached() async             // test waits for the model to park here
     public func signal()                    // let it continue
 }
 
 public enum ScriptExhaustion: Sendable { case fail, repeatLast, loop }
+public struct ScriptExhausted: Error { let scripted: Int; let requested: Int }
 
 // 27+ — the real conformance, compile-checked today
 @available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
 public struct ScriptedLanguageModel: LanguageModel {
-    public init(replying: String)
-    public init(script: Script)
-    public init(scripts: [Script], whenExhausted: ScriptExhaustion = .fail)
-    public init(failingWith: any Error)
+    public var capabilities: LanguageModelCapabilities        // settable; empty by default
+    public init(script: Script, capabilities: … = [], clock: … = ContinuousClock())
+    public init(scripts: [Script], whenExhausted: ScriptExhaustion = .fail, …)
     public var requests: [LanguageModelExecutorGenerationRequest] { get }   // spy, sync
+    public var responseCount: Int { get }
 }
 ```
+
+*(As shipped. Two deltas from the sketch reviewed on 2026-07-26: `Cue` became an
+actor — both sides await, which is the safe way to hold continuations — and the
+`replying:` / `failingWith:` initializers were dropped; see the note below.)*
 
 #### Tasks — ✅ done 2026-07-26 (21 tests; LedgerKit still 175)
 
@@ -645,21 +656,36 @@ contract and likely a consumer's first impression of the project.
 
 **`LedgerKitTestSupport` is a poor name for the "gateway drug" pitch** — nobody
 installs *LedgerKitTestSupport* to get a scripted Foundation Models double.
-SPEC §10.1 names the product, so renaming is a rev-6 conversation, not an
-implementation decision.
+Recorded in SPEC §10.1 (rev 6) as **provisional**, with the decision due no later
+than the `0.1.0` tag. Not yet decided; candidates and their arguments:
+
+| Candidate | For | Against |
+|---|---|---|
+| `LanguageModelDirector` | Says what it does; sits naturally beside `LanguageModelSession` / `LanguageModelExecutor` | **`LanguageModel*` is Apple's de facto namespace in this framework and it is actively growing** — `LanguageModelExecutor`, `LanguageModelCapabilities`, `LanguageModelExecutorGenerationRequest` are all new in 27. A third-party product there reads as first-party and risks a real collision. Also inverts the metaphor: in it, the *developer* is the director and the package supplies the performer |
+| `Understudy` | A stand-in who knows the script and performs on demand **is** a test double, exactly; unmistakably third-party; self-documenting the way `Cue` is | Says nothing about Foundation Models, so discovery suffers unless the package description carries it |
+| `ScriptedModels` / `FoundationModelsScripted` | Discoverable — the words a searcher actually types | Flat; abandons the metaphor that makes `Script` and `Cue` read as one idea |
+
+The theatrical metaphor is load-bearing rather than decorative, and worth
+protecting in whatever name wins: `Script` is simultaneously the software sense
+(a list of instructions) and the theatrical one (lines an actor performs), which
+is what makes `Cue` self-explanatory — "wait for your cue" needs no doc comment.
+A name that abandons it costs that.
 
 ---
 
-### Phase 5 — Wrap-up
+### Phase 5 — Wrap-up ✅ *done 2026-07-26*
 
-- [ ] Fill §5 traceability table completely (row ↔ fixture ↔ suite).
-- [ ] ROADMAP.md: mark M3 done with the same audit-note style as M1/M2
-      (deviations recorded: D3's topology reversal, D5's row-1/2 → M4 handoff).
-- [ ] CLAUDE.md status paragraph: M3 done, test counts, next = M4 (+ the
-      loader's inherited obligations: raw-row corpus form, row-1/2 fixtures).
-- [ ] Confirm no spec amendments accrued; if any did, they are a rev-6 proposal
-      *first* (approval before implementation).
-- [ ] Full suites green in both packages; do not mark done otherwise.
+- [x] §5 traceability table filled: every §6.6 row, non-rule and invariant maps
+      to a named suite; the only open cells are rows 1–2's on-disk form, which
+      is M4's by construction (D5).
+- [x] ROADMAP.md: M3 struck through with an audit note, exit criteria marked,
+      OQ3/OQ5 struck from the tracker, handoffs to M4 recorded.
+- [x] CLAUDE.md: status paragraph rewritten; harness landmarks, corpus rules and
+      the mutation-testing practice recorded for future sessions.
+- [x] **SPEC rev 6 ratified** at the M3 boundary. Amendments now open rev 7.
+- [x] Both packages green, warning-free.
+
+**Final state: 196 tests** — 175 `LedgerKit`, 21 `LedgerKitTestSupport`, ≈0.2 s.
 
 ---
 
@@ -681,15 +707,15 @@ line numbers are stable — Phase 0 only removed its tail.
 
 | Row | Condition | Existing coverage | Gap → phase |
 |---|---|---|---|
-| 1 | Undecodable envelope | `FolderTests:97` `undecodableEnvelope`; hostile seq 16 | on-disk form → **P3**/M4 |
-| 2 | Unknown payload kind | `FolderTests:87` `undecodableIsNotAGap` (asserts eventID); rich seq 12, hostile seq 17 | on-disk form → **P3**/M4 |
-| 3 | Undecodable outcome — **non**-quarantine | `WireFormatTests:261–318`, all four shapes + `<missing>`/`<unreadable>` | **decode-level only — no test proves a tolerant terminal *terminates the generation* in the fold** → **P1** |
+| 1 | Undecodable envelope | `FolderTests:97` `undecodableEnvelope`; hostile seq 16 | on-disk `raw` form → **M4** (reserved in schema) |
+| 2 | Unknown payload kind | `FolderTests:87` `undecodableIsNotAGap` (asserts eventID); rich seq 12, hostile seq 17 | on-disk `raw` form → **M4** (reserved in schema) |
+| 3 | Undecodable outcome — **non**-quarantine | `WireFormatTests:261–318`, all four shapes | ✅ **P1** `NonRuleTests.tolerantTerminalTerminatesTheGeneration` (fold level, real decoder) · ✅ **P3** `wire/tolerantTerminals.json` (from bytes, 3 shapes) |
 | 4 | Foreign `conversationID` | `FolderTests:49` `foreignConversation`, `:58` `foreignOutranksGenesis`; hostile seq 22 | — |
 | 5 | Before genesis / second genesis | `FolderTests:30`, `:40`; hostile seq 1, 3 | — |
-| 6 | User append: unknown parent / ID reuse | `FolderTests:231` `unknownParent`, `:240` `duplicateMessageID` | back-door shape (reuse an **in-flight assistant** ID) → **P1** |
+| 6 | User append: unknown parent / ID reuse | `FolderTests:231` `unknownParent`, `:240` `duplicateMessageID` | ✅ **P1** `AllocateOnceTests.inFlightAssistantIDCannotBeReused` (the rev-5 back door) |
 | 7 | Second bare nil-parent append | `FolderTests:221` `secondRootMessage`; hostile seq 5 | — |
 | 8 | Start: gen-ID reuse / bound msg-ID / unknown parent | `FolderTests:440`, `:449`, `:457`, `:467`, `:474`; hostile seq 6 | — |
-| 9 | Delta/tool/**terminal** unknown gen; out-of-bounds | `FolderTests:571`, `:581`, `:601` (delta), `:618` cascade (all three kinds); hostile seq 7, 8, 12 | standalone row-9-vs-10 partition test → **P1** |
+| 9 | Delta/tool/**terminal** unknown gen; out-of-bounds | `FolderTests:571`, `:581`, `:601`, `:618` cascade; hostile seq 7, 8, 12 | ✅ **P1** `TerminalPartitionTests.partition` (row 9 vs row 10 in one log) |
 | 10 | Second terminal | `FolderTests:591`; `FolderOrderingTests:185`; hostile seq 13 | — |
 | 11 | Edit: assistant / unknown / replacement collision | `FolderTests:608`, `:314`, `:321`; hostile seq 14 | — |
 | 12 | Path endpoint never existed | `FolderTests:336`; `ClassifyTests:104`; hostile seq 15 | — |
@@ -698,29 +724,29 @@ line numbers are stable — Phase 0 only removed its tail.
 
 | Non-rule | Existing coverage | Gap → phase |
 |---|---|---|
-| Tolerant terminal | `WireFormatTests:261–318` | fold-level end-to-end → **P1** |
+| Tolerant terminal | `WireFormatTests:261–318` | ✅ **P1** + **P3**, as row 3 above |
 | Role adjacency (assistant parent, consecutive user siblings, nil-parent start) | `FolderTests:252`, `:421`, `:431` | — |
-| Sequence gaps (one per contiguous gap) | `FolderTests:65`, `:77`, `:87` | **gap that swallows a terminal ⇒ `.interrupted`** → **P1** |
+| Sequence gaps (one per contiguous gap) | `FolderTests:65`, `:77`, `:87` | ✅ **P1** `Corpus.gapSwallowedTerminal` + `CorpusTests.gapSwallowedTerminalInterrupts` · ✅ **P2** oracle over 520 mutations |
 | Cascade (start orphans delta + tool + terminal) | `FolderTests:618`, exact residue | — |
-| Duplicate `EventID` reduces without residue | **none** | → **P1** |
+| Duplicate `EventID` reduces without residue | **none** | ✅ **P1** `NonRuleTests.duplicateEventIDIsNotAQuarantine` |
 | Row ordering is a precondition | `FolderOrderingTests:133–204` (6 tests) | — |
 
 ### Invariants and sweeps
 
 | Item | Existing coverage | Gap → phase |
 |---|---|---|
-| I1 literal goldens (cross-process) | `CorpusTests:47` `richGolden` | per-fixture goldens → **P1** |
-| I1 repeat / mapping half | `CorpusSweepTests:18`; `ClassifyDeterminismTests` | — |
-| I2 totality over prefixes | `CorpusSweepTests:29` — **now both layers, corpus-wide** | interior-gap + compound → **P2** |
+| I1 literal goldens (cross-process) | `CorpusTests` `richGolden` | ✅ **P1** `goldenOrderings` (multiTurn, editBranch, rootEdit, toolsAndMetadata) |
+| I1 repeat / mapping half | `CorpusSweepTests`; `ClassifyDeterminismTests` | — |
+| I2 totality over prefixes | `CorpusSweepTests` — both layers, corpus-wide | ✅ **P2** `interiorGapSweep` (520 mutations) + `compoundSweep` (3,289) |
 | I3 / I4 | rows 9, 10 above | — |
-| I5 synthesis | `ClassifyTests:17`; now universal via the bridge predicate | partial-content sweep → **P2** |
-| I6 virtual root / clamping | `CorpusSweepTests:54`; `FolderTests:304` root edit | — |
-| I7 allocate-once at 3 sites | rows 6, 8, 11 above | assert as **one rule** → **P1** |
+| I5 synthesis | `ClassifyTests`; universal via the bridge predicate | ✅ **P2** `interruptionIsExactAcrossTruncations` (independent oracle) + `truncationIsMonotone` |
+| I6 virtual root / clamping | `CorpusSweepTests`; `FolderTests:304` root edit | — |
+| I7 allocate-once at 3 sites | rows 6, 8, 11 above | ✅ **P1** `AllocateOnceTests.oneRuleThreeSites` + `allocationIsPermanentNotCurrent` |
 | Diagnostic identity (eventID populated) | **universal** in `invariantProblems` (Phase 0) | — |
-| P3 snapshot equivalence | `CorpusSweepTests:75`, every split of every fixture | widen with corpus → **P2** |
-| Crash-fuzz interior gaps | **none** | → **P2** |
-| Version-frozen corpus | **none** | → **P3** |
-| `ScriptedLanguageModel` | **none** | → **P4** |
+| P3 snapshot equivalence | `CorpusSweepTests`, every split of every fixture | ✅ **P2** `resumeEqualsReplayUnderMutation` (every split of every row-deleted fixture) |
+| Crash-fuzz interior gaps | **none** | ✅ **P2** exhaustive, with an independent gap oracle |
+| Version-frozen corpus | **none** | ✅ **P3** `dev/` (8) + `wire/` (1) + `frozen/` + freeze procedure |
+| `ScriptedLanguageModel` | **none** | ✅ **P4** real conformance, 21 tests |
 
 ### Golden shapes already covered (no new fixture needed unless pinned as a file)
 
