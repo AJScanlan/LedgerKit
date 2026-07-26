@@ -40,9 +40,19 @@ public enum QuarantineReason: Sendable, Hashable, Codable {
     /// `QuarantinedEvent.eventID` nil.
     case undecodableEnvelope
 
-    /// Row 2 — a payload discriminator this version does not know, i.e. written
-    /// by a newer LedgerKit. Carries the tag where it was legible. The
-    /// forward-compatibility row: the conversation loads degraded, never fails.
+    /// Row 2 — **the payload would not decode, with the envelope intact.** Two
+    /// conditions, one disposition (SPEC rev 7 widened the row to say so): a
+    /// discriminator this version does not know, i.e. written by a newer
+    /// LedgerKit, *or* one it does know carrying a body it cannot read. Carries
+    /// the tag where it was legible.
+    ///
+    /// The forward-compatibility row: the conversation loads degraded, never
+    /// fails. The two conditions are not distinguished because the instruction to
+    /// a diagnostic reader is identical — *look at that row* — and the tag already
+    /// says which one they are looking at. The case **name** keeps its original
+    /// spelling deliberately: renaming it would be a source break for consumers
+    /// switching exhaustively, and would move every fixture that renders it, to
+    /// buy nothing the tag does not already carry.
     case unknownPayloadKind(String?)
 
     // MARK: Stream integrity (rows 4–5)
@@ -131,7 +141,12 @@ extension QuarantineReason: CustomStringConvertible {
         case .undecodableEnvelope:
             "row undecodable; no event identity recoverable"
         case .unknownPayloadKind(let kind):
-            "unknown payload kind: \(kind ?? "<unreadable>")"
+            // Not "unknown payload kind": SPEC rev 7 widened row 2 to include a
+            // kind this version *does* know whose body will not decode, and the
+            // old wording read as a false claim on exactly those rows. Prose is
+            // non-contractual (ADR-001), so this cost one line and moved no
+            // fixture — `StateDump` renders the case name, not this string.
+            "payload undecodable (kind: \(kind ?? "<unreadable>"))"
         case .foreignConversation(let found):
             "envelope names conversation \(found), which is not the stream it was loaded from"
         case .beforeGenesis:

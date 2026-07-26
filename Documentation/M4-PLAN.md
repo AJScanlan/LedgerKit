@@ -62,7 +62,7 @@ re-derive them:
 | `LanguageModelSession.Error` — `.concurrentRequests`, `.transcriptMutationWhileResponding` | ~L1985 | OQ6 closed — busy session is a **typed error** now, superseding the iOS 26 "surfaces as `rateLimited`" evidence. §7.2 gate stays as insurance. M6 residue: confirm it's *thrown*, not trapped |
 | `ResponseStream.Snapshot { content, rawContent, transcriptEntries (27+), usage (27+) }` | ~L2200 | OQ4 closed |
 | Provider channel has **`replaceTextSegment`** beside `appendText`, both with `segmentID` | Response.Action | **§7.3's prefix property is provider behavior, not an API guarantee.** M6 should diff segment-aware via `transcriptEntries`, or expect the fail-loud path to fire on well-behaved providers |
-| `Transcript.Entry` has a **seventh case: `attachment`** (multimodal, 27+) | ~L2253 | N11 count stale; text-only user content is now a *scoping decision* to own in rev 7 |
+| ~~`Transcript.Entry` has a **seventh case: `attachment`** (multimodal, 27+)~~ **✗ WRONG — see the correction below** | ~L2253 | N11 count stale; text-only user content is now a *scoping decision* to own in rev 7 |
 | `Transcript.ToolCalls` / `.ToolOutput` / `.Reasoning` all have **public inits**; reasoning carries `segments` + `signature: Data?` | ~L2475–2604 | OQ2/OQ9 closed — v0.2 transcript-fidelity is feasible, reasoning recordable *in principle*; v0.1 ignores by choice |
 | `LanguageModel` protocol = `capabilities` + `executorConfiguration` only; configurations opaque; **no `modelID` key anywhere** | ~L1440 | OQ8 closed — requested `ModelDescriptor` is **app-supplied at driver init**; `StopInfo.resolvedModelID` is provider convention, expect nil on-device |
 | `ContextOptions { includeSchemaInPrompt, reasoningLevel }`; `Transcript` is `MutableCollection` + `RangeReplaceableCollection` at 27; `TranscriptErrorHandlingPolicy { .revertTranscript, .preserveTranscript }` | ~L3068, ~L2754 | OQ7 closed — everything is session-scoped; §2's sherlock check **passes** |
@@ -70,6 +70,63 @@ re-derive them:
 | `LanguageModelError.ContextSizeExceeded` carries **`contextSize: Int, tokenCount: Int`** | ~L1500 | D17 — the one wire decision, below |
 | `Usage.Input { totalTokenCount, cachedTokenCount }`, `Usage.Output { totalTokenCount, reasoningTokenCount }` | ~L1955 | §7.7's ⚠️ closes; maps 1:1 onto `TokenUsage`'s four fields |
 | `Refusal.explanation` is an **on-demand generation** (`Response<String>` property), not stored data | ~L1639 | Confirms rev 6's decision not to project refusal text |
+
+### Correction appended 2026-07-26, drafting rev 7 (Phase 5)
+
+Before writing these facts into a ratified spec I spot-checked their citations —
+not re-deriving the table, just confirming the lines say what the row claims.
+**Twelve of thirteen hold exactly. One does not, and it is struck above:**
+
+> **`Transcript.Entry` did *not* gain a seventh case.** It still has **six**
+> (L2223–2231): `instructions`, `prompt`, `toolCalls`, `toolOutput`, `response`,
+> `reasoning` (the last gated 27+). The `attachment` case at **L2253 — the line
+> this table cites — belongs to `Transcript.Segment`**, which grew from two cases
+> to four: `text`, `structure`, `attachment` (27+), `custom` (27+).
+
+**Consequence: N11's "six entry kinds" was correct all along and rev 7 leaves the
+count alone.** The amendment lands one level down, at *segments* — which is the
+better home for the point anyway, since it is prompt and response *content* that
+can now be non-text, and that is what N8 and §7.3 already scope out. Rev 7 adds
+**N8a** to own the text-only decision explicitly, since `Attachment<Content>` is
+`PromptRepresentable` and multimodal user input is therefore a real 27 feature.
+
+**A second finding, absent from this table, which *improves* the OQ6 row.** The
+iOS 26 enum `LanguageModelSession.GenerationError` is deprecated **case by case**
+at 27 (L3480–3506), each case naming its replacement: `.rateLimited` →
+`LanguageModelError.rateLimited`, `.concurrentRequests` →
+`LanguageModelSession.Error.concurrentRequests`, `.refusal` →
+`LanguageModelError.refusal`, `.decodingFailure` → `GeneratedContent.ParsingError`.
+That **explains** the iOS 26 evidence instead of merely superseding it: at 26 one
+enum held both `rateLimited` and `concurrentRequests`, so reading "busy session
+surfaces as rateLimited" out of it was reasonable. It also raises an obligation
+nobody had written down — **deprecated is not absent**, so a provider built against
+26 can still throw the old family, and §8's normalization must recognize both.
+Both are in rev 7 (§7.2, §8).
+
+**Citations confirmed, so the next reader need not repeat this** (Beta 4,
+`arm64e-apple-macos.swiftinterface`, 3,583 lines):
+
+| Claim | Line(s) |
+|---|---|
+| `LanguageModelSession(model: some LanguageModel, tools:, transcript:)` (+ `SystemLanguageModel`-defaulted overload at L41) | 1910 |
+| `LanguageModelSession.Error { concurrentRequests, transcriptMutationWhileResponding }` | 1986–1988 |
+| `ResponseStream.Snapshot { content, rawContent, transcriptEntries (27+), usage (27+) }` | 2151–2159 |
+| `replaceTextSegment(_:segmentID:tokenCount:)` — Response *and* Reasoning channels | 1818, 1843 |
+| `Transcript.ToolOutput(id:toolName:segments:)`; `Transcript.Reasoning { id, segments, signature: Data? }` | 2540–2544, 2599–2602 |
+| `LanguageModel` = `capabilities` + `executorConfiguration`, nothing else | 1440–1444 |
+| `ContextOptions { includeSchemaInPrompt, reasoningLevel }` | 3068–3071 |
+| `Transcript`: `MutableCollection`, `RangeReplaceableCollection`, `Codable`; `TranscriptErrorHandlingPolicy` | 2617, 2627, 2649, 2754 |
+| `LanguageModelError.RateLimited.resetDate: Date?` | 1516 |
+| `LanguageModelError.ContextSizeExceeded { contextSize: Int, tokenCount: Int }` — **non-optional**, unlike ours | 1500–1502 |
+| `Usage.Input { totalTokenCount, cachedTokenCount }` / `Usage.Output { totalTokenCount, reasoningTokenCount }`; `session.usage` | 1955–1967, 1898 |
+| `Refusal.explanation: Response<String>` (`async throws`) + `explanationStream` | 1639, 23 |
+
+**The generalizable lesson, recorded because it cost nothing this time and would
+have cost a lot at M6:** a fact table assembled by reading is still a
+*transcription*, and transcriptions of adjacent declarations are exactly where
+line-number citations go wrong — `Entry` and `Segment` are thirty lines apart and
+both have an `attachment`-shaped hole in the reader's memory. Cite, then re-read
+the citation before anything downstream depends on it.
 
 **Also decided at the boundary (2026-07-26): the test-double package is named
 `Understudy`.** The theatrical metaphor is load-bearing (`Script`, `Cue`,
@@ -882,16 +939,16 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 
 | Obligation | Suite / evidence | Status |
 |---|---|---|
-| §6.6 rows 1–2 from disk (`raw` form + wire fixtures) | Phase 2 | ☐ |
-| Diagnostic identity through production loader | Phase 2 | ☐ |
+| §6.6 rows 1–2 from disk (`raw` form + wire fixtures) | `wire/undecodableRows` + `CorpusFile`'s `raw` rows through the production loader | ☑ |
+| Diagnostic identity through production loader | `CorpusFileTests.diagnosticIdentityHoldsFromDisk` (both sides, non-vacuous) | ☑ |
 | P1 exhaustive over corpus | `FoldForwardTests` — every replayable fixture × every flush boundary, fold and classify levels | ☑ |
-| P3 against real store, diagnostics included | Phase 3 | ☐ |
-| Cold-open ≤ one generation suffix (rows replayed) | Phase 3 | ☐ |
-| Index maintained on non-delta appends only | Phase 1 | ☐ |
-| Timestamps born canonical at the store | Phase 1 + corpus | ☐ |
+| P3 against real store, diagnostics included | `SnapshotCodecTests` (all fixtures — the sweep that reaches diagnostics) + `SnapshotStoreTests` (real SQLite) | ☑ |
+| Cold-open ≤ one generation suffix (rows replayed) | `ColdOpenTests` — 10,004 events → 3 rows, measured on the resume path via a counting wrapper | ☑ |
+| Index maintained on non-delta appends only | `PersistenceStoreTests` — the ~4 Hz churn guard; `Payload.updatesIndex` is exhaustive | ☑ |
+| Timestamps born canonical at the store | `append`'s debug assertion + `Log.timestampsAreCanonical` + `CorpusFileTests.timestampsAreCanonical` | ☑ |
 | Registry manifest (ADR-001 D-3) | `Registry/tags.json` + `RegistryTests` (10 tests) | ☑ |
-| No public memberwise inits on derived state | Phase 0 | ☐ |
-| Understudy renamed, both packages green | Phase 0 | ☐ |
+| No public memberwise inits on derived state | Phase 0 (four inits internal; `MessageContent.init` deliberately public) | ☑ |
+| Understudy renamed, both packages green | Phase 0, own commit; SPEC §10.1 resolved in rev 7 | ☑ |
 
 ## 9. Decision log
 
@@ -915,5 +972,6 @@ line regions (Beta 4 — re-verify line numbers if a new beta lands first).
 | 2026-07-26 | **Phase 0 done (D13)** | **200** (179 + 21) | Breaking-surface pass: four inits internal, `MessageContent`, `.failed` labels, `GenerationError` description (+4 tests, mutation-tested), both config types → structs with factories. Zero warnings. Playground label-fixed; its rewrite carried as a follow-up |
 | 2026-07-26 | **Phase 1 done (GRDB wiring)** | **223** (202 + 21) | GRDB 7.11.1, three `STRICT` tables, six verbs, `WireJSON`, `LedgerSchema`'s two versions, two-stage loader (pulled forward from Phase 2). D16 → column-only, D19 recorded. **ADR-003 Accepted; ADR-001 D-1/D-2 closed.** 4 mutations injected, all caught, all reverted |
 | 2026-07-26 | **Phase 2 done (corpus integration)** | **226** (205 + 21) | `raw` rows implemented through the production loader; `rich`/`hostile` on disk (M3 handoffs 1–2 closed); `wire/undecodableRows` authored; store↔corpus equivalence sweep. Corpus now *depends on* the loader. 4 mutations caught. **Rev 7 gains item 14** (§6.6 has no case for "known kind, malformed body") |
+| 2026-07-26 | **Phase 5: SPEC rev 7 ratified** | **266** (245 + 21) | Appendix E; OQ1/2/4/6/7/8/9 closed by reading; §6.6 row 2 widened (+ its rendering reworded — non-contractual, zero fixture churn); N8a added. **One M4-PLAN §2 row found wrong while drafting** (`Transcript.Entry` vs `Transcript.Segment`) — corrected above with the confirmed citation list. Remaining: ROADMAP strike-through + OQ tracker, §8 traceability |
 | 2026-07-26 | **Phase 4 done (P1, P2 scaffolding, D-3, D17)** | **266** (245 + 21) | P1 through the real store at every flush boundary (fold *and* classify levels); P2's predicate + `LiveOverlay` parameterization, swept at every truncation with the empty live set, with seven tests of the predicate itself; `Registry/tags.json` + `RegistryTests` closing **ADR-001 D-3** (and retiring `CorpusFileTests`' duplicate registry); **D17** widened `contextSizeExceeded` with `dev/` provably byte-identical. 6 mutations caught. Four stale `try` warnings cleaned up |
 | 2026-07-26 | **Phase 3 done (snapshots + cold open)** | **239** (218 + 21) | `Snapshot` coding + the four-condition discard policy + `foldedState(of:)` as a composition above the seam. P3 through the **codec** (all fixtures — the sweep that reaches diagnostics) and through the **store** (replayable, real SQLite). **Cold open: 10,004 events → 3 rows replayed, ~28 ms**, measured on the resume path via a counting wrapper. 4 mutations caught. Suite 0.18 s → 0.58 s, all of it appending |
