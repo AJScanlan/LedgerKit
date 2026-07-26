@@ -1,6 +1,6 @@
 # LedgerKit v0.1 — Build Roadmap
 
-**Companion to:** [SPEC.md](./SPEC.md) — **rev 6 draft**, opened 2026-07-26 during M3, ratifies at the M3 boundary. (Rev 5 was ratified 2026-07-25 at the M2 boundary.)
+**Companion to:** [SPEC.md](./SPEC.md) — **rev 6, ratified 2026-07-26 at the M3 boundary**; subsequent amendments open rev 7. (Rev 5 was ratified 2026-07-25 at the M2 boundary.)
 **Target:** tagged `0.1.0` before iOS 27 GA (~Sept 2026). Estimate from spec §12: **4–6 weeks part-time**, assuming the ⚠️ beta verifications hold.
 **Sequencing strategy:** *pure core first* — build and fully test everything platform-agnostic (§6) before touching the beta-coupled session seam (§7).
 
