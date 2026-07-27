@@ -172,7 +172,7 @@ Three tables, append-only truth (§9). **266 tests green** — 245 in `LedgerKit
 > **Handoffs to M5** (five, in [M4-PLAN.md](./M4-PLAN.md) §7): the store actor is the **stamping site** and must mint timestamps canonical at birth (ADR-001 R-5 — both `append`'s debug assertion and the corpus's `timestampsAreCanonical` fail if it slips); snapshot **refresh policy** (§9's after-each-terminal cadence with a 500-event floor) is actor behaviour, since nothing at M4 *triggers* a refresh; **`LedgerError` is designed at M5**, against the real verbs, and M4 deliberately pre-committed no public error surface; `append` **returns the assembled tail** so the actor folds forward instead of re-reading — P1 is the property that makes that legal, and it is green before M5 starts; and in-flight registration / the live set is M5's, with `overlay_live` and P2's completion at M7.
 
 ### M5 — `ConversationStore` actor + turn verbs
-The concurrency boundary and the public write API (§6.5, §11). Still no FM — verbs take a driver but M5 can test against a no-op/scripted driver.
+The concurrency boundary and the public write API (§6.5, §11). Still no FM — verbs take a driver but M5 can test against a no-op/scripted driver. **Build order, decision log (D21–D28) and phase gates: [M5-PLAN.md](./M5-PLAN.md)** (drafted 2026-07-27 at the M4 boundary; rev 8 ratifies at this milestone's close).
 
 - Actor owning all writes; single-flight per conversation (`generationInFlight`), cross-conversation free.
 - **Start atomicity** (§6.5): single-flight check + appends + in-flight registration in one critical section; a losing `send` racer records *nothing*.
