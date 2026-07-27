@@ -48,6 +48,23 @@ import Foundation
 /// (§7.4). The store exposes exactly one read verb, ``conversation(_:)``.
 public actor ConversationStore {
 
+    /// One conversation's folded state and the sequence it is folded to (D23).
+    ///
+    /// The actor **folds forward**: `append` returns the assembled tail, so its
+    /// own writes are reduced into this pair rather than re-read. P1 is the
+    /// property that licenses it — it asserts the values `append` returned are
+    /// interchangeable with the bytes a re-read decodes, which is precisely the
+    /// claim this cache makes on every write.
+    ///
+    /// **No eviction policy in v0.1** beyond delete and the divergence drop
+    /// below: the cache is bounded by conversations actually touched in a
+    /// session, a `FoldedState` is small, and an LRU nobody measured is
+    /// complexity nobody asked for.
+    private struct CachedFold {
+        var state: FoldedState
+        var lastSequence: Int64
+    }
+
     private let persistence: any PersistenceStore
     private let deltaFlush: DeltaFlushPolicy
     private let snapshots: SnapshotPolicy
@@ -55,6 +72,7 @@ public actor ConversationStore {
     /// monotonicity state (``IDGenerator``).
     private var identifiers: any IdentifierSource
     private let now: @Sendable () -> Date
+    private var folds: [ConversationID: CachedFold] = [:]
 
     /// Opens (or creates) a store.
     ///
@@ -107,7 +125,7 @@ public actor ConversationStore {
 
     // MARK: - Lifecycle & metadata
     //
-    // Every body below is `fatalError` until its phase lands. This is the one
+    // Bodies still spelled `fatalError` belong to a later phase. This is the one
     // place in the package where that is permitted (M5-PLAN Phase 0): they are
     // compile scaffolding for a surface under review, and no test may reach one
     // — a test that does has found a missing implementation, which is exactly
@@ -116,7 +134,22 @@ public actor ConversationStore {
     /// Creates a conversation — a `conversationCreated` genesis event — and
     /// returns its (empty) reduced state.
     public func createConversation(title: String? = nil) async throws -> Conversation {
-        fatalError("ConversationStore.createConversation is M5 Phase 1")
+        let id = identifiers.makeConversationID()
+        let tail = try await commit([mint(.conversationCreated(title: title), in: id)], to: id)
+
+        // Seeded from `.empty` rather than cold-loaded: the identifier was
+        // minted a line ago, so no log can exist under it, and a read would be
+        // a round trip to confirm nothing. The genesis still arrives through
+        // `foldForward`, so there is one advance path rather than a special
+        // case that could drift from it.
+        folds[id] = CachedFold(state: .empty(id), lastSequence: 0)
+        foldForward(tail, in: id)
+
+        // Read back through the ordinary accessor rather than returning the
+        // state built above. In the happy path it is a dictionary lookup, and in
+        // any path where the genesis failed to reach the cache it falls back to
+        // the log — so this has no unreachable branch to get wrong.
+        return classify(try await existingFold(of: id).state, mapping: .default)
     }
 
     /// Sets the conversation's instructions; `nil` clears (§6.1).
@@ -128,7 +161,7 @@ public actor ConversationStore {
     /// - Throws: ``LedgerError/unknownConversation(_:)``, or a persistence
     ///   failure. Legal mid-generation.
     public func setInstructions(_ instructions: String?, in conversation: ConversationID) async throws {
-        fatalError("ConversationStore.setInstructions is M5 Phase 1")
+        try await record(.instructionsChanged(instructions), in: conversation)
     }
 
     /// Sets the conversation's title; `nil` clears — symmetric with
@@ -137,7 +170,7 @@ public actor ConversationStore {
     /// - Throws: ``LedgerError/unknownConversation(_:)``, or a persistence
     ///   failure. Legal mid-generation.
     public func setTitle(_ title: String?, in conversation: ConversationID) async throws {
-        fatalError("ConversationStore.setTitle is M5 Phase 1")
+        try await record(.titleChanged(title), in: conversation)
     }
 
     /// Deletes a conversation's events, snapshots, and index row. **Irreversible.**
@@ -178,7 +211,7 @@ public actor ConversationStore {
     ///   failing to load, and returning an empty conversation would be
     ///   indistinguishable from one that is genuinely empty.
     public func conversation(_ id: ConversationID) async throws -> Conversation {
-        fatalError("ConversationStore.conversation is M5 Phase 1")
+        classify(try await existingFold(of: id).state, mapping: .default)
     }
 
     // MARK: - Branching
@@ -319,6 +352,139 @@ public actor ConversationStore {
     /// exactly one terminal exists either way.
     public func cancelGeneration(in conversation: ConversationID) {
         fatalError("ConversationStore.cancelGeneration is M5 Phase 4")
+    }
+
+    // MARK: - The cache
+
+    /// Drops a conversation's cached fold.
+    ///
+    /// Correctness never depends on this — the log is the truth, so the worst an
+    /// eviction costs is the replay it was avoiding. Phase 4's
+    /// ``deleteConversation(_:)`` calls it because the conversation is gone;
+    /// ``foldForward(_:in:)`` calls it because the cache can no longer be
+    /// trusted.
+    func evict(_ conversation: ConversationID) {
+        folds[conversation] = nil
+    }
+
+    /// A conversation's cached fold, cold-loading it if this is the first touch.
+    ///
+    /// **``FoldedState/hasGenesis`` is the existence predicate**, which is a
+    /// happy consequence rather than a design: the flag exists so a snapshot
+    /// resumed from a genesis-less log agrees with a replay of it (P3), and
+    /// "this conversation has a valid `conversationCreated`" is exactly what a
+    /// caller means by asking whether it exists. A log whose genesis quarantined
+    /// reads as unknown for the same reason it should — every subsequent append
+    /// to it would quarantine under §6.6 row 5.
+    ///
+    /// A missing conversation is deliberately **not** cached. A negative entry
+    /// would need invalidation, and unknown identifiers are not a hot path.
+    private func existingFold(of conversation: ConversationID) async throws -> CachedFold {
+        if let cached = folds[conversation] {
+            guard cached.state.hasGenesis else { throw LedgerError.unknownConversation(conversation) }
+            return cached
+        }
+
+        let loaded: (state: FoldedState, lastSequence: Int64)
+        do {
+            loaded = try await persistence.loadedFold(of: conversation)
+        } catch let error as CancellationError {
+            throw error
+        } catch {
+            throw LedgerError.wrapping(error)
+        }
+        guard loaded.state.hasGenesis else { throw LedgerError.unknownConversation(conversation) }
+
+        // **Publish only if newer.** The load above awaited, and an actor is
+        // reentrant at every await, so another verb may have populated *and*
+        // advanced this entry while the read was in flight. Overwriting it would
+        // silently rewind the cache behind that verb's back, and the next append
+        // would then fold its tail onto a state missing an event — a false gap
+        // in memory that disk never had. The log only grows and this actor is
+        // its only writer, so "at least as far along" is the whole test.
+        if let current = folds[conversation], current.lastSequence >= loaded.lastSequence {
+            return current
+        }
+
+        let entry = CachedFold(state: loaded.state, lastSequence: loaded.lastSequence)
+        folds[conversation] = entry
+        return entry
+    }
+
+    /// Folds an appended tail into the conversation's cached state (D23).
+    ///
+    /// **Drops the entry rather than folding a hole into it** when the tail does
+    /// not continue exactly where the cache left off. Two verbs writing to one
+    /// conversation both await the database, and nothing orders their
+    /// resumptions: the later-sequenced tail can arrive first, and folding it
+    /// would raise a `sequenceGap` diagnostic *in memory* against a log that has
+    /// no gap — state diverging from disk while both halves look plausible
+    /// alone, which is the worst available shape and precisely what P1 exists to
+    /// catch. Dropping costs one replay and cannot be wrong.
+    private func foldForward(_ tail: [LedgerEvent], in conversation: ConversationID) {
+        guard let first = tail.first, let last = tail.last else { return }
+        guard var entry = folds[conversation], entry.lastSequence + 1 == first.sequence else {
+            evict(conversation)
+            return
+        }
+        entry.state = fold(
+            resuming: entry.state,
+            after: entry.lastSequence,
+            with: tail.lazy.map(LoadedEvent.decoded)
+        )
+        entry.lastSequence = last.sequence
+        folds[conversation] = entry
+    }
+
+    // MARK: - Writing
+
+    /// Appends one event to an existing conversation and folds it forward.
+    ///
+    /// The eligibility check runs first and the mint runs after it, so a verb
+    /// that throws consumes no identifier — identifiers are cheap, but a gap in
+    /// the v7 run is a false signal to anyone reading a log by eye.
+    private func record(_ payload: LedgerEvent.Payload, in conversation: ConversationID) async throws {
+        _ = try await existingFold(of: conversation)
+        let tail = try await commit([mint(payload, in: conversation)], to: conversation)
+        foldForward(tail, in: conversation)
+    }
+
+    /// Mints one wire record — **the stamping site** (M4 handoff 1).
+    ///
+    /// Timestamps are canonicalized *here*, at birth, and nowhere else.
+    /// `append` debug-asserts they arrive canonical and must never repair them:
+    /// repairing at write time would give every event two identities depending
+    /// on whether it had been to disk, which is the bug class ADR-001 R-5 and
+    /// P1/P3 exist to catch. The wire form carries milliseconds while `Date` is
+    /// a `Double` of seconds, so an unrounded stamp does not survive its own
+    /// encoding.
+    private func mint(_ payload: LedgerEvent.Payload, in conversation: ConversationID) -> LedgerEvent.Record {
+        LedgerEvent.Record(
+            id: identifiers.makeEventID(),
+            conversationID: conversation,
+            timestamp: WireDate.canonical(now()),
+            payload: payload
+        )
+    }
+
+    /// The seam boundary for writes: one transaction in, an assembled tail out,
+    /// and no backend error type escaping (ADR-003 rule 1).
+    ///
+    /// `CancellationError` passes through as itself. It is not a persistence
+    /// failure and must not be reported as one — §7.2 gives it its own meaning
+    /// on this channel, and a caller distinguishing "the disk failed" from "I
+    /// cancelled this" is the whole point of a typed error.
+    private func commit(
+        _ records: [LedgerEvent.Record],
+        to conversation: ConversationID
+    ) async throws -> [LedgerEvent] {
+        do {
+            return try await persistence.append(records, to: conversation)
+        } catch let error as CancellationError {
+            throw error
+        } catch {
+            throw LedgerError.wrapping(error)
+        }
     }
 }
 

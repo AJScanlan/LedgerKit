@@ -94,12 +94,39 @@ extension PersistenceStore {
     /// caps the seam at six verbs, and this is a *composition* of three of them.
     /// Policy above the seam, shared by every backend, overridable by none.
     func foldedState(of conversation: ConversationID) async throws -> FoldedState {
+        try await loadedFold(of: conversation).state
+    }
+
+    /// The same load, additionally reporting **the sequence the fold stopped at**.
+    ///
+    /// The pair is what an in-memory cache of a conversation needs, and it is the
+    /// same pair ``Snapshot`` persists (`payload` + `upToSequence`) — a fold is only
+    /// resumable if you know where it got to. M5's store actor holds one per
+    /// conversation: `lastSequence` is the `after:` its fold-forward passes when the
+    /// next append returns a tail, and the `upTo:` its snapshot refresh checkpoints
+    /// at (§9).
+    ///
+    /// It would have been easy to let the actor infer the sequence from the tail it
+    /// just appended — `tail.first.sequence - 1` — and that inference is *correct*
+    /// only because the store is the sole writer of contiguous sequences. Reading
+    /// the number back from the load instead means the actor can **check** that
+    /// assumption rather than depend on it, which is the difference between a false
+    /// gap diagnostic that surfaces and one that does not.
+    ///
+    /// `foldedState(of:)` is expressed in terms of this rather than beside it: two
+    /// compositions of the snapshot fast-path would be two things to get wrong, and
+    /// rev 3 already shipped that mistake once (P3 exists because of it).
+    func loadedFold(of conversation: ConversationID) async throws -> (state: FoldedState, lastSequence: Int64) {
         if let snapshot = try? await latestSnapshot(for: conversation),
            let resumed = snapshot.foldedState {
             let suffix = try await events(in: conversation, from: snapshot.upToSequence + 1)
-            return fold(resuming: resumed, after: snapshot.upToSequence, with: suffix)
+            return (
+                fold(resuming: resumed, after: snapshot.upToSequence, with: suffix),
+                suffix.last?.sequence ?? snapshot.upToSequence
+            )
         }
-        return fold(try await events(in: conversation, from: 1), for: conversation)
+        let rows = try await events(in: conversation, from: 1)
+        return (fold(rows, for: conversation), rows.last?.sequence ?? 0)
     }
 
     /// Checkpoints `state` as of `sequence`, replacing any existing checkpoint.

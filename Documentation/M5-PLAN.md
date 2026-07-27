@@ -1,6 +1,6 @@
 # M5 Implementation Plan — `ConversationStore` actor + turn verbs
 
-**Status:** 🚧 **IN PROGRESS** — opened 2026-07-27 at the M4 boundary. **Phase 0 landed 2026-07-27, awaiting its review gate.**
+**Status:** 🚧 **IN PROGRESS** — opened 2026-07-27 at the M4 boundary. **Phase 0 reviewed and committed; Phase 1 landed 2026-07-27, awaiting its review gate.**
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M5 section) · [SPEC.md](./SPEC.md) §6.5, §11, §7.2, §7.4, §7.5, §9, §10.4 · [M4-PLAN.md](./M4-PLAN.md) §7 (the five inherited handoffs)
 **Baseline:** M0–M4 done and audited, **266 tests green** (245 `LedgerKit` + 21 `Understudy`), both packages warning-free. **SPEC rev 8 open** (Appendix F — post-M4-audit amendments); it accumulates M5's items and **ratifies at this milestone's boundary** (agreed 2026-07-27).
 **Spec work:** rev 8 is already open, so M5 amendments *extend Appendix F* rather than opening a new revision. The inventory is §6 of this plan; SPEC edits require approval first, drafted scratch-first per the standing pattern.
@@ -142,6 +142,31 @@ cache. `deleteConversation` evicts. **No eviction policy otherwise in v0.1** —
 the cache is bounded by conversations actually touched in a session, a
 `FoldedState` is small, and an LRU nobody measured is complexity nobody asked
 for. Revisit only with a measurement in hand (the `WireJSON` rule).
+
+### D29 — The cache is dropped, never repaired, when reentrancy makes it untrustworthy
+**Proposed at Phase 1; awaiting the gate.** D23 says the actor folds forward on a
+per-conversation cache. Both of the cache's operations sit behind an `await`, and
+an actor is reentrant at every one, so both have a hazard D23 does not name:
+
+1. **A cold load that resumes late.** Another verb may have populated *and*
+   advanced the entry while the read was in flight; publishing the older fold
+   would rewind the cache behind a completed write, and the next append would
+   then fold its tail onto a state missing an event. Guard: **publish only if
+   newer** (`current.lastSequence >= loaded.lastSequence` ⇒ keep current). Sound
+   because the log only grows and this actor is its only writer.
+2. **A tail that does not continue the cache.** Two writes to one conversation
+   both await the database and nothing orders their resumptions, so the
+   later-sequenced tail can arrive first. Folding it would raise a `sequenceGap`
+   diagnostic *in memory* against a log that has no gap. Guard: **drop the
+   entry** rather than fold a hole into it.
+
+The shared principle is the one §9 already applies to snapshots: **a derived
+cache may be discarded at any time, so the safe response to any doubt about it is
+to discard it.** The worst an eviction costs is the replay it was avoiding; the
+worst a repaired-but-wrong cache costs is state diverging from disk while both
+halves look right alone — which is P1's whole subject. This does not weaken D23's
+"no eviction policy in v0.1": there is still no *policy*, only two correctness
+drops.
 
 ### D24 — Start atomicity under actor reentrancy: reserve → append → confirm-or-rollback
 §6.5 requires the single-flight check, the verb's appends, and in-flight
@@ -303,27 +328,75 @@ finalized (names, payloads); both suites green (unchanged counts).
 
 ### Phase 1 — Actor core + lifecycle verbs
 
+**Status:** ✅ **code landed 2026-07-27; review gate open.** 285 tests green
+(264 `LedgerKit` + 21 `Understudy`), both packages warning-free.
+
 **Goal:** the actor exists as a correct single-conversation machine —
 cache, stamping, and the verbs with no tree or generation semantics.
 
-- [ ] Fold-forward cache (D23): cold load via `foldedState(of:)`, advance on
-      append, evict on delete.
-- [ ] Stamping site (M4 handoff 1): mint `Record`s with injected IDs +
+- [x] Fold-forward cache (D23): cold load via `foldedState(of:)`, advance on
+      append, evict on delete. → `CachedFold` + `existingFold(of:)` /
+      `foldForward(_:in:)` / `evict(_:)`. Cold load goes through a new
+      `PersistenceStore.loadedFold(of:)`, which is `foldedState(of:)` **plus the
+      sequence it stopped at** — `foldedState(of:)` is now expressed in terms of
+      it, so there is still exactly one composition of the snapshot fast-path.
+      `evict` is exercised directly; Phase 4's `deleteConversation` calls it.
+- [x] Stamping site (M4 handoff 1): mint `Record`s with injected IDs +
       `WireDate.canonical(now())`. The corpus's `timestampsAreCanonical` and
       `append`'s debug assertion are the safety net; a store-level test asserts
       it directly anyway (the assertion is debug-only; the test is not).
-- [ ] `createConversation(title:)` → genesis append, returns `Conversation`.
-- [ ] `setInstructions(_:in:)`, `setTitle(_:in:)` — nil clears (§6.1);
-      `unknownConversation` on a missing stream.
-- [ ] `conversation(_:)` (D28).
-- [ ] **Healthy-log property, first instance:** every verb-produced log
+- [x] `createConversation(title:)` → genesis append, returns `Conversation`.
+- [x] `setInstructions(_:in:)`, `setTitle(_:in:)` — nil clears (§6.1);
+      `unknownConversation` on a missing stream. **`FoldedState.hasGenesis` is
+      the existence predicate**, which is a happy consequence rather than a
+      design: the flag exists for P3, and "has a valid `conversationCreated`" is
+      exactly what a caller means by "exists".
+- [x] `conversation(_:)` (D28).
+- [x] **Healthy-log property, first instance:** every verb-produced log
       re-reduces from disk with empty `diagnostics` and equals the cached state
-      (fold-forward ≡ re-read — P1's discipline applied to the actor).
+      (fold-forward ≡ re-read — P1's discipline applied to the actor). →
+      `healthyLogProblems(_:in:backedBy:)` in `StoreFixtures.swift`, in the
+      `InvariantChecks.swift` returns-problems idiom so Phases 3–4 can sweep it.
 
 **Review gate:** lifecycle verbs land events matching a hand-written
 `Log`-fixture equivalent byte-for-byte under injection (D27); mutation test:
 break the cache advance (skip one tail fold) and the healthy-log property must
 catch the cache/disk divergence.
+
+**Gate items raised by the implementation:**
+
+1. **Two reentrancy hazards in the cache that D23 does not name — see D29.**
+   Both are guarded and both are mutation-tested.
+2. **Mutation results.** ① Cache advance skipped entirely → caught, but by
+   `unknownConversation` (the genesis never reaches the cache), so it was
+   re-run as ① *b* — fold the genesis, skip every tail after it — which is
+   caught by the healthy-log property exactly as the gate predicts. ② Remove
+   the publish-if-newer guard → caught by the late-cold-load test alone.
+   ③ Remove the sequence-continuity check → caught by the out-of-order test
+   alone. ④ Remove `WireDate.canonical` → see item 3.
+3. **⚠️ Mutation ④ exposed a real hole in the stamping test, now fixed, and the
+   lesson generalizes.** The first version read rows back from SQLite and
+   asserted they were canonical — and it **passed** with canonicalization
+   removed, because the wire formatter *rounds* on the way out, so the re-read
+   repairs the stamp. R-5's bug lives precisely in the gap between the in-memory
+   event and the re-read one, so a test that only looks at one side cannot see
+   it. Fixed with a `RecordingStore` double capturing records **as written**,
+   plus an explicit `rows == asWritten` comparison. **Standing note for later
+   phases: any assertion about what the store wrote must observe the write, not
+   the read-back** — the codec is not a neutral observer.
+   (In *debug* this mutation trips M4's `append` assertion and takes the process
+   down before any test runs; the store-level test is the release-build net,
+   which is why the plan asked for it.)
+4. **Test count 269 → 285** (16 new). Suites: lifecycle verbs, the stamping
+   site, the fold-forward cache, cache reentrancy.
+5. **`Latch` + `ParkingStore` + `RecordingStore` + `FailingStore` land in
+   `StoreFixtures.swift`** as the store-side harness, alongside
+   `ScriptedIdentifiers` (identifiers matching `Log`'s own scheme, so store
+   output compares against hand-written fixtures) and `SteppingClock`.
+   **`Latch` is deliberately not `Understudy.Cue`:** `Cue.park()` is internal to
+   that package, so a `PersistenceStore` double cannot park on one. The planned
+   first Understudy import therefore stays at Phase 3, where the parking happens
+   inside the script player and only `reached()`/`signal()` are needed.
 
 ---
 
@@ -514,7 +587,7 @@ approval:
 | Healthy-log property over every verb + chaos run | | ☐ |
 | Snapshot refresh trigger + cold reopen ≤ one suffix | | ☐ |
 | Delete cancels first; cache evicted | | ☐ |
-| Timestamps born canonical at the actor | | ☐ |
+| Timestamps born canonical at the actor | `StoreStampingTests` — asserted on records **as written**, plus `rows == asWritten` (the read-back alone cannot see it) | ☑ |
 | Live set ⊆ open generations (P2 store half) | | ☐ |
 | Mutation tests: D24 rollback, cache advance, pre-terminal flush, cancel-first delete | | ☐ |
 
@@ -532,10 +605,12 @@ approval:
 | D26 | Chaos is deterministic: `Cue`-parked cancellation points; the one honest race asserted by invariant | **Accepted** 2026-07-27 · rev 8 amends §10.4 |
 | D27 | Store takes injected `IDGenerator` + clock; byte-stable logs under test | **Accepted** 2026-07-27 |
 | D28 | One async read verb `conversation(_:)`; no sync reads; projection stays M7 | **Accepted** 2026-07-27 |
+| D29 | Cache dropped, never repaired, on reentrancy doubt: publish-only-if-newer on cold load, drop on a non-continuing tail | **Proposed** 2026-07-27 at Phase 1 · both mutation-tested · awaiting gate |
 
 ## 10. Status log
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-07-27 | Phase 1 landed | 285 (264 + 21) | Cache, stamping site, `createConversation` / `setInstructions` / `setTitle` / `conversation`, healthy-log property. New: `Store/Snapshots.swift` gains `loadedFold(of:)`; tests gain `StoreFixtures.swift` + `ConversationStoreTests.swift`. **D29 proposed.** Four mutations run; ④ found a real hole in the stamping test (read-back repairs a bad stamp) — fixed, and the standing lesson is recorded under Phase 1 gate item 3. Warning-free |
 | 2026-07-27 | Phase 0 landed | 269 (248 + 21) | Five files: `Store/{GenerationDriving,LedgerError,Policies,ConversationStore}.swift` + `Tests/APISketchTests.swift`. §11 sketch type-checks line-for-line against the landed signatures, with one recorded substitution (M6's concrete `GenerationDriver` → `some GenerationDriving`). Four gate items listed under Phase 0. Warning-free |
 | 2026-07-27 | Plan drafted | 266 (245 + 21) | Sourced from the M4 boundary audit + M4-PLAN §7 handoffs; D21–D28 accepted; rev 8 open, ratifies at this boundary. TL;DR block is a deliberate experiment (M4 audit process feedback) — keep it if it earns its keep, drop it at Phase 5 if not |
