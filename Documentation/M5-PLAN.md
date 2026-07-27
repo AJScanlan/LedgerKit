@@ -1,6 +1,6 @@
 # M5 Implementation Plan — `ConversationStore` actor + turn verbs
 
-**Status:** 🔲 **PLANNED** — opened 2026-07-27 at the M4 boundary. No phase started.
+**Status:** 🚧 **IN PROGRESS** — opened 2026-07-27 at the M4 boundary. **Phase 0 landed 2026-07-27, awaiting its review gate.**
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M5 section) · [SPEC.md](./SPEC.md) §6.5, §11, §7.2, §7.4, §7.5, §9, §10.4 · [M4-PLAN.md](./M4-PLAN.md) §7 (the five inherited handoffs)
 **Baseline:** M0–M4 done and audited, **266 tests green** (245 `LedgerKit` + 21 `Understudy`), both packages warning-free. **SPEC rev 8 open** (Appendix F — post-M4-audit amendments); it accumulates M5's items and **ratifies at this milestone's boundary** (agreed 2026-07-27).
 **Spec work:** rev 8 is already open, so M5 amendments *extend Appendix F* rather than opening a new revision. The inventory is §6 of this plan; SPEC edits require approval first, drafted scratch-first per the standing pattern.
@@ -244,25 +244,60 @@ machinery. Phase 5 closes the milestone and ratifies rev 8.
 
 ### Phase 0 — The surface: driver seam, `LedgerError`, verb signatures
 
+**Status:** ✅ **code landed 2026-07-27; review gate open.** 269 tests green
+(248 `LedgerKit` + 21 `Understudy`), both packages warning-free.
+
 **Goal:** every public shape exists, compiles, and is signed off before any
 behavior lands — the D21/D22 designs made concrete.
 
-- [ ] D21 protocol + signal/request types in `Store/` (doc comments carrying
-      the five constraints), named at the gate.
-- [ ] `LedgerError` with the D22 case inventory; `CustomStringConvertible`
-      (non-contractual, stated).
-- [ ] `ConversationStore` actor skeleton: init (persistence config, D27
+- [x] D21 protocol + signal/request types in `Store/` (doc comments carrying
+      the five constraints), named at the gate. → `Store/GenerationDriving.swift`:
+      `GenerationDriving` (`model` + `generate(_:streamingInto:)`),
+      `GenerationRequest`, `GenerationSignal`, `GenerationChannel`.
+- [x] `LedgerError` with the D22 case inventory; `CustomStringConvertible`
+      (non-contractual, stated). → `Store/LedgerError.swift`.
+- [x] `ConversationStore` actor skeleton: init (persistence config, D27
       injection), all ten verb signatures + `conversation(_:)`, bodies
       `fatalError("Phase N")` (the one permitted use — they are compile
-      scaffolding and no test may reach them).
-- [ ] Policy struct skeletons (`DeltaFlushPolicy`, `SnapshotPolicy` — names
-      bikesheddable) with defaults only.
-- [ ] A compile-only rendition of the §11 sketch in the test target (the
+      scaffolding and no test may reach them). → `Store/ConversationStore.swift`,
+      plus the internal `IdentifierSource` erasure.
+- [x] Policy struct skeletons (`DeltaFlushPolicy`, `SnapshotPolicy` — names
+      bikesheddable) with defaults only. → `Store/Policies.swift`.
+- [x] A compile-only rendition of the §11 sketch in the test target (the
       acceptance test for shape, guardrail 1) — commented assertions, no
-      behavior yet.
+      behavior yet. → `Tests/LedgerKitTests/APISketchTests.swift`.
 
 **Review gate:** signatures + doc comments read as the finished API; D21/D22
 finalized (names, payloads); both suites green (unchanged counts).
+
+**Gate items raised by the implementation** (decide here, not later):
+
+1. **`GenerationChannel` is a fourth seam type the plan did not name.** D21
+   sketched "an `AsyncStream` of signals with the terminal `Outcome` as the
+   return value"; handing the driver a raw
+   `AsyncStream<GenerationSignal>.Continuation` would also hand it `finish()`,
+   and a driver finishing the stream truncates the store's loop while the driver
+   is still producing. The wrapper narrows the driver's surface to `emit(_:)`;
+   `makeStream()` and `finish()` are **internal**, so the store alone owns the
+   stream's lifetime. Shape confirmed against the 27 SDK rather than assumed:
+   `LanguageModelExecutor.respond(to:model:streamingInto:)` is request-plus-channel,
+   one layer down.
+2. **Construction of `GenerationRequest` / `GenerationChannel` is internal**,
+   consistent with M4 Phase 0's derived-state rule. Consequence, accepted: a
+   *third-party* driver author cannot call `generate` in isolation, because they
+   cannot build a request. In-package drivers (M6) and the Phase 3 double are
+   unaffected. Reopening this is additive, so it is not urgent — but it is the
+   one place M5 narrows what v0.2 might want.
+3. **Test count moved 266 → 269, against the gate's "unchanged counts".**
+   Deliberate: three Phase 0 declarations have real behaviour rather than being
+   scaffolding — the public init, the `LedgerError`-wrapping of a backend
+   failure (guardrail 4's only testable instance today), and the channel's
+   ordering/delivery. Leaving those untested to protect a predicted number would
+   invert the test rhythm.
+4. **The policy structs' memberwise inits are `internal`, not `private`.** The
+   *public* surface is `.default` alone, as planned; the module needs to vary
+   them (a flush-every-character policy is how "always flush before the
+   terminal" gets a failing case at Phase 3).
 
 ---
 
@@ -489,8 +524,8 @@ approval:
 
 | # | Decision | Status |
 |---|---|---|
-| D21 | Driver seam: public protocol at M5, five constraints; concrete conformance at M6 | **Accepted** 2026-07-27 · final shape at Phase 0 gate |
-| D22 | `LedgerError`: destructurable enum, §11's throw inventory, GRDB-opaque, non-contractual prose | **Accepted** 2026-07-27 · payloads finalized against real verbs |
+| D21 | Driver seam: public protocol at M5, five constraints; concrete conformance at M6 | **Accepted** 2026-07-27 · shape **proposed** at Phase 0: `GenerationDriving` = `var model` + non-throwing `generate(_:streamingInto:) async -> Outcome`, with `GenerationRequest` / `GenerationSignal` / `GenerationChannel`. Awaiting gate |
+| D22 | `LedgerError`: destructurable enum, §11's throw inventory, GRDB-opaque, non-contractual prose | **Accepted** 2026-07-27 · payloads **proposed** at Phase 0: `unknownConversation(_)`, `unknownMessage(_)`, `ineligibleTarget(message:expected:found:)`, `generationInFlight(_)`, `persistenceFailure(description:)`. Awaiting gate |
 | D23 | Fold-forward per-conversation cache; no eviction policy in v0.1 | **Accepted** 2026-07-27 |
 | D24 | Reserve → append → confirm-or-rollback; reservation is the synchronous critical section | **Accepted** 2026-07-27 · mutation-test the rollback |
 | D25 | Flush loop store-side; `DeltaFlushPolicy`/`SnapshotPolicy` as structs-with-factories | **Accepted** 2026-07-27 · attachment point at Phase 3 gate; rev 8 clarifies §7.4 |
@@ -502,4 +537,5 @@ approval:
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-07-27 | Phase 0 landed | 269 (248 + 21) | Five files: `Store/{GenerationDriving,LedgerError,Policies,ConversationStore}.swift` + `Tests/APISketchTests.swift`. §11 sketch type-checks line-for-line against the landed signatures, with one recorded substitution (M6's concrete `GenerationDriver` → `some GenerationDriving`). Four gate items listed under Phase 0. Warning-free |
 | 2026-07-27 | Plan drafted | 266 (245 + 21) | Sourced from the M4 boundary audit + M4-PLAN §7 handoffs; D21–D28 accepted; rev 8 open, ratifies at this boundary. TL;DR block is a deliberate experiment (M4 audit process feedback) — keep it if it earns its keep, drop it at Phase 5 if not |
