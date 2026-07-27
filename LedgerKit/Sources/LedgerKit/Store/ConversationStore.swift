@@ -73,6 +73,17 @@ public actor ConversationStore {
     private var identifiers: any IdentifierSource
     private let now: @Sendable () -> Date
     private var folds: [ConversationID: CachedFold] = [:]
+    /// Conversations whose one generation slot is taken — reserved, or reserved
+    /// and running (§6.5, D24).
+    ///
+    /// **Single-flight gates generation *starts*, not ledger writes.** Nothing
+    /// in ``edit(_:content:in:)`` or ``switchBranch(to:in:)`` consults this, and
+    /// that omission is normative rather than incidental: §6.5 makes mid-stream
+    /// edits and switches legal, so a user may move the visible path while a
+    /// generation streams off it. The stream continues and terminates normally —
+    /// completion changes state in place and emits no path event, so the bubble
+    /// stays wherever the user left it.
+    private var live: Set<ConversationID> = []
 
     /// Opens (or creates) a store.
     ///
@@ -240,7 +251,22 @@ public actor ConversationStore {
         content: String,
         in conversation: ConversationID
     ) async throws -> MessageID {
-        fatalError("ConversationStore.edit is M5 Phase 2")
+        _ = try await target(message, expecting: .user, in: conversation)
+
+        // The path event is not optional here and never conditional, unlike
+        // `respond`'s: an edit's replacement is a *sibling* of the original, so
+        // its parent is never the current endpoint and auto-extend can never
+        // fire (§6.4). Without it the edit would land off-path and invisible.
+        let replacement = identifiers.makeMessageID()
+        let tail = try await commit(
+            [
+                mint(.messageEdited(original: message, replacement: replacement, content: content), in: conversation),
+                mint(.activePathChanged(endpoint: replacement), in: conversation),
+            ],
+            to: conversation
+        )
+        foldForward(tail, in: conversation)
+        return replacement
     }
 
     /// Moves the visible thread to the branch ending at `endpoint` — a bare
@@ -255,7 +281,14 @@ public actor ConversationStore {
     ///   reducer *quarantines* the same fact (§6.6 row 12) because an event in a
     ///   log has no caller to tell.
     public func switchBranch(to endpoint: MessageID, in conversation: ConversationID) async throws {
-        fatalError("ConversationStore.switchBranch is M5 Phase 2")
+        // No role expectation: switching *to* an assistant message is the
+        // ordinary case — it is how a branch switcher moves between sibling
+        // responses — and the only requirement §6.4 states is that the endpoint
+        // exists.
+        _ = try await target(endpoint, expecting: nil, in: conversation)
+
+        let tail = try await commit([mint(.activePathChanged(endpoint: endpoint), in: conversation)], to: conversation)
+        foldForward(tail, in: conversation)
     }
 
     // MARK: - Generation
@@ -434,6 +467,69 @@ public actor ConversationStore {
         )
         entry.lastSequence = last.sequence
         folds[conversation] = entry
+    }
+
+    // MARK: - Eligibility
+
+    /// Resolves a verb's target message — the one place `edit`, `switchBranch`,
+    /// `respond` and `regenerate` agree about what a valid target is (§6.5).
+    ///
+    /// Shared rather than repeated because the four verbs differ only in the
+    /// role they expect, and four copies of "look it up, check the role" is four
+    /// chances for one of them to disagree with §6.5 about which error a
+    /// wrong-role target deserves.
+    ///
+    /// **The layer difference is the point.** The reducer *quarantines* these
+    /// same facts — an unknown edit target is §6.6 row 11, a never-existent path
+    /// endpoint is row 12 — because an event sitting in a log has no caller to
+    /// tell. A verb does, so it throws. Same fact, correct channel per layer.
+    ///
+    /// The decision cannot go stale across the `await` that follows it: roles
+    /// never change and messages are never removed, so a target valid now is
+    /// valid when the append lands.
+    ///
+    /// - Parameter role: `nil` accepts any role — `switchBranch`'s case, where
+    ///   existence is the only requirement.
+    private func target(
+        _ message: MessageID,
+        expecting role: Role?,
+        in conversation: ConversationID
+    ) async throws -> (state: FoldedState, message: FoldedMessage) {
+        let state = try await existingFold(of: conversation).state
+        guard let found = state.messages[message] else {
+            throw LedgerError.unknownMessage(message)
+        }
+        if let role, found.role != role {
+            throw LedgerError.ineligibleTarget(message: message, expected: role, found: found.role)
+        }
+        return (state, found)
+    }
+
+    // MARK: - Single-flight
+
+    /// Reserves the conversation's one generation slot (§6.5, D24 step 1).
+    ///
+    /// **Synchronous by construction, and that is the whole design.** §6.5 asks
+    /// for the single-flight check, the appends and the registration in "one
+    /// actor-isolated critical section", which no lock can provide across an
+    /// `await`. Ordering provides it instead: this contains no suspension point,
+    /// so a second starter arriving while the first is mid-append sees the
+    /// reservation and throws.
+    ///
+    /// Phase 3 widens the stored value to carry the running task (cancellation
+    /// needs a handle); the two entry points here are already the shape D24's
+    /// step 1 and rollback want.
+    func reserve(_ conversation: ConversationID) throws {
+        guard live.insert(conversation).inserted else {
+            throw LedgerError.generationInFlight(conversation)
+        }
+    }
+
+    /// Releases the slot — D24's rollback *and* its normal completion path, so
+    /// a generation that failed to start leaves no more trace than one that
+    /// finished.
+    func release(_ conversation: ConversationID) {
+        live.remove(conversation)
     }
 
     // MARK: - Writing

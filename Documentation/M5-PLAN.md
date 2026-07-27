@@ -144,7 +144,7 @@ the cache is bounded by conversations actually touched in a session, a
 for. Revisit only with a measurement in hand (the `WireJSON` rule).
 
 ### D29 — The cache is dropped, never repaired, when reentrancy makes it untrustworthy
-**Proposed at Phase 1; awaiting the gate.** D23 says the actor folds forward on a
+**Accepted at the Phase 1 gate.** D23 says the actor folds forward on a
 per-conversation cache. Both of the cache's operations sit behind an `await`, and
 an actor is reentrant at every one, so both have a hazard D23 does not name:
 
@@ -402,24 +402,62 @@ catch the cache/disk divergence.
 
 ### Phase 2 — Tree verbs: `edit`, `switchBranch`, eligibility
 
+**Status:** ✅ **code landed 2026-07-27; review gate open.** 296 tests green
+(275 `LedgerKit` + 21 `Understudy`), both packages warning-free.
+
 **Goal:** the ledger-only verbs, with §6.4/§6.5's path semantics exact.
 
-- [ ] `edit(_:content:in:)` → `messageEdited` + `activePathChanged`, one
+- [x] `edit(_:content:in:)` → `messageEdited` + `activePathChanged`, one
       transaction; returns the replacement `MessageID`; eligibility: target is
       a **user** message (`ineligibleTarget` otherwise, `unknownMessage` if
       absent). Editing a root message works (I6's virtual-root case — fixture
-      exists reducer-side; the verb test replays it through the store).
-- [ ] `switchBranch(to:in:)` → bare `activePathChanged`; `unknownMessage` on a
+      exists reducer-side; the verb test replays it through the store). → the
+      root-edit test asserts the store's log **equals `Corpus.rootEdit.log`
+      row for row**, not merely reduces the same way.
+- [x] `switchBranch(to:in:)` → bare `activePathChanged`; `unknownMessage` on a
       never-existent endpoint (the *store* throws where the reducer would
       quarantine row 12 — same fact, correct channel per layer).
-- [ ] Eligibility checks read the cache — one shared internal
+- [x] Eligibility checks read the cache — one shared internal
       `target(_:expecting:)` helper so respond/regenerate/edit agree.
-- [ ] Mid-stream legality *stub*: `edit` and `switchBranch` do **not** check
+      `expecting: nil` is `switchBranch`'s case, where existence is the only
+      requirement.
+- [x] Mid-stream legality *stub*: `edit` and `switchBranch` do **not** check
       the live set (§6.5 allows them mid-flight) — asserted now with a
       hand-registered live entry, exercised for real in Phase 3.
 
 **Review gate:** §6.4's three explicit-path cases have verb-level tests; the
 healthy-log property covers every new verb; both suites green.
+
+**Gate items raised by the implementation:**
+
+1. **Only two of §6.4's three explicit-path cases are reachable at Phase 2.**
+   Edit and branch switch are Phase 2 verbs and both have verb-level tests; the
+   middle case — *generation off the endpoint* — is `respond`/`regenerate`, so
+   it lands with them at Phase 3. Noted rather than worked around: Phase 2 has
+   no verb that can produce it.
+2. **Phase 2 lands the live set's storage plus `reserve(_:)` / `release(_:)`.**
+   The mid-stream bullet requires a hand-registered live entry, which requires
+   somewhere to register it. Both are internal, synchronous, and already the
+   shape D24 step 1 and its rollback want; **Phase 3 widens the stored value
+   from `Set<ConversationID>` to carry the running task**, which cancellation
+   needs a handle for. No public surface moved.
+3. **Mutation results.** Ⓐ Drop `edit`'s `activePathChanged` → caught by three
+   tests. Ⓑ Drop `switchBranch`'s existence check → caught on all three of its
+   assertions (throws / nothing written / rows unchanged). Ⓒ Gate `edit` on
+   single-flight → caught by the mid-stream test alone, which is the point of
+   having it.
+4. **⚠️ The healthy-log property did *not* catch mutation Ⓐ, and correctly so.**
+   An edit missing its path event produces a perfectly *healthy* log — no
+   quarantine, no diagnostics — that is merely semantically wrong. Worth stating
+   plainly because the property is easy to over-trust: it certifies that the
+   store never writes something the reducer would reject, **not** that the store
+   wrote the right thing. Semantic assertions stay per-verb.
+5. **Harness additions** (`StoreFixtures.swift`): `ScriptedIdentifiers` counters
+   are now configurable starting points; `StoreUnderTest.continuing(_:)` seeds a
+   `Log` and advances identifiers *and* clock past it, so a verb's output
+   continues the fixture's own numbering; `RecordingStore.appends` exposes one
+   element per **transaction**, which is what makes "one transaction" assertable
+   rather than assumed (§6.4's edit, and §6.5's start atomicity at Phase 3).
 
 ---
 
@@ -580,7 +618,7 @@ approval:
 | Start atomicity: losing racer records nothing | | ☐ |
 | Single-flight per conversation; cross-conversation freedom | | ☐ |
 | Two-channel contract, per verb, log-untouched proofs | | ☐ |
-| Target eligibility (respond/regenerate/edit) | | ☐ |
+| Target eligibility (respond/regenerate/edit) | `StoreTreeVerbTests` covers `edit` (user) via the shared `target(_:expecting:)`; respond/regenerate at Phase 3 | ◐ |
 | §7.2 straddle (pre-append throws, post-append returns) | | ☐ |
 | Cancel vs. natural terminal: one terminal (I3) | | ☐ |
 | Only deltas coalesce; flush-before-terminal | | ☐ |
@@ -605,12 +643,13 @@ approval:
 | D26 | Chaos is deterministic: `Cue`-parked cancellation points; the one honest race asserted by invariant | **Accepted** 2026-07-27 · rev 8 amends §10.4 |
 | D27 | Store takes injected `IDGenerator` + clock; byte-stable logs under test | **Accepted** 2026-07-27 |
 | D28 | One async read verb `conversation(_:)`; no sync reads; projection stays M7 | **Accepted** 2026-07-27 |
-| D29 | Cache dropped, never repaired, on reentrancy doubt: publish-only-if-newer on cold load, drop on a non-continuing tail | **Proposed** 2026-07-27 at Phase 1 · both mutation-tested · awaiting gate |
+| D29 | Cache dropped, never repaired, on reentrancy doubt: publish-only-if-newer on cold load, drop on a non-continuing tail | **Accepted** 2026-07-27 at the Phase 1 gate · both mutation-tested |
 
 ## 10. Status log
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-07-27 | Phase 2 landed | 296 (275 + 21) | `edit` / `switchBranch` / shared `target(_:expecting:)`; live-set storage + `reserve`/`release` (D24's synchronous half, landed early for the mid-stream assertion). Root edit reproduces `Corpus.rootEdit` row for row. Three mutations run, all caught; Ⓐ confirmed the healthy-log property is not a semantic check (Phase 2 gate item 4). Warning-free |
 | 2026-07-27 | Phase 1 landed | 285 (264 + 21) | Cache, stamping site, `createConversation` / `setInstructions` / `setTitle` / `conversation`, healthy-log property. New: `Store/Snapshots.swift` gains `loadedFold(of:)`; tests gain `StoreFixtures.swift` + `ConversationStoreTests.swift`. **D29 proposed.** Four mutations run; ④ found a real hole in the stamping test (read-back repairs a bad stamp) — fixed, and the standing lesson is recorded under Phase 1 gate item 3. Warning-free |
 | 2026-07-27 | Phase 0 landed | 269 (248 + 21) | Five files: `Store/{GenerationDriving,LedgerError,Policies,ConversationStore}.swift` + `Tests/APISketchTests.swift`. §11 sketch type-checks line-for-line against the landed signatures, with one recorded substitution (M6's concrete `GenerationDriver` → `some GenerationDriving`). Four gate items listed under Phase 0. Warning-free |
 | 2026-07-27 | Plan drafted | 266 (245 + 21) | Sourced from the M4 boundary audit + M4-PLAN §7 handoffs; D21–D28 accepted; rev 8 open, ratifies at this boundary. TL;DR block is a deliberate experiment (M4 audit process feedback) — keep it if it earns its keep, drop it at Phase 5 if not |

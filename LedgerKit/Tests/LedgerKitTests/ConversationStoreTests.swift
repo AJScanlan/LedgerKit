@@ -303,6 +303,214 @@ struct StoreCacheTests {
     }
 }
 
+// MARK: - Phase 2: tree verbs
+
+/// The ledger-only verbs — no generation semantics, no driver, just §6.4's path
+/// rules made executable.
+///
+/// Every fixture here is *seeded*: the verb that creates a user message arrives
+/// at Phase 3, so an edit test necessarily starts from a log someone else wrote.
+/// `StoreUnderTest.continuing(_:)` advances the identifier and clock streams past
+/// the seed so the store's output stays comparable to a hand-written `Log`.
+@Suite("Store — tree verbs")
+struct StoreTreeVerbTests {
+
+    /// A conversation with a *non-root* user message, so an edit's replacement
+    /// lands under a real parent rather than the virtual root.
+    private func threadWithSecondTurn() -> Log {
+        var log = Log.withCompletedTurn()
+        log.append(.userMessageAppended(message: Fix.userB, content: "And mountain folds?", parent: Fix.assistantA))
+        return log
+    }
+
+    @Test("edit writes messageEdited + activePathChanged in one transaction")
+    func editIsOneTransaction() async throws {
+        let seed = threadWithSecondTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x17)
+
+        let replacement = try await fixture.store.edit(
+            Fix.userB,
+            content: "And mountain folds, briefly?",
+            in: seed.conversation
+        )
+
+        #expect(replacement == Fix.edited)
+        #expect(fixture.appends.count == 1, "an edit that split into two transactions is a crash away from a stranded half")
+        #expect(fixture.appends.first?.map(\.payload) == [
+            .messageEdited(original: Fix.userB, replacement: Fix.edited, content: "And mountain folds, briefly?"),
+            .activePathChanged(endpoint: Fix.edited),
+        ])
+    }
+
+    /// §6.4 case 1: the edit moves the visible thread onto the new branch, and
+    /// the original survives beside it — unreachable by default, reachable
+    /// through a branch switcher. DoD-1's "partial retained as its own branch"
+    /// is the same mechanism seen from the generation side.
+    @Test("the edit is on the path and the original survives as a sibling")
+    func editBranches() async throws {
+        let seed = threadWithSecondTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x17)
+
+        let replacement = try await fixture.store.edit(Fix.userB, content: "shorter", in: seed.conversation)
+        let read = try await fixture.store.conversation(seed.conversation)
+
+        #expect(read.activePath == [Fix.userA, Fix.assistantA, replacement])
+        #expect(read.messages[replacement]?.parent == Fix.assistantA)
+        #expect(read.messages.siblings(of: replacement).map(\.id) == [Fix.userB])
+        #expect(read.messages[Fix.userB] != nil, "the original branch is retained, not replaced")
+    }
+
+    /// I6's virtual-root case: editing the *first* message yields a root-level
+    /// sibling with no special case anywhere. The corpus already pins the
+    /// reduced state; this pins that the **store verb produces that very log**,
+    /// event for event.
+    @Test("editing a root message reproduces the rootEdit corpus fixture exactly")
+    func rootEditMatchesTheCorpus() async throws {
+        let seed = Log.withUserMessage()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x17)
+
+        let replacement = try await fixture.store.edit(
+            Fix.userA,
+            content: "Explain mountain folds",
+            in: seed.conversation
+        )
+
+        #expect(replacement == Fix.edited)
+        #expect(try await fixture.rows(of: seed.conversation) == Corpus.rootEdit.log.rows)
+    }
+
+    @Test("editing an assistant message is ineligible, and writes nothing")
+    func editRejectsAssistantTargets() async throws {
+        let seed = Log.withCompletedTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x17)
+
+        await #expect(throws: LedgerError.ineligibleTarget(
+            message: Fix.assistantA,
+            expected: .user,
+            found: .assistant
+        )) {
+            try await fixture.store.edit(Fix.assistantA, content: "forged", in: seed.conversation)
+        }
+
+        #expect(fixture.written.isEmpty)
+        #expect(try await fixture.rows(of: seed.conversation) == seed.rows)
+    }
+
+    @Test("editing an absent message is unknown, and writes nothing")
+    func editRejectsAbsentTargets() async throws {
+        let seed = Log.withCompletedTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x17)
+        let ghost = MessageID(uuid(0xDEAD))
+
+        await #expect(throws: LedgerError.unknownMessage(ghost)) {
+            try await fixture.store.edit(ghost, content: "nowhere", in: seed.conversation)
+        }
+
+        #expect(fixture.written.isEmpty)
+        #expect(try await fixture.rows(of: seed.conversation) == seed.rows)
+    }
+
+    /// §6.4 case 3: a branch switch is a *bare* `activePathChanged` — one event,
+    /// nothing else.
+    @Test("switchBranch writes one bare activePathChanged and moves the path")
+    func switchBranchMovesThePath() async throws {
+        let seed = Log.withCompletedTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x17)
+
+        try await fixture.store.switchBranch(to: Fix.userA, in: seed.conversation)
+
+        #expect(fixture.written.map(\.payload) == [.activePathChanged(endpoint: Fix.userA)])
+        #expect(try await fixture.store.conversation(seed.conversation).activePath == [Fix.userA])
+    }
+
+    /// No role requirement: moving between sibling *responses* is what a branch
+    /// switcher is for.
+    @Test("switching onto an assistant endpoint is legal")
+    func switchBranchAcceptsAssistantEndpoints() async throws {
+        let seed = Log.withCompletedTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x17)
+
+        try await fixture.store.switchBranch(to: Fix.userA, in: seed.conversation)
+        try await fixture.store.switchBranch(to: Fix.assistantA, in: seed.conversation)
+
+        #expect(try await fixture.store.conversation(seed.conversation).activePath == [Fix.userA, Fix.assistantA])
+    }
+
+    /// The layer difference, made executable: the *store* throws where the
+    /// reducer would quarantine (§6.6 row 12). Same fact — this endpoint never
+    /// existed — reported on the channel each layer actually has.
+    @Test("switching to a never-existent endpoint is unknown, and writes nothing")
+    func switchBranchRejectsAbsentEndpoints() async throws {
+        let seed = Log.withCompletedTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x17)
+        let ghost = MessageID(uuid(0xDEAD))
+
+        await #expect(throws: LedgerError.unknownMessage(ghost)) {
+            try await fixture.store.switchBranch(to: ghost, in: seed.conversation)
+        }
+
+        #expect(fixture.written.isEmpty)
+        #expect(try await fixture.rows(of: seed.conversation) == seed.rows)
+    }
+
+    /// **§6.5's mid-stream legality**, at the level Phase 2 can reach:
+    /// single-flight gates generation *starts*, not ledger writes, so a taken
+    /// slot must not block either tree verb. Phase 3 runs the same assertion
+    /// against a genuinely parked generation; this one proves the verbs do not
+    /// consult the live set at all.
+    @Test("edit and switchBranch stay legal while a generation slot is taken")
+    func treeVerbsIgnoreTheLiveSet() async throws {
+        let seed = threadWithSecondTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x17)
+
+        try await fixture.store.reserve(seed.conversation)
+
+        let replacement = try await fixture.store.edit(Fix.userB, content: "shorter", in: seed.conversation)
+        try await fixture.store.switchBranch(to: Fix.userB, in: seed.conversation)
+
+        #expect(try await fixture.store.conversation(seed.conversation).activePath.last == Fix.userB)
+        #expect(replacement == Fix.edited)
+
+        // And the slot really was taken while both ran.
+        await #expect(throws: LedgerError.generationInFlight(seed.conversation)) {
+            try await fixture.store.reserve(seed.conversation)
+        }
+    }
+
+    @Test("the tree verbs produce a healthy log the cache agrees with")
+    func healthyLog() async throws {
+        let seed = threadWithSecondTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x17)
+
+        let replacement = try await fixture.store.edit(Fix.userB, content: "shorter", in: seed.conversation)
+        try await fixture.store.switchBranch(to: Fix.userA, in: seed.conversation)
+        try await fixture.store.switchBranch(to: replacement, in: seed.conversation)
+
+        let problems = try await healthyLogProblems(
+            seed.conversation,
+            in: fixture.store,
+            backedBy: fixture.backing
+        )
+        #expect(problems.isEmpty, "\(problems)")
+    }
+
+    /// The reservation is a plain in-memory slot, so releasing it must make the
+    /// conversation startable again — D24's rollback depends on exactly this.
+    @Test("releasing a reservation frees the slot")
+    func reservationRoundTrips() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+
+        try await fixture.store.reserve(convo.id)
+        await #expect(throws: LedgerError.generationInFlight(convo.id)) {
+            try await fixture.store.reserve(convo.id)
+        }
+
+        await fixture.store.release(convo.id)
+        try await fixture.store.reserve(convo.id)
+    }
+}
+
 /// Reentrancy is the whole reason this cache is subtle: an actor yields at every
 /// `await`, so both hazards below involve a verb resuming into a world that
 /// changed underneath it. Both are driven by `Latch` at a point the test chose

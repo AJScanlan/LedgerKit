@@ -22,14 +22,32 @@ import Testing
 /// `Fix.genA` — so an expected `Log` can be written by hand and read by eye.
 /// A seeded generator is exercised separately, where the claim is that the real
 /// one plugs in at all.
+///
+/// Every counter is a *starting point* because a verb test usually seeds a
+/// fixture first: the store must then continue that log's numbering rather than
+/// restart it and collide with identifiers already in the tree.
+/// ``StoreUnderTest/continuing(_:over:messagesFrom:generationsFrom:)`` does the
+/// arithmetic.
 struct ScriptedIdentifiers: IdentifierSource {
     /// Mirrors `Log`'s `nextEventNumber`: pre-incremented, so the first event is
     /// `uuid(0x101)`.
-    private var events = 0x100
+    private var events: Int
     /// One before `Fix.conversation` / `Fix.userA` / `Fix.genA` respectively.
-    private var conversations = 0
-    private var messages = 0x0F
-    private var generations = 0x2F
+    private var conversations: Int
+    private var messages: Int
+    private var generations: Int
+
+    init(
+        eventsFrom events: Int = 0x100,
+        conversationsFrom conversations: Int = 0,
+        messagesFrom messages: Int = 0x0F,
+        generationsFrom generations: Int = 0x2F
+    ) {
+        self.events = events
+        self.conversations = conversations
+        self.messages = messages
+        self.generations = generations
+    }
 
     mutating func makeEventID() -> EventID {
         events += 1
@@ -83,19 +101,26 @@ final class SteppingClock: Sendable {
 /// is the only place the in-memory half is observable.
 final class RecordingStore: PersistenceStore {
     private let wrapped: any PersistenceStore
-    private let captured = Mutex<[LedgerEvent.Record]>([])
+    private let captured = Mutex<[[LedgerEvent.Record]]>([])
 
     init(_ wrapped: any PersistenceStore) {
         self.wrapped = wrapped
     }
 
+    /// One element per **successful transaction**, so "these two events commit
+    /// together" is assertable rather than assumed. That grouping is the whole
+    /// content of §6.5's start atomicity and §6.4's one-transaction edit: an
+    /// edit that wrote its two events in two batches would look identical in a
+    /// flattened list and be a crash away from a stranded half-operation.
+    var appends: [[LedgerEvent.Record]] { captured.withLock { $0 } }
+
     /// Records from appends that **succeeded**, in write order — so a test
     /// asserting "the log is untouched" is not misled by an attempt.
-    var written: [LedgerEvent.Record] { captured.withLock { $0 } }
+    var written: [LedgerEvent.Record] { appends.flatMap { $0 } }
 
     func append(_ records: [LedgerEvent.Record], to conversation: ConversationID) async throws -> [LedgerEvent] {
         let tail = try await wrapped.append(records, to: conversation)
-        captured.withLock { $0 += records }
+        captured.withLock { $0.append(records) }
         return tail
     }
 
@@ -131,17 +156,56 @@ struct StoreUnderTest {
 
     /// Records the store has written, as handed to `append`.
     var written: [LedgerEvent.Record] { recorder.written }
+    /// One element per transaction — see ``RecordingStore/appends``.
+    var appends: [[LedgerEvent.Record]] { recorder.appends }
 
-    init(over backing: (any PersistenceStore)? = nil) throws {
+    init(
+        over backing: (any PersistenceStore)? = nil,
+        identifiers: ScriptedIdentifiers = ScriptedIdentifiers(),
+        clockFrom base: Date = Log.base
+    ) throws {
         let recorder = RecordingStore(try backing ?? SQLitePersistenceStore(.inMemory))
-        let clock = SteppingClock()
+        let clock = SteppingClock(from: base)
         self.recorder = recorder
         self.backing = recorder
         self.clock = clock
         self.store = ConversationStore(
             persistence: recorder,
-            identifiers: ScriptedIdentifiers(),
+            identifiers: identifiers,
             now: clock.now
+        )
+    }
+
+    /// A store over a database already holding `seed`, with the identifier and
+    /// clock streams **advanced past it**.
+    ///
+    /// This is the ordinary shape for a tree or generation verb test: the verbs
+    /// that *create* a user message arrive at Phase 3, so anything testing
+    /// `edit` or `switchBranch` has to start from a log somebody else wrote. By
+    /// continuing the fixture's own numbering — event IDs, message IDs, one
+    /// second per event from `Log.base` — the store's output stays comparable to
+    /// a hand-written `Log`, and can be compared against a *corpus* fixture
+    /// outright.
+    ///
+    /// `messagesFrom` / `generationsFrom` are explicit because only the caller
+    /// knows which identifiers its seed already used: the defaults would have
+    /// the store re-mint `Fix.userA` and quarantine under §6.6 row 6.
+    static func continuing(
+        _ seed: Log,
+        over backing: (any PersistenceStore)? = nil,
+        messagesFrom messages: Int = 0x0F,
+        generationsFrom generations: Int = 0x2F
+    ) async throws -> Self {
+        let base = try backing ?? SQLitePersistenceStore(.inMemory)
+        _ = try await base.append(seed.records, to: seed.conversation)
+        return try Self(
+            over: base,
+            identifiers: ScriptedIdentifiers(
+                eventsFrom: 0x100 + Int(seed.lastSequence),
+                messagesFrom: messages,
+                generationsFrom: generations
+            ),
+            clockFrom: Log.base.addingTimeInterval(Double(seed.lastSequence))
         )
     }
 
