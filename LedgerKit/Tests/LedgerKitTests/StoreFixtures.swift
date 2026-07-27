@@ -162,7 +162,8 @@ struct StoreUnderTest {
     init(
         over backing: (any PersistenceStore)? = nil,
         identifiers: ScriptedIdentifiers = ScriptedIdentifiers(),
-        clockFrom base: Date = Log.base
+        clockFrom base: Date = Log.base,
+        deltaFlush: DeltaFlushPolicy = .default
     ) throws {
         let recorder = RecordingStore(try backing ?? SQLitePersistenceStore(.inMemory))
         let clock = SteppingClock(from: base)
@@ -171,6 +172,7 @@ struct StoreUnderTest {
         self.clock = clock
         self.store = ConversationStore(
             persistence: recorder,
+            deltaFlush: deltaFlush,
             identifiers: identifiers,
             now: clock.now
         )
@@ -194,7 +196,8 @@ struct StoreUnderTest {
         _ seed: Log,
         over backing: (any PersistenceStore)? = nil,
         messagesFrom messages: Int = 0x0F,
-        generationsFrom generations: Int = 0x2F
+        generationsFrom generations: Int = 0x2F,
+        deltaFlush: DeltaFlushPolicy = .default
     ) async throws -> Self {
         let base = try backing ?? SQLitePersistenceStore(.inMemory)
         _ = try await base.append(seed.records, to: seed.conversation)
@@ -205,7 +208,8 @@ struct StoreUnderTest {
                 messagesFrom: messages,
                 generationsFrom: generations
             ),
-            clockFrom: Log.base.addingTimeInterval(Double(seed.lastSequence))
+            clockFrom: Log.base.addingTimeInterval(Double(seed.lastSequence)),
+            deltaFlush: deltaFlush
         )
     }
 
@@ -373,6 +377,114 @@ final class ParkingStore: PersistenceStore {
             return true
         }
         if isFirst { await latch.park() }
+    }
+}
+
+// MARK: - The driver double
+
+/// A `GenerationDriving` conformance that plays a fixed script (M5-PLAN Phase 3).
+///
+/// **Store-level, not model-level, and that is the whole point of the seam.**
+/// `Understudy.ScriptedLanguageModel` sits on the far side of a `GenerationDriver`
+/// that does not exist until M6, and cannot execute on a macOS 26 machine at all.
+/// This double conforms to the D21 protocol directly, so every store behaviour —
+/// single-flight, start atomicity, the flush loop, cancellation — is testable
+/// today with no Foundation Models anywhere.
+///
+/// Parking uses ``Latch`` rather than `Understudy.Cue`: `Cue.park()` is internal
+/// to that package, since its script *player* is the only thing meant to park on
+/// one. At M6 the arrangement inverts — the player parks, and the test uses
+/// `Cue`'s public `reached()` / `signal()`, which is exactly what it was designed
+/// for.
+final class ScriptedDriver: GenerationDriving {
+
+    enum Step: Sendable {
+        case delta(String)
+        case toolRecord(ToolRecord)
+        /// Parks the generation mid-flight until the test releases it — a point
+        /// the test *chose*, rather than a sleep it hoped for (D26).
+        case pause(Latch)
+    }
+
+    let model: ModelDescriptor
+    private let script: [Step]
+    private let ending: Outcome
+    private let requests = Mutex<[GenerationRequest]>([])
+
+    init(
+        _ script: [Step] = [],
+        ending: Outcome = .completed(Fix.stopInfo),
+        model: ModelDescriptor = Fix.model
+    ) {
+        self.script = script
+        self.ending = ending
+        self.model = model
+    }
+
+    /// One delta and a completion — the ordinary turn.
+    convenience init(saying text: String, model: ModelDescriptor = Fix.model) {
+        self.init([.delta(text)], model: model)
+    }
+
+    /// The rehydration material the store handed over, per call (§7.1).
+    var received: [GenerationRequest] { requests.withLock { $0 } }
+
+    func generate(_ request: GenerationRequest, streamingInto channel: GenerationChannel) async -> Outcome {
+        requests.withLock { $0.append(request) }
+        for step in script {
+            switch step {
+            case .delta(let text): channel.emit(.delta(text))
+            case .toolRecord(let record): channel.emit(.toolRecord(record))
+            case .pause(let latch): await latch.park()
+            }
+        }
+        return ending
+    }
+}
+
+/// Passes everything through until `tolerating` appends have succeeded, then
+/// fails every subsequent one.
+///
+/// Reads keep working throughout, which is what makes it usable for the start
+/// atomicity tests: the conversation must be loadable for a verb to get as far
+/// as reserving its slot and *then* fail to append (D24).
+final class FlakyStore: PersistenceStore {
+    private let wrapped: any PersistenceStore
+    private let remaining: Mutex<Int>
+
+    init(_ wrapped: any PersistenceStore, tolerating appends: Int = 0) {
+        self.wrapped = wrapped
+        self.remaining = Mutex(appends)
+    }
+
+    func append(_ records: [LedgerEvent.Record], to conversation: ConversationID) async throws -> [LedgerEvent] {
+        let allowed = remaining.withLock { left -> Bool in
+            guard left > 0 else { return false }
+            left -= 1
+            return true
+        }
+        guard allowed else { throw FailingStore.Failure() }
+        return try await wrapped.append(records, to: conversation)
+    }
+
+    func events(in conversation: ConversationID, from sequence: Int64) async throws -> [LoadedEvent] {
+        try await wrapped.events(in: conversation, from: sequence)
+    }
+
+    func latestSnapshot(for conversation: ConversationID) async throws -> Snapshot? {
+        try await wrapped.latestSnapshot(for: conversation)
+    }
+
+    func save(_ snapshot: Snapshot) async throws {
+        try await wrapped.save(snapshot)
+    }
+
+    func deleteConversation(_ conversation: ConversationID) async throws {
+        try await wrapped.deleteConversation(conversation)
+    }
+
+    func conversationSummaries() async throws -> [ConversationSummary] {
+        try await wrapped.conversationSummaries()
     }
 }
 

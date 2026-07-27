@@ -511,6 +511,400 @@ struct StoreTreeVerbTests {
     }
 }
 
+// MARK: - Phase 3: generation verbs
+
+/// `ScriptedIdentifiers` mints message IDs in one stream, so a `send` takes two
+/// of them: the user message first, then the assistant node.
+private let firstUser = Fix.userA                  // 0x10
+private let firstAssistant = MessageID(uuid(0x11)) // 0x11
+
+@Suite("Store — generation verbs")
+struct StoreGenerationTests {
+
+    @Test("send commits its user message and generationStarted together, then streams")
+    func sendIsAtomic() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+        let driver = ScriptedDriver(saying: "A valley fold")
+
+        let outcome = try await fixture.store.send("Explain valley folds", in: convo.id, using: driver)
+
+        #expect(outcome == .completed(Fix.stopInfo))
+        #expect(fixture.appends.map { $0.map(\.payload) } == [
+            [.conversationCreated(title: nil)],
+            // §6.5's start atomicity: one transaction, and nothing more —
+            // auto-extend is a fold rule, not an event.
+            [
+                .userMessageAppended(message: firstUser, content: "Explain valley folds", parent: nil),
+                .generationStarted(generation: Fix.genA, message: firstAssistant, parent: firstUser, model: Fix.model),
+            ],
+            // §7.4: always flush before the terminal.
+            [.deltaAppended(generation: Fix.genA, text: "A valley fold")],
+            [.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo))],
+        ])
+    }
+
+    @Test("the completed turn reduces to a visible thread")
+    func sendProducesAThread() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+
+        _ = try await fixture.store.send(
+            "Explain valley folds",
+            in: convo.id,
+            using: ScriptedDriver([.delta("A valley "), .delta("fold is…")])
+        )
+
+        let read = try await fixture.store.conversation(convo.id)
+        #expect(read.activePath == [firstUser, firstAssistant])
+        #expect(read.messages[firstAssistant]?.state == .complete(MessageContent(text: "A valley fold is…")))
+        #expect(read.messages[firstAssistant]?.stopInfo == Fix.stopInfo)
+    }
+
+    /// D21 constraint 3: the *requested* descriptor is the driver's, and the
+    /// store copies it rather than inventing one (§7.8 — nothing in the
+    /// framework exposes model identity).
+    @Test("the driver's ModelDescriptor rides generationStarted")
+    func modelDescriptorFlowsFromTheDriver() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+        let claude = ModelDescriptor(provider: "anthropic", model: "claude-opus-5")
+
+        _ = try await fixture.store.send("hi", in: convo.id, using: ScriptedDriver(saying: "hello", model: claude))
+
+        #expect(try await fixture.store.conversation(convo.id).messages[firstAssistant]?.model == claude)
+    }
+
+    /// D21 constraint 4: the store hands over **reduction output**, not the log.
+    @Test("the driver receives the instructions and the active path")
+    func driverReceivesRehydrationMaterial() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+        try await fixture.store.setInstructions("You are an origami tutor.", in: convo.id)
+        let driver = ScriptedDriver(saying: "ok")
+
+        _ = try await fixture.store.send("Explain valley folds", in: convo.id, using: driver)
+
+        let request = try #require(driver.received.first)
+        #expect(request.conversation == convo.id)
+        #expect(request.instructions == "You are an origami tutor.")
+        #expect(request.context.map(\.id) == [firstUser])
+        #expect(request.context.first?.state == .complete(MessageContent(text: "Explain valley folds")))
+    }
+
+    /// §6.4 case 2, first half: the parent *is* the endpoint, so auto-extend
+    /// fires and no path event is needed.
+    @Test("respond at the endpoint emits no path event")
+    func respondAtTheEndpoint() async throws {
+        let seed = Log.withUserMessage()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x1F, generationsFrom: 0x30)
+
+        _ = try await fixture.store.respond(to: Fix.userA, in: seed.conversation, using: ScriptedDriver(saying: "ok"))
+
+        #expect(fixture.appends.first?.map(\.payload) == [
+            .generationStarted(generation: Fix.genB, message: Fix.assistantA, parent: Fix.userA, model: Fix.model),
+        ])
+    }
+
+    /// §6.4 case 2, second half — **the case Phase 2 could not reach.** A
+    /// generation the user asked for must never stream invisibly, so an
+    /// off-endpoint target carries its path event in the same transaction.
+    @Test("respond off the endpoint moves the path in the same transaction")
+    func respondOffTheEndpointMovesThePath() async throws {
+        let seed = Log.withCompletedTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x20, generationsFrom: 0x30)
+
+        // The endpoint is `assistantA`; the target is the user message above it.
+        _ = try await fixture.store.respond(to: Fix.userA, in: seed.conversation, using: ScriptedDriver(saying: "again"))
+
+        #expect(fixture.appends.first?.map(\.payload) == [
+            .generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.userA, model: Fix.model),
+            .activePathChanged(endpoint: Fix.assistantB),
+        ])
+
+        let read = try await fixture.store.conversation(seed.conversation)
+        #expect(read.activePath == [Fix.userA, Fix.assistantB])
+        // The old response survives as a sibling — DoD-1's shape, falling out of
+        // the model rather than being a feature.
+        #expect(read.messages.siblings(of: Fix.assistantB).map(\.id) == [Fix.assistantA])
+    }
+
+    @Test("regenerate is exactly respond on the target's parent")
+    func regenerateIsSugar() async throws {
+        let seed = Log.withCompletedTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x20, generationsFrom: 0x30)
+
+        _ = try await fixture.store.regenerate(Fix.assistantA, in: seed.conversation, using: ScriptedDriver(saying: "again"))
+
+        #expect(fixture.appends.first?.map(\.payload) == [
+            .generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.userA, model: Fix.model),
+            .activePathChanged(endpoint: Fix.assistantB),
+        ])
+        #expect(try await fixture.store.conversation(seed.conversation).activePath == [Fix.userA, Fix.assistantB])
+    }
+
+    @Test("respond rejects an assistant target, regenerate rejects a user one")
+    func eligibilityIsSymmetric() async throws {
+        let seed = Log.withCompletedTurn()
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x20, generationsFrom: 0x30)
+
+        await #expect(throws: LedgerError.ineligibleTarget(
+            message: Fix.assistantA, expected: .user, found: .assistant
+        )) {
+            try await fixture.store.respond(to: Fix.assistantA, in: seed.conversation, using: ScriptedDriver())
+        }
+        await #expect(throws: LedgerError.ineligibleTarget(
+            message: Fix.userA, expected: .assistant, found: .user
+        )) {
+            try await fixture.store.regenerate(Fix.userA, in: seed.conversation, using: ScriptedDriver())
+        }
+
+        #expect(fixture.written.isEmpty)
+        #expect(try await fixture.rows(of: seed.conversation) == seed.rows)
+    }
+
+    /// N10, from the *reading* side: a nil-parent `generationStarted` is wire
+    /// headroom the reducer accepts and this store never writes — so it declines
+    /// to regenerate one rather than authoring the shape N10 reserves.
+    @Test("regenerating a root-level assistant message is unsupported")
+    func regenerateRejectsRootLevelAssistants() async throws {
+        var seed = Log.opened()
+        seed.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: nil, model: Fix.model))
+        seed.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
+        let fixture = try await StoreUnderTest.continuing(seed, messagesFrom: 0x20, generationsFrom: 0x30)
+
+        await #expect(throws: LedgerError.unsupportedTarget(message: Fix.assistantA)) {
+            try await fixture.store.regenerate(Fix.assistantA, in: seed.conversation, using: ScriptedDriver())
+        }
+
+        #expect(fixture.written.isEmpty)
+    }
+
+    @Test("a generation verb on an unknown conversation throws and writes nothing")
+    func unknownConversationThrows() async throws {
+        let fixture = try StoreUnderTest()
+
+        await #expect(throws: LedgerError.unknownConversation(Fix.foreign)) {
+            try await fixture.store.send("hi", in: Fix.foreign, using: ScriptedDriver())
+        }
+        #expect(fixture.written.isEmpty)
+    }
+}
+
+/// §6.5's concurrency rules: one generation per conversation, unrestricted
+/// across them. Every interleaving below is driven by `Latch` at a point the
+/// test chose (D26) — no sleeps, no seeds, and a failure reproduces by
+/// re-running.
+@Suite("Store — single-flight and start atomicity")
+struct StoreSingleFlightTests {
+
+    @Test("a second starter throws generationInFlight and records nothing")
+    func secondStarterIsTurnedAway() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+        let latch = Latch()
+
+        let running = Task {
+            try await fixture.store.send(
+                "first",
+                in: convo.id,
+                using: ScriptedDriver([.delta("half "), .pause(latch), .delta("done")])
+            )
+        }
+        await latch.waitForArrival()
+
+        let before = fixture.written.count
+        await #expect(throws: LedgerError.generationInFlight(convo.id)) {
+            try await fixture.store.send("second", in: convo.id, using: ScriptedDriver())
+        }
+        // §6.5: a losing racer records **nothing** — no orphaned user message,
+        // no yanked path.
+        #expect(fixture.written.count == before)
+
+        await latch.release()
+        #expect(try await running.value == .completed(Fix.stopInfo))
+    }
+
+    @Test("two conversations generate at once")
+    func crossConversationConcurrencyIsFree() async throws {
+        let fixture = try StoreUnderTest()
+        let first = try await fixture.store.createConversation(title: "first")
+        let second = try await fixture.store.createConversation(title: "second")
+        let firstLatch = Latch()
+        let secondLatch = Latch()
+
+        let a = Task {
+            try await fixture.store.send("a", in: first.id, using: ScriptedDriver([.pause(firstLatch), .delta("A")]))
+        }
+        await firstLatch.waitForArrival()
+
+        // The second starts while the first is provably mid-flight — which is
+        // the claim: single-flight is per conversation, not per store.
+        let b = Task {
+            try await fixture.store.send("b", in: second.id, using: ScriptedDriver([.pause(secondLatch), .delta("B")]))
+        }
+        await secondLatch.waitForArrival()
+
+        await firstLatch.release()
+        await secondLatch.release()
+
+        #expect(try await a.value == .completed(Fix.stopInfo))
+        #expect(try await b.value == .completed(Fix.stopInfo))
+        #expect(try await fixture.store.conversation(first.id).activeMessages.last?.state
+                == .complete(MessageContent(text: "A")))
+        #expect(try await fixture.store.conversation(second.id).activeMessages.last?.state
+                == .complete(MessageContent(text: "B")))
+    }
+
+    /// **D24's rollback.** A start append that fails must leave the slot free —
+    /// otherwise one disk hiccup wedges the conversation as permanently
+    /// "generating", with no generation to cancel and no way back.
+    @Test("a failed start releases the reservation and leaves the log untouched")
+    func failedStartRollsBack() async throws {
+        let backing = try SQLitePersistenceStore(.inMemory)
+        let seed = Log.withUserMessage()
+        _ = try await backing.append(seed.records, to: seed.conversation)
+
+        let fixture = try StoreUnderTest(over: FlakyStore(backing, tolerating: 0))
+
+        do {
+            _ = try await fixture.store.send("hi", in: seed.conversation, using: ScriptedDriver())
+            Issue.record("expected the start append to fail")
+        } catch let error as LedgerError {
+            guard case .persistenceFailure = error else {
+                Issue.record("expected .persistenceFailure, got \(error)")
+                return
+            }
+        }
+
+        // The log is untouched — the seam's batch is all-or-nothing…
+        #expect(try await backing.events(in: seed.conversation, from: 1) == seed.rows)
+        // …and the slot is free, so the conversation is not wedged.
+        try await fixture.store.reserve(seed.conversation)
+    }
+}
+
+/// §7.4's cadence: only deltas coalesce, everything else appends synchronously,
+/// and the buffer is always flushed before the terminal.
+@Suite("Store — the flush loop")
+struct StoreFlushTests {
+
+    /// Deterministic without controlling a clock: a one-character bound makes
+    /// every delta due, and `.zero` would too.
+    private static let everyDelta = DeltaFlushPolicy(interval: .zero, characterCount: 1)
+    /// Nothing is ever due, so only the mandatory pre-terminal flush fires.
+    private static let never = DeltaFlushPolicy(interval: .seconds(3600), characterCount: .max)
+
+    @Test("a flush-per-delta policy writes one row per delta")
+    func flushesPerDelta() async throws {
+        let fixture = try StoreUnderTest(deltaFlush: Self.everyDelta)
+        let convo = try await fixture.store.createConversation()
+
+        _ = try await fixture.store.send(
+            "q",
+            in: convo.id,
+            using: ScriptedDriver([.delta("one "), .delta("two "), .delta("three")])
+        )
+
+        #expect(fixture.written.compactMap { payload -> String? in
+            guard case .deltaAppended(_, let text) = payload.payload else { return nil }
+            return text
+        } == ["one ", "two ", "three"])
+    }
+
+    /// The buffer's whole purpose: a 60 s generation should not be ~240 separate
+    /// transactions when nothing needs them to be.
+    @Test("a policy that never comes due still flushes once, before the terminal")
+    func coalescesButNeverLoses() async throws {
+        let fixture = try StoreUnderTest(deltaFlush: Self.never)
+        let convo = try await fixture.store.createConversation()
+
+        _ = try await fixture.store.send(
+            "q",
+            in: convo.id,
+            using: ScriptedDriver([.delta("one "), .delta("two "), .delta("three")])
+        )
+
+        let payloads = fixture.written.map(\.payload)
+        #expect(payloads.filter { if case .deltaAppended = $0 { true } else { false } }
+                == [.deltaAppended(generation: Fix.genA, text: "one two three")])
+        // …and it landed *before* the terminal, which is not a policy choice.
+        #expect(payloads.last == .generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
+        #expect(try await fixture.store.conversation(convo.id).messages[firstAssistant]?.state
+                == .complete(MessageContent(text: "one two three")))
+    }
+
+    /// Only `deltaAppended` coalesces (§7.4). A tool record forces the buffer
+    /// out first, or the log would claim the tool ran before text that preceded
+    /// it — and I4 would reject nothing, so the corruption would be silent.
+    @Test("a tool record flushes buffered text ahead of itself")
+    func toolRecordsOrderAfterTheirText() async throws {
+        let fixture = try StoreUnderTest(deltaFlush: Self.never)
+        let convo = try await fixture.store.createConversation()
+        let record = ToolRecord(name: "lookupFold", status: .succeeded)
+
+        _ = try await fixture.store.send(
+            "q",
+            in: convo.id,
+            using: ScriptedDriver([.delta("before "), .toolRecord(record), .delta("after")])
+        )
+
+        #expect(fixture.written.map(\.payload).suffix(4) == [
+            .deltaAppended(generation: Fix.genA, text: "before "),
+            .toolInvocationRecorded(generation: Fix.genA, record: record),
+            .deltaAppended(generation: Fix.genA, text: "after"),
+            .generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)),
+        ])
+        #expect(try await fixture.store.conversation(convo.id).messages[firstAssistant]?.toolRecords == [record])
+    }
+
+    /// The healthy-log property over a *streaming* log, with a flush landing
+    /// mid-generation — the Phase 3 gate's version of it.
+    @Test("a streaming generation produces a healthy log the cache agrees with")
+    func healthyStreamingLog() async throws {
+        let fixture = try StoreUnderTest(deltaFlush: Self.everyDelta)
+        let convo = try await fixture.store.createConversation(title: "streaming")
+
+        _ = try await fixture.store.send(
+            "q",
+            in: convo.id,
+            using: ScriptedDriver([
+                .delta("one "),
+                .toolRecord(ToolRecord(name: "t", status: .succeeded)),
+                .delta("two "),
+                .delta("three"),
+            ])
+        )
+        _ = try await fixture.store.respond(to: firstUser, in: convo.id, using: ScriptedDriver(saying: "again"))
+
+        let problems = try await healthyLogProblems(convo.id, in: fixture.store, backedBy: fixture.backing)
+        #expect(problems.isEmpty, "\(problems)")
+    }
+
+    /// A failure is a *terminal*, not a throw (§7.2) — including the zero-token
+    /// case, which renders as an empty failed bubble showing how to recover.
+    @Test("a driver failure lands as an outcome, not an exception")
+    func failuresAreOutcomes() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+        let failure = Outcome.failed(.providerFailure(status: 401, code: nil, message: nil))
+
+        let outcome = try await fixture.store.send(
+            "q",
+            in: convo.id,
+            using: ScriptedDriver([], ending: failure)
+        )
+
+        #expect(outcome == failure)
+        let read = try await fixture.store.conversation(convo.id)
+        #expect(read.messages[firstAssistant]?.state == .failed(
+            partial: "",
+            error: .providerFailure(status: 401, code: nil, message: nil),
+            recoverability: .recoverableUpstream(.reauthenticate)
+        ))
+    }
+}
+
 /// Reentrancy is the whole reason this cache is subtle: an actor yields at every
 /// `await`, so both hazards below involve a verb resuming into a world that
 /// changed underneath it. Both are driven by `Latch` at a point the test chose

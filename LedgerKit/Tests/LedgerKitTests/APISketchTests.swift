@@ -2,7 +2,8 @@ import Foundation
 import Testing
 @testable import LedgerKit
 
-// **The §11 sketch, rendered as code that must compile** — M5-PLAN guardrail 1.
+// **The §11 sketch, as code that must compile and — since Phase 3 — must run.**
+// M5-PLAN guardrail 1 and the milestone's first exit criterion.
 //
 // SPEC §11 is a sketch in a Markdown fence, which means nothing stops the landed
 // API from drifting away from it one plausible signature at a time. This file is
@@ -10,39 +11,25 @@ import Testing
 // signature is wrong or rev 8 records why the sketch moved. Never silently
 // diverge.
 //
-// **`apiSketch` is type-checked and never executed**, and that is not a
-// temporary state of affairs at Phase 0 — it is the file's design. Every verb
-// body is `fatalError` until its phase lands, so *running* it would crash; and
-// even once M5 is complete, a sketch that ran would be a slow integration test
-// pretending to be a shape assertion. Shape is what it asserts, and the compiler
-// is the assertion. The real behaviour tests live per-phase beside the verbs.
+// The file is in two halves, and the split is the milestone's progress made
+// visible. ``apiSketch`` is **executed** by the suite below — every lifecycle,
+// tree and generation line, end to end against a scripted driver. ``apiShape``
+// is type-checked and never called, holding the lines that must not run here:
+// the file-backed initializer, which no test should scribble a database for, and
+// the cancellation and delete lines, whose verbs land at Phase 4. Phase 4 moves
+// those into the runnable half and this comment shrinks.
 //
 // The one deliberate substitution from §11, recorded rather than glossed: §11
 // constructs `GenerationDriver(model: SystemLanguageModel.default,
 // toolRecording: .metadataOnly)`, which is M6's concrete driver over Foundation
 // Models. M5 has only the seam (D21), so the sketch takes a `some
-// GenerationDriving` — which is exactly the point of the seam, and what makes
-// this file runnable on a machine with no Apple Intelligence eligibility.
+// GenerationDriving` — which is exactly the point of the seam, and what lets
+// this file run on a machine with no Apple Intelligence eligibility.
 
-/// A stand-in for M6's `GenerationDriver`: enough of a conformance to type-check
-/// the sketch, and nothing more. Phase 3 brings the real scripted double, with
-/// `Cue` parking for deterministic cancellation (D26).
-private struct SketchDriver: GenerationDriving {
-    let model = ModelDescriptor(provider: "understudy", model: "sketch")
+// MARK: - The sketch, executed
 
-    func generate(_ request: GenerationRequest, streamingInto channel: GenerationChannel) async -> Outcome {
-        channel.emit(.delta("a valley fold is "))
-        channel.emit(.delta("a fold toward you"))
-        return .completed(StopInfo())
-    }
-}
-
-// MARK: - The sketch
-
-/// SPEC §11, line for line. Never called; see the file header.
-private func apiSketch(dbURL: URL, driver: SketchDriver) async throws -> [String] {
-    let store = try ConversationStore(persistence: .sqlite(at: dbURL))    // actor
-
+/// SPEC §11's lifecycle, tree and generation lines, in order.
+private func apiSketch(store: ConversationStore, driver: some GenerationDriving) async throws -> [String] {
     // Lifecycle & metadata
     let convo = try await store.createConversation()                      // optional title:
     try await store.setInstructions("You are an origami tutor.", in: convo.id)
@@ -77,21 +64,33 @@ private func apiSketch(dbURL: URL, driver: SketchDriver) async throws -> [String
     guard let assistant = edited.activeMessages.last(where: { $0.role == .assistant }) else { return rendered }
 
     let outcome3 = try await store.regenerate(assistant.id, in: convo.id, using: driver)
-        // EXACTLY respond(to: its parent) — pure sugar since rev 4 (§6.4).
+        // EXACTLY respond(to: its parent) — pure sugar since rev 4 (§6.4): the
+        // off-endpoint path event is respond's job now, so regenerate adds nothing
+        // but the assistant-to-parent lookup. Sibling response falls out.
     rendered.append(render(outcome3))
+
+    // SwiftUI — message states drive UI directly:
+    rendered.append(contentsOf: (try await store.conversation(convo.id)).activeMessages.map(bubble))
 
     // Branching
     try await store.switchBranch(to: replacement, in: convo.id)           // bare activePathChanged
 
-    // Cancellation — canonical path; the store outlives any Task handle:
-    await store.cancelGeneration(in: convo.id)                            // no-op if none live; racing a
-                                                                          // natural terminal is benign —
-                                                                          // first append wins, I3 (§7.5)
+    return rendered
+}
+
+/// The §11 lines that must type-check here but must not execute: a file-backed
+/// store, and the two verbs Phase 4 implements.
+///
+/// Never called; see the file header.
+private func apiShape(dbURL: URL, driver: some GenerationDriving) async throws {
+    let store = try ConversationStore(persistence: .sqlite(at: dbURL))    // actor
+    let convo = try await store.createConversation()
 
     // send/respond/regenerate THROW only when the generation never started —
-    // i.e. before generationStarted is appended (§7.2). After the append,
-    // failures are outcomes, not exceptions. One channel for "couldn't record",
-    // one channel for "recorded a failure".
+    // i.e. before generationStarted is appended (§7.2): unknown conversation,
+    // unknown/ineligible target, generationInFlight, persistence failure. After
+    // the append, failures are outcomes, not exceptions. One channel for
+    // "couldn't record", one channel for "recorded a failure".
     let generationTask = Task {
         _ = try await store.send("Explain valley folds", in: convo.id, using: driver)
     }
@@ -99,15 +98,13 @@ private func apiSketch(dbURL: URL, driver: SketchDriver) async throws -> [String
     // Stop button — either path, same semantics (§7.5):
     generationTask.cancel()                      // sugar: dies with its owner
     // or:
-    await store.cancelGeneration(in: convo.id)   // canonical
-
-    // SwiftUI — message states drive UI directly:
-    rendered.append(contentsOf: edited.activeMessages.map(bubble))
+    await store.cancelGeneration(in: convo.id)   // canonical; no-op if none live,
+                                                 // and racing a natural terminal is
+                                                 // benign — first append wins, I3
 
     try await store.deleteConversation(convo.id)                          // cancels any in-flight generation
                                                                           // first (§9), then irreversible,
                                                                           // out-of-band delete
-    return rendered
 }
 
 /// §11's showpiece: the compiler forces the app to handle interruption and
@@ -146,15 +143,39 @@ private func render(_ outcome: Outcome) -> String {
     }
 }
 
-// MARK: - Phase 0's behaviour
+// MARK: - Phase 0's behaviour, and Phase 3's exit criterion
 
-/// The three Phase 0 declarations that are not scaffolding: the two initializers
-/// and the signal channel. Everything else in this milestone's surface is a
-/// signature awaiting its phase.
-@Suite("M5 Phase 0 — store surface")
+@Suite("M5 — the §11 public API")
 struct APISketchTests {
 
-    @Test("Opening an in-memory store succeeds and migrates")
+    /// **The milestone's first exit criterion**, minus the cancellation lines
+    /// (Phase 4): every §11 line above runs against a scripted driver, and the
+    /// log it produces is one the reducer accepts without a single diagnostic.
+    @Test("the §11 sketch runs end-to-end against a scripted driver")
+    func sketchRuns() async throws {
+        let fixture = try StoreUnderTest()
+        let driver = ScriptedDriver(saying: "A valley fold is a fold toward you.")
+
+        let rendered = try await apiSketch(store: fixture.store, driver: driver)
+
+        // Three turns, each ending in exactly one terminal outcome (I3).
+        #expect(rendered.prefix(3) == [
+            "completed (8 output tokens)",
+            "completed (8 output tokens)",
+            "completed (8 output tokens)",
+        ])
+        #expect(rendered.dropFirst(3).contains { $0.hasPrefix("complete: A valley fold") })
+        #expect(driver.received.count == 3)
+
+        // Every conversation the sketch touched reduces with empty diagnostics.
+        let summaries = try await fixture.backing.conversationSummaries()
+        for summary in summaries {
+            let problems = try await healthyLogProblems(summary.id, in: fixture.store, backedBy: fixture.backing)
+            #expect(problems.isEmpty, "\(summary.id): \(problems)")
+        }
+    }
+
+    @Test("opening an in-memory store succeeds and migrates")
     func opensInMemory() throws {
         _ = try ConversationStore(persistence: .inMemory)
     }
@@ -164,7 +185,7 @@ struct APISketchTests {
     /// `LedgerError`, and the underlying description rides along as prose the
     /// test deliberately does not read (ADR-001: assert the case, never the
     /// wording).
-    @Test("An unopenable database throws LedgerError, never the backend's error")
+    @Test("an unopenable database throws LedgerError, never the backend's error")
     func wrapsBackendFailure() throws {
         let unreachable = URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString)/ledger.db")
         do {
@@ -178,11 +199,10 @@ struct APISketchTests {
         }
     }
 
-    /// The channel is the only Phase 0 type with runtime behaviour, and its two
-    /// properties are the ones a lost delta would violate: order, and delivery
-    /// of everything emitted before the reader arrived (unbounded buffering —
-    /// see ``GenerationChannel/makeStream()``).
-    @Test("The generation channel delivers every signal, in order, then ends")
+    /// The channel's two properties are the ones a lost delta would violate:
+    /// order, and delivery of everything emitted before the reader arrived
+    /// (unbounded buffering — see ``GenerationChannel/makeStream()``).
+    @Test("the generation channel delivers every signal, in order, then ends")
     func channelDeliversInOrder() async {
         let (signals, channel) = GenerationChannel.makeStream()
         let record = ToolRecord(name: "lookupFold", status: .succeeded)

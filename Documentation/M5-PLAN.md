@@ -1,6 +1,6 @@
 # M5 Implementation Plan — `ConversationStore` actor + turn verbs
 
-**Status:** 🚧 **IN PROGRESS** — opened 2026-07-27 at the M4 boundary. **Phase 0 reviewed and committed; Phase 1 landed 2026-07-27, awaiting its review gate.**
+**Status:** 🚧 **IN PROGRESS** — opened 2026-07-27 at the M4 boundary. **Phases 0–2 reviewed; Phase 3 landed 2026-07-27, awaiting its review gate.** Phase 4 (cancellation, deletion, snapshot refresh, chaos) is next.
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M5 section) · [SPEC.md](./SPEC.md) §6.5, §11, §7.2, §7.4, §7.5, §9, §10.4 · [M4-PLAN.md](./M4-PLAN.md) §7 (the five inherited handoffs)
 **Baseline:** M0–M4 done and audited, **266 tests green** (245 `LedgerKit` + 21 `Understudy`), both packages warning-free. **SPEC rev 8 open** (Appendix F — post-M4-audit amendments); it accumulates M5's items and **ratifies at this milestone's boundary** (agreed 2026-07-27).
 **Spec work:** rev 8 is already open, so M5 amendments *extend Appendix F* rather than opening a new revision. The inventory is §6 of this plan; SPEC edits require approval first, drafted scratch-first per the standing pattern.
@@ -69,7 +69,7 @@ Curated, not accumulated — each row is here because some Phase below acts on i
 | A snapshot save failure is a missed optimization; a snapshot *read* failure is swallowed; an `events` failure propagates | `Snapshots.swift` | The actor wraps `saveSnapshot` in the shrug (§9's "best-effort" is caller policy); it never converts an `events` failure into an empty conversation |
 | **Swift actors are reentrant at every `await`** | Swift concurrency semantics | §6.5's "one actor-isolated critical section" cannot be a lock held across the append's `await`. D24 is the resolution — read it before writing any verb |
 | The dev machine runs **macOS 26**; `ScriptedLanguageModel` and everything touching `LanguageModelSession` is 27-only and **cannot execute here** | CLAUDE.md toolchain note | M5's test driver is a **store-level double in `LedgerKitTests`** conforming to D21's protocol — no Foundation Models import anywhere in M5. The script→snapshot→diff end-to-end property stays M6's |
-| `Understudy.Cue` is platform-agnostic (26+), public, and purpose-built for parking a generation mid-flight | `Understudy/Cue.swift` | LedgerKit's test target takes its **first Understudy import** at M5 — for `Cue` in the chaos suites. This is the import CLAUDE.md has promised since M3 |
+| ~~`Understudy.Cue` is public and purpose-built for parking a generation mid-flight~~ **Corrected at Phase 3: `Cue.park()` is `internal`** — the script player is the only thing meant to park on one | `Understudy/Cue.swift` | **No Understudy import at M5.** A `LedgerKitTests` driver double cannot park on a `Cue`, so `Latch` (test-target, ~30 lines) does it. The promised import is **M6's**, where the player parks and the test uses the public `reached()`/`signal()` — `Cue` as designed |
 | `Log.records` gives every reducer fixture its wire form; `Log.timestampsAreCanonical`, `Log.isStoreReplayable` exist | `ReducerFixtures.swift` | Store suites replay the same logs the reducer suites fold. Verb tests extend this: verb sequence → captured records → reducer fixture equivalence |
 | Only `deltaAppended` coalesces; **everything else appends synchronously before the verb proceeds** — a `generationStarted` in an unflushed tail is the vanishing-turn hole | §7.4 | The generation loop flushes deltas on policy and *always* flushes before the terminal append |
 | The requested `ModelDescriptor` is **app-supplied at driver init** — nothing in FM derives it | §7.8, OQ8 | The driver seam must *expose* the descriptor; the store copies it into `generationStarted`. The store never invents one |
@@ -463,34 +463,96 @@ healthy-log property covers every new verb; both suites green.
 
 ### Phase 3 — Generation verbs: `send`, `respond`, `regenerate` + the loop
 
+**Status:** ✅ **code landed 2026-07-27; review gate open.** 315 tests green
+(294 `LedgerKit` + 21 `Understudy`), both packages warning-free.
+
 **Goal:** the heart — single-flight, start atomicity, the generation loop, and
 the two-channel contract, against a scripted test driver.
 
-- [ ] **Test driver double** in `LedgerKitTests` conforming to D21: scripted
-      signals (deltas, tool records, outcome) with `Cue` parking between
-      steps — LedgerKit's first `Understudy` import (for `Cue`; the full
-      `ScriptedLanguageModel` integration is M6's).
-- [ ] Reserve → append → confirm-or-rollback (D24). `send` =
+- [x] **Test driver double** in `LedgerKitTests` conforming to D21: scripted
+      signals (deltas, tool records, outcome) with ~~`Cue`~~ **`Latch`** parking
+      between steps. → `ScriptedDriver`. **The Understudy import does not
+      happen — see gate item 1.**
+- [x] Reserve → append → confirm-or-rollback (D24). `send` =
       `userMessageAppended` + `generationStarted` in one transaction;
       `respond`/`regenerate` add `activePathChanged` when the parent is off
       the endpoint (§6.4 — a requested generation never streams invisibly).
-- [ ] `regenerate` is *exact* sugar: resolve the assistant target's parent,
-      delegate to `respond` internals. One implementation, two entries.
-- [ ] The generation loop (D25): consume signals; buffer deltas; flush on
+      The reservation gained a second state (`.reserved` → `.running(task)`),
+      because D24's window between claiming the slot and confirming it is
+      exactly where the race lives.
+- [x] `regenerate` is *exact* sugar: resolve the assistant target's parent,
+      delegate to `respond` internals. One implementation, two entries — the
+      private `generate(from:in:precededBy:movingPath:using:)`.
+- [x] The generation loop (D25): consume signals; buffer deltas; flush on
       `DeltaFlushPolicy`; tool records and the terminal append synchronously;
       **always flush before the terminal**. Suspend the verb until the terminal
       is durable; return the `Outcome`.
-- [ ] Single-flight: a second starter throws `generationInFlight`;
+- [x] Single-flight: a second starter throws `generationInFlight`;
       cross-conversation concurrency is *tested*, not just permitted (two
       conversations, two parked drivers, both complete).
-- [ ] Two-channel contract per verb: every §11 throw condition has a test
+- [x] Two-channel contract per verb: every §11 throw condition has a test
       proving the log untouched afterward (re-read, count rows).
-- [ ] `ModelDescriptor` flows driver → `generationStarted` (D21 constraint 3).
+- [x] `ModelDescriptor` flows driver → `generationStarted` (D21 constraint 3).
 
 **Review gate:** the §11 sketch runs (§1 exit criterion) minus cancellation
 lines; start-atomicity mutation test (D24: delete the rollback → chaos suite
 must catch the wedged conversation); healthy-log property now spans streaming
 logs, including a flush landing mid-generation.
+
+**Gate items raised by the implementation:**
+
+1. **⚠️ The planned first `Understudy` import does not happen at M5, and the
+   plan's Context row on it is wrong.** `Cue.park()` is **internal** to
+   Understudy — its script *player* is the only thing meant to park on one — so
+   a driver double living in `LedgerKitTests` cannot use it. `Latch`
+   (Phase 1's, ~30 lines) does both halves and is what `ScriptedDriver` parks
+   on. Making `park()` public would widen `Cue`'s stated contract ("a rendezvous
+   between a running script and the test watching it") to buy one test-target
+   convenience, so it was not done. **At M6 the arrangement inverts and `Cue`
+   works as designed:** the player parks, and the test uses the public
+   `reached()` / `signal()`. The first Understudy import is therefore M6's.
+2. **`LedgerError` gained a sixth case: `unsupportedTarget(message:)`.** Reached
+   by exactly one condition — `regenerate` of a **root-level** assistant message,
+   whose parent is the virtual root, so the store would have to emit
+   `generationStarted(parent: nil)`. **N10 is normative** ("the v0.1 store simply
+   never emits one"), so the store declines rather than authoring the shape N10
+   reserves. Reachable only from a log this version did not write, which is the
+   forward-compatibility direction the design cares about; relaxing N10 in v0.2
+   makes the case unreachable rather than wrong. **D22 addition — needs sign-off,
+   and a rev 8 §11 line.**
+3. **⚠️ Rev 8 inventory item: §11's throw channel needs one more clause.** A
+   persistence failure while recording a *delta flush* or the *terminal* happens
+   after `generationStarted` is in the log, so §11's "throw only when the
+   generation never started" does not cover it — but §11's own principle does:
+   *"one channel for 'couldn't record', one channel for 'recorded a failure'"*,
+   and this is emphatically the former. The implementation throws
+   `persistenceFailure`, leaves an open generation on disk (which reduces to
+   `.interrupted` — the honest state, already handled by the recovery UX), and
+   winds the driver down. Added to §6's inventory as item 7.
+4. **The delta buffer is timed on `ContinuousClock`, not the injected `now`.**
+   Two reasons: an interval measured on a wall clock is wrong whenever that clock
+   is adjusted, and `now` is *the stamping site*, so spending its reads on flush
+   bookkeeping would make an event's timestamp depend on how often the buffer was
+   consulted — which would have silently broken every byte-for-byte fixture test.
+   Determinism comes from the character bound and from `.zero` / very large
+   intervals, needing no clock control at all.
+5. **The driver runs in an unstructured `Task` whose handle the reservation
+   holds**, which is a soft tension with D21 constraint 5 ("cancellation flows
+   through structured concurrency"). A handle is unavoidable: `cancelGeneration`
+   is a *different* actor entry and cannot cancel a task it has no reference to.
+   Phase 4 restores the constraint's behaviour with `withTaskCancellationHandler`,
+   so cancelling the verb's own task still reaches the driver (§7.2's straddle).
+6. **Mutation results.** Ⓓ Delete D24's rollback → caught by the failed-start
+   test (the conversation stays wedged as "generating"). Ⓔ Split `send` into two
+   transactions → caught by the atomicity test alone, which is correct: the
+   damage is *crash*-visible, not racer-visible, so the transaction-grouping
+   assertion is the only instrument that can see it. Ⓕ Remove the pre-terminal
+   flush → caught by six tests. Ⓖ Remove the flush ahead of a tool record →
+   caught by its own test.
+7. **`APISketchTests.swift` is now half runnable.** `apiSketch` executes every
+   lifecycle, tree and generation line of §11 end-to-end and asserts the log it
+   produces is diagnostic-free; `apiShape` still holds the file-backed
+   initializer and the cancellation/delete lines, which Phase 4 moves across.
 
 ---
 
@@ -573,6 +635,16 @@ approval:
    a corruption signal.
 6. Anything Phases 1–4 surface that changes a §6.5/§11 sentence — logged here
    as discovered, the M4 pattern.
+7. **§11's throw channel covers "couldn't record", not only "never started"**
+   (Phase 3, gate item 3). A persistence failure while flushing deltas or
+   recording the terminal is post-start, so the current sentence excludes it,
+   while §11's own stated principle includes it. The store throws
+   `persistenceFailure` and leaves an open generation — `.interrupted` on reload,
+   the honest state. Also record `LedgerError`'s sixth case,
+   `unsupportedTarget(message:)`, and its N10 rationale (gate item 2).
+8. **The Context table's "first Understudy import at M5" row is wrong** and
+   should be corrected wherever it is repeated (this plan §2, CLAUDE.md).
+   `Cue.park()` is internal, so the import is M6's — see Phase 3 gate item 1.
 
 ---
 
@@ -614,14 +686,14 @@ approval:
 
 | Obligation | Suite / evidence | Status |
 |---|---|---|
-| §11 sketch compiles and runs against scripted driver | | ☐ |
-| Start atomicity: losing racer records nothing | | ☐ |
-| Single-flight per conversation; cross-conversation freedom | | ☐ |
+| §11 sketch compiles and runs against scripted driver | `APISketchTests.sketchRuns` — runnable half; cancellation lines at Phase 4 | ◐ |
+| Start atomicity: losing racer records nothing | `StoreSingleFlightTests` — turned-away racer + D24 rollback (mutation Ⓓ) | ☑ |
+| Single-flight per conversation; cross-conversation freedom | `StoreSingleFlightTests` — both, with parked drivers | ☑ |
 | Two-channel contract, per verb, log-untouched proofs | | ☐ |
-| Target eligibility (respond/regenerate/edit) | `StoreTreeVerbTests` covers `edit` (user) via the shared `target(_:expecting:)`; respond/regenerate at Phase 3 | ◐ |
+| Target eligibility (respond/regenerate/edit) | `StoreTreeVerbTests` (edit) + `StoreGenerationTests` (respond/regenerate, plus N10's `unsupportedTarget`), all via the shared `target(_:expecting:)` | ☑ |
 | §7.2 straddle (pre-append throws, post-append returns) | | ☐ |
 | Cancel vs. natural terminal: one terminal (I3) | | ☐ |
-| Only deltas coalesce; flush-before-terminal | | ☐ |
+| Only deltas coalesce; flush-before-terminal | `StoreFlushTests` — mutations Ⓕ and Ⓖ both caught | ☑ |
 | Healthy-log property over every verb + chaos run | | ☐ |
 | Snapshot refresh trigger + cold reopen ≤ one suffix | | ☐ |
 | Delete cancels first; cache evicted | | ☐ |
@@ -649,6 +721,7 @@ approval:
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-07-27 | Phase 3 landed | 315 (294 + 21) | `send` / `respond` / `regenerate` over one shared start path; D24's reserve→append→confirm-or-rollback; the D25 flush loop; `ScriptedDriver`. **§11 sketch now runs end-to-end** minus cancellation. Four mutations run, all caught. Three items for sign-off: `LedgerError.unsupportedTarget` (N10), §11's throw-channel clause, and the dropped Understudy import. Warning-free |
 | 2026-07-27 | Phase 2 landed | 296 (275 + 21) | `edit` / `switchBranch` / shared `target(_:expecting:)`; live-set storage + `reserve`/`release` (D24's synchronous half, landed early for the mid-stream assertion). Root edit reproduces `Corpus.rootEdit` row for row. Three mutations run, all caught; Ⓐ confirmed the healthy-log property is not a semantic check (Phase 2 gate item 4). Warning-free |
 | 2026-07-27 | Phase 1 landed | 285 (264 + 21) | Cache, stamping site, `createConversation` / `setInstructions` / `setTitle` / `conversation`, healthy-log property. New: `Store/Snapshots.swift` gains `loadedFold(of:)`; tests gain `StoreFixtures.swift` + `ConversationStoreTests.swift`. **D29 proposed.** Four mutations run; ④ found a real hole in the stamping test (read-back repairs a bad stamp) — fixed, and the standing lesson is recorded under Phase 1 gate item 3. Warning-free |
 | 2026-07-27 | Phase 0 landed | 269 (248 + 21) | Five files: `Store/{GenerationDriving,LedgerError,Policies,ConversationStore}.swift` + `Tests/APISketchTests.swift`. §11 sketch type-checks line-for-line against the landed signatures, with one recorded substitution (M6's concrete `GenerationDriver` → `some GenerationDriving`). Four gate items listed under Phase 0. Warning-free |

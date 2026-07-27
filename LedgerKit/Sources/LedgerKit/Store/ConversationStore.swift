@@ -65,6 +65,72 @@ public actor ConversationStore {
         var lastSequence: Int64
     }
 
+    /// A conversation's generation slot (§6.5, D24).
+    ///
+    /// Two states because D24 has two moments: the slot is claimed *before* the
+    /// start append (so a racer arriving mid-append is turned away), and only
+    /// becomes a running generation once that append succeeded. A single
+    /// "is generating" flag could not express the window in between, which is
+    /// precisely the window the race lives in.
+    private enum Reservation {
+        /// Claimed, nothing appended yet — D24 step 1.
+        case reserved
+        /// Confirmed and running — D24 step 3. The handle is what
+        /// ``cancelGeneration(in:)`` cancels (Phase 4); a generation the store
+        /// cannot reach is a generation the stop button cannot stop.
+        case running(Task<Outcome, Never>)
+    }
+
+    /// Accumulates stream text until the flush policy says it is worth a
+    /// transaction (§7.4, D25).
+    ///
+    /// Timed on a **`ContinuousClock`**, not on the store's injected `now` —
+    /// deliberately, and for two reasons. An interval measured against a wall
+    /// clock is wrong whenever that clock is adjusted, which is a real thing
+    /// during a long generation; and `now` is *the stamping site*, so spending
+    /// its reads on flush bookkeeping would make an event's timestamp depend on
+    /// how often the buffer was consulted. Determinism in tests comes from the
+    /// character bound and from `.zero` / very large intervals, which need no
+    /// clock control at all.
+    private struct DeltaBuffer {
+        private let policy: DeltaFlushPolicy
+        private var text = ""
+        /// Tracked incrementally: `String.count` is O(n), and calling it per
+        /// delta would make buffering quadratic in a long generation.
+        private var characters = 0
+        private var openedAt: ContinuousClock.Instant
+
+        init(policy: DeltaFlushPolicy, openedAt: ContinuousClock.Instant = .now) {
+            self.policy = policy
+            self.openedAt = openedAt
+        }
+
+        mutating func append(_ delta: String) {
+            text += delta
+            characters += delta.count
+        }
+
+        /// The buffered text if the policy says it is due, resetting the buffer.
+        mutating func takeIfDue(at instant: ContinuousClock.Instant = .now) -> String? {
+            guard !text.isEmpty,
+                  characters >= policy.characterCount || instant - openedAt >= policy.interval
+            else { return nil }
+            return take(at: instant)
+        }
+
+        /// The buffered text whatever the policy says, resetting the buffer —
+        /// the pre-terminal flush, which is not a policy choice (§7.4).
+        mutating func take(at instant: ContinuousClock.Instant = .now) -> String? {
+            guard !text.isEmpty else { return nil }
+            defer {
+                text = ""
+                characters = 0
+                openedAt = instant
+            }
+            return text
+        }
+    }
+
     private let persistence: any PersistenceStore
     private let deltaFlush: DeltaFlushPolicy
     private let snapshots: SnapshotPolicy
@@ -83,7 +149,7 @@ public actor ConversationStore {
     /// generation streams off it. The stream continues and terminates normally —
     /// completion changes state in place and emits no path event, so the bubble
     /// stays wherever the user left it.
-    private var live: Set<ConversationID> = []
+    private var live: [ConversationID: Reservation] = [:]
 
     /// Opens (or creates) a store.
     ///
@@ -315,7 +381,26 @@ public actor ConversationStore {
         in conversation: ConversationID,
         using driver: some GenerationDriving
     ) async throws -> Outcome {
-        fatalError("ConversationStore.send is M5 Phase 3")
+        let state = try await existingFold(of: conversation).state
+        try reserve(conversation)
+
+        let message = identifiers.makeMessageID()
+        // `endpoint == nil` is the virtual root, which opens the tree — and it
+        // can only be nil when the tree is empty, since the first inserted node
+        // auto-extends onto it and nothing ever sets it back. So this cannot
+        // produce §6.6 row 7's "second bare nil-parent append".
+        let user = mint(.userMessageAppended(message: message, content: text, parent: state.endpoint), in: conversation)
+
+        // The user message's parent *is* the endpoint, so auto-extend moves the
+        // path onto it, and the generation then hangs off the new endpoint —
+        // which is why `send` is two events and never three (§6.4, §6.5).
+        return try await generate(
+            from: message,
+            in: conversation,
+            precededBy: [user],
+            movingPath: false,
+            using: driver
+        )
     }
 
     /// Generates a response to an existing **user** message.
@@ -343,7 +428,17 @@ public actor ConversationStore {
         in conversation: ConversationID,
         using driver: some GenerationDriving
     ) async throws -> Outcome {
-        fatalError("ConversationStore.respond is M5 Phase 3")
+        let (state, _) = try await target(message, expecting: .user, in: conversation)
+        try reserve(conversation)
+
+        return try await generate(
+            from: message,
+            in: conversation,
+            // Off the endpoint, auto-extend cannot fire, and a generation the
+            // user asked for must never stream invisibly (§6.4).
+            movingPath: state.endpoint != message,
+            using: driver
+        )
     }
 
     /// Regenerates an **assistant** message: exactly ``respond(to:in:using:)`` on
@@ -362,7 +457,22 @@ public actor ConversationStore {
         in conversation: ConversationID,
         using driver: some GenerationDriving
     ) async throws -> Outcome {
-        fatalError("ConversationStore.regenerate is M5 Phase 3")
+        let (state, assistant) = try await target(message, expecting: .assistant, in: conversation)
+
+        // The assistant-to-parent lookup is the *whole* of what regenerate adds
+        // over respond (§6.4, rev 4). A root-level assistant has no parent
+        // message to respond to — see `unsupportedTarget`.
+        guard let parent = assistant.parent else {
+            throw LedgerError.unsupportedTarget(message: message)
+        }
+        try reserve(conversation)
+
+        return try await generate(
+            from: parent,
+            in: conversation,
+            movingPath: state.endpoint != parent,
+            using: driver
+        )
     }
 
     // MARK: - Cancellation
@@ -520,16 +630,184 @@ public actor ConversationStore {
     /// needs a handle); the two entry points here are already the shape D24's
     /// step 1 and rollback want.
     func reserve(_ conversation: ConversationID) throws {
-        guard live.insert(conversation).inserted else {
+        guard live[conversation] == nil else {
             throw LedgerError.generationInFlight(conversation)
         }
+        live[conversation] = .reserved
+    }
+
+    /// Upgrades a reservation to a running generation — D24 step 3, reached only
+    /// after the start append committed.
+    private func confirm(_ conversation: ConversationID, running task: Task<Outcome, Never>) {
+        live[conversation] = .running(task)
     }
 
     /// Releases the slot — D24's rollback *and* its normal completion path, so
     /// a generation that failed to start leaves no more trace than one that
     /// finished.
     func release(_ conversation: ConversationID) {
-        live.remove(conversation)
+        live[conversation] = nil
+    }
+
+    // MARK: - Generating
+
+    /// The one implementation behind `send`, `respond` and `regenerate`.
+    ///
+    /// **Callers reserve, this rolls back.** The slot is claimed by the verb —
+    /// synchronously, with no `await` between its check and its registration
+    /// (D24 step 1) — and released here on any failure to start. Splitting it
+    /// that way keeps the critical section inside a single verb body, where it
+    /// is checkable by reading, rather than spread across a call boundary.
+    ///
+    /// Everything the three verbs disagree about is a parameter: `send` brings
+    /// its user message, `respond` and `regenerate` bring a path event when the
+    /// parent is off the endpoint. `regenerate` is *exact* sugar for `respond`
+    /// on the target's parent (§6.4, rev 4), so there is one implementation and
+    /// two entry points rather than two implementations to keep agreeing.
+    ///
+    /// - Parameters:
+    ///   - parent: The message the new assistant node hangs from.
+    ///   - precededBy: Events committing in the **same transaction** ahead of
+    ///     `generationStarted` — `send`'s user message. §6.5's start atomicity
+    ///     is exactly this: a losing racer records nothing, so there is no
+    ///     orphaned user message with the path already yanked onto it.
+    ///   - movingPath: Whether to emit `activePathChanged` onto the new node.
+    private func generate(
+        from parent: MessageID,
+        in conversation: ConversationID,
+        precededBy leading: [LedgerEvent.Record] = [],
+        movingPath: Bool,
+        using driver: some GenerationDriving
+    ) async throws -> Outcome {
+        let generation = identifiers.makeGenerationID()
+        let assistant = identifiers.makeMessageID()
+
+        var records = leading
+        records.append(mint(
+            // The *requested* descriptor comes from the driver and is never
+            // invented here (§7.8, D21 constraint 3): nothing in the framework
+            // exposes model identity, so the app supplies it at driver init and
+            // the store copies it.
+            .generationStarted(generation: generation, message: assistant, parent: parent, model: driver.model),
+            in: conversation
+        ))
+        if movingPath {
+            records.append(mint(.activePathChanged(endpoint: assistant), in: conversation))
+        }
+
+        do {
+            let tail = try await commit(records, to: conversation)
+            foldForward(tail, in: conversation)
+        } catch {
+            // D24's rollback. The seam's batch is all-or-nothing, so the log was
+            // never touched — a failed starter leaves no more trace than a
+            // losing racer, and the slot must not stay wedged either way.
+            release(conversation)
+            throw error
+        }
+
+        // Past this line the generation exists in the log, so §7.2 applies:
+        // every *generation* failure from here is an `Outcome`, not a throw.
+        return try await run(generation, from: parent, in: conversation, using: driver)
+    }
+
+    /// Consumes a driver's signals, persists them on the flush policy, and
+    /// records the one terminal (D25, §7.4).
+    ///
+    /// **The loop is the store's, not the driver's.** §7.4 attributed delta
+    /// coalescing to "the driver", written before the seam existed; the store
+    /// owns every append, so the *cadence of appends* is necessarily its
+    /// business too. What the driver still owns is the thing §7.4 cared about —
+    /// producing deltas rather than snapshots, which is the diffing on the far
+    /// side of the seam.
+    ///
+    /// **Only deltas coalesce** (§7.4). A tool record forces the buffer out
+    /// first, or the log would claim the tool ran before text that preceded it;
+    /// and the terminal is always preceded by a flush, which is not a policy
+    /// choice — the unflushed tail is exactly what a crash costs, and losing it
+    /// at the very end would lose a *completed* generation's last words.
+    private func run(
+        _ generation: GenerationID,
+        from parent: MessageID,
+        in conversation: ConversationID,
+        using driver: some GenerationDriving
+    ) async throws -> Outcome {
+        defer { release(conversation) }
+
+        let request = try await rehydrationMaterial(upTo: parent, in: conversation)
+        let (signals, channel) = GenerationChannel.makeStream()
+        let driving = Task {
+            // The store finishes the stream, always — so the loop below
+            // terminates whether or not the driver was well behaved.
+            defer { channel.finish() }
+            return await driver.generate(request, streamingInto: channel)
+        }
+        confirm(conversation, running: driving)
+
+        var buffer = DeltaBuffer(policy: deltaFlush)
+        do {
+            for await signal in signals {
+                switch signal {
+                case .delta(let text):
+                    buffer.append(text)
+                    if let due = buffer.takeIfDue() {
+                        try await append(.deltaAppended(generation: generation, text: due), in: conversation)
+                    }
+                case .toolRecord(let record):
+                    if let pending = buffer.take() {
+                        try await append(.deltaAppended(generation: generation, text: pending), in: conversation)
+                    }
+                    try await append(.toolInvocationRecorded(generation: generation, record: record), in: conversation)
+                }
+            }
+            if let pending = buffer.take() {
+                try await append(.deltaAppended(generation: generation, text: pending), in: conversation)
+            }
+        } catch {
+            // A persistence failure mid-stream. Wind the driver down rather than
+            // leave it producing into a stream nobody is reading, then report on
+            // the throw channel: §11's principle is "one channel for *couldn't
+            // record*", and this is emphatically that. The log keeps an open
+            // generation, which reduces to `.interrupted` — the honest state,
+            // and the one the recovery UX already handles.
+            driving.cancel()
+            _ = await driving.value
+            throw error
+        }
+
+        let outcome = await driving.value
+        try await append(.generationEnded(generation: generation, outcome: outcome), in: conversation)
+        return outcome
+    }
+
+    /// What the driver needs to rebuild a session (§7.1), from reduction output
+    /// rather than from the log (D21 constraint 4).
+    private func rehydrationMaterial(
+        upTo parent: MessageID,
+        in conversation: ConversationID
+    ) async throws -> GenerationRequest {
+        let state = try await existingFold(of: conversation).state
+        return GenerationRequest(
+            conversation: conversation,
+            instructions: state.instructions,
+            context: ancestry(of: parent, in: state).map { Message($0, mapping: .default) }
+        )
+    }
+
+    /// The chain from a root-level node down to `message`, in order.
+    ///
+    /// Iterative, with a visited set: I2's posture is that nothing may trap *or
+    /// hang*, and tree depth tracks message count in a linear conversation, so
+    /// recursing here is a stack-overflow risk on a long thread.
+    private func ancestry(of message: MessageID, in state: FoldedState) -> [FoldedMessage] {
+        var chain: [FoldedMessage] = []
+        var seen: Set<MessageID> = []
+        var cursor: MessageID? = message
+        while let id = cursor, seen.insert(id).inserted, let node = state.messages[id] {
+            chain.append(node)
+            cursor = node.parent
+        }
+        return chain.reversed()
     }
 
     // MARK: - Writing
@@ -541,6 +819,13 @@ public actor ConversationStore {
     /// the v7 run is a false signal to anyone reading a log by eye.
     private func record(_ payload: LedgerEvent.Payload, in conversation: ConversationID) async throws {
         _ = try await existingFold(of: conversation)
+        try await append(payload, in: conversation)
+    }
+
+    /// Appends one already-validated event and folds it forward. The generation
+    /// loop's unit of work, where re-checking existence per delta would be a
+    /// round trip to confirm something that cannot have changed.
+    private func append(_ payload: LedgerEvent.Payload, in conversation: ConversationID) async throws {
         let tail = try await commit([mint(payload, in: conversation)], to: conversation)
         foldForward(tail, in: conversation)
     }

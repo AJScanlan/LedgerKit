@@ -55,6 +55,23 @@ public enum LedgerError: Error, Sendable, Equatable {
     /// pattern.
     case ineligibleTarget(message: MessageID, expected: Role, found: Role)
 
+    /// The target exists and has the right role, but v0.1's store cannot express
+    /// the operation on it.
+    ///
+    /// Exactly one condition reaches this in v0.1: `regenerate` of a
+    /// **root-level** assistant message. Regenerating is `respond(to:)` on the
+    /// target's parent, and a root-level node's parent is the *virtual root* —
+    /// so the store would have to emit `generationStarted(parent: nil)`, which
+    /// **N10 reserves as wire headroom the v0.1 store never writes**. The
+    /// reducer accepts such an event (I6); the store declines to author one,
+    /// which is the N10 pattern exactly: log tolerant, store enforcing.
+    ///
+    /// Reachable only from a log this version did not write — a future
+    /// LedgerKit relaxing N10, which is the forward-compatibility direction the
+    /// whole design cares about. Relaxing N10 here would make this case
+    /// unreachable rather than wrong.
+    case unsupportedTarget(message: MessageID)
+
     /// A generation is already live in this conversation (§6.5's single-flight).
     ///
     /// Throw, don't queue: queuing would hide a product decision inside a
@@ -107,6 +124,8 @@ extension LedgerError: CustomStringConvertible {
             "unknown message \(id)"
         case .ineligibleTarget(let message, let expected, let found):
             "ineligible target \(message): expected a \(expected.rawValue) message, found \(found.rawValue)"
+        case .unsupportedTarget(let message):
+            "unsupported target \(message): a root-level assistant message cannot be regenerated (N10)"
         case .generationInFlight(let id):
             "a generation is already in flight in conversation \(id)"
         case .persistenceFailure(let description):
