@@ -102,6 +102,7 @@ final class SteppingClock: Sendable {
 final class RecordingStore: PersistenceStore {
     private let wrapped: any PersistenceStore
     private let captured = Mutex<[[LedgerEvent.Record]]>([])
+    private let reads = Mutex(0)
 
     init(_ wrapped: any PersistenceStore) {
         self.wrapped = wrapped
@@ -118,6 +119,11 @@ final class RecordingStore: PersistenceStore {
     /// asserting "the log is untouched" is not misled by an attempt.
     var written: [LedgerEvent.Record] { appends.flatMap { $0 } }
 
+    /// Rows the *reducer* was handed, which is what the cold-open criterion is
+    /// about: a separate `events(…)` call would only prove that *a* suffix read
+    /// is cheap, not that the resume path's own read is.
+    var rowsRead: Int { reads.withLock { $0 } }
+
     func append(_ records: [LedgerEvent.Record], to conversation: ConversationID) async throws -> [LedgerEvent] {
         let tail = try await wrapped.append(records, to: conversation)
         captured.withLock { $0.append(records) }
@@ -125,7 +131,9 @@ final class RecordingStore: PersistenceStore {
     }
 
     func events(in conversation: ConversationID, from sequence: Int64) async throws -> [LoadedEvent] {
-        try await wrapped.events(in: conversation, from: sequence)
+        let loaded = try await wrapped.events(in: conversation, from: sequence)
+        reads.withLock { $0 += loaded.count }
+        return loaded
     }
 
     func latestSnapshot(for conversation: ConversationID) async throws -> Snapshot? {
@@ -158,6 +166,8 @@ struct StoreUnderTest {
     var written: [LedgerEvent.Record] { recorder.written }
     /// One element per transaction — see ``RecordingStore/appends``.
     var appends: [[LedgerEvent.Record]] { recorder.appends }
+    /// Rows handed to the reducer — the cold-open criterion's measure.
+    var rowsRead: Int { recorder.rowsRead }
 
     init(
         over backing: (any PersistenceStore)? = nil,
@@ -281,14 +291,14 @@ func healthyLogProblems(
 ///
 /// Deliberately **not** `Understudy.Cue`, which is the same idea one layer up:
 /// `Cue.park()` is internal to that package — its script player is the only
-/// thing meant to park on one — so a `PersistenceStore` double cannot use it.
-/// This is also simpler on purpose: nothing here is cancelled, so there is no
-/// cancellation path to get right.
+/// thing meant to park on one — so neither a `PersistenceStore` double nor a
+/// `GenerationDriving` double can use it. At M6 the arrangement inverts and
+/// `Cue` is used as designed.
 actor Latch {
     private var arrived = false
     private var released = false
     private var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
-    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, any Error>] = []
 
     /// Test side: suspends until the subject parks. Returns immediately if it
     /// already has.
@@ -307,14 +317,40 @@ actor Latch {
     }
 
     /// Subject side: announce arrival, then park until released.
-    func park() async {
+    ///
+    /// **Throws `CancellationError` if cancelled while parked**, without which
+    /// cancelling a driver stopped at a latch would deadlock the very chaos
+    /// tests this type exists for — the store would wait forever for a
+    /// generation that was told to stop. `Cue` carries the same path for the
+    /// same reason.
+    func park() async throws {
         arrived = true
         let arrivals = arrivalWaiters
         arrivalWaiters = []
         for continuation in arrivals { continuation.resume() }
 
         if released { return }
-        await withCheckedContinuation { releaseWaiters.append($0) }
+
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                // Checked inside the actor, because cancellation can land
+                // between the handler being installed and the continuation
+                // being stored — the classic hole in this pattern.
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    releaseWaiters.append(continuation)
+                }
+            }
+        } onCancel: {
+            Task { await self.failWaiters() }
+        }
+    }
+
+    private func failWaiters() {
+        let waiting = releaseWaiters
+        releaseWaiters = []
+        for continuation in waiting { continuation.resume(throwing: CancellationError()) }
     }
 }
 
@@ -376,7 +412,10 @@ final class ParkingStore: PersistenceStore {
             alreadyParked = true
             return true
         }
-        if isFirst { await latch.park() }
+        // A cancelled park just proceeds: this double exists to *interleave*
+        // actor entries, not to model a cancellable operation, and swallowing
+        // here keeps the persistence call itself faithful to the real one.
+        if isFirst { try? await latch.park() }
     }
 }
 
@@ -432,10 +471,18 @@ final class ScriptedDriver: GenerationDriving {
     func generate(_ request: GenerationRequest, streamingInto channel: GenerationChannel) async -> Outcome {
         requests.withLock { $0.append(request) }
         for step in script {
+            // A well-behaved driver notices between steps, not only while
+            // suspended (§7.5): winding down and returning `.cancelled` is its
+            // whole obligation.
+                if Task.isCancelled { return .cancelled }
             switch step {
             case .delta(let text): channel.emit(.delta(text))
             case .toolRecord(let record): channel.emit(.toolRecord(record))
-            case .pause(let latch): await latch.park()
+            case .pause(let latch):
+                // A cancelled park throws, which is how a stop reaches a driver
+                // suspended mid-stream (§7.5). Winding down and returning
+                // `.cancelled` is the driver's whole obligation.
+                do { try await latch.park() } catch { return .cancelled }
             }
         }
         return ending
@@ -477,6 +524,40 @@ final class FlakyStore: PersistenceStore {
 
     func save(_ snapshot: Snapshot) async throws {
         try await wrapped.save(snapshot)
+    }
+
+    func deleteConversation(_ conversation: ConversationID) async throws {
+        try await wrapped.deleteConversation(conversation)
+    }
+
+    func conversationSummaries() async throws -> [ConversationSummary] {
+        try await wrapped.conversationSummaries()
+    }
+}
+
+/// Everything works except `save` — §9's "best-effort" refresh, put under the
+/// only pressure that distinguishes it from a mandatory one.
+final class SnapshotHostileStore: PersistenceStore {
+    private let wrapped: any PersistenceStore
+
+    init(_ wrapped: any PersistenceStore) {
+        self.wrapped = wrapped
+    }
+
+    func append(_ records: [LedgerEvent.Record], to conversation: ConversationID) async throws -> [LedgerEvent] {
+        try await wrapped.append(records, to: conversation)
+    }
+
+    func events(in conversation: ConversationID, from sequence: Int64) async throws -> [LoadedEvent] {
+        try await wrapped.events(in: conversation, from: sequence)
+    }
+
+    func latestSnapshot(for conversation: ConversationID) async throws -> Snapshot? {
+        try await wrapped.latestSnapshot(for: conversation)
+    }
+
+    func save(_ snapshot: Snapshot) async throws {
+        throw FailingStore.Failure(reason: "no checkpoints today")
     }
 
     func deleteConversation(_ conversation: ConversationID) async throws {

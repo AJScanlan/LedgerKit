@@ -1,6 +1,6 @@
 # M5 Implementation Plan — `ConversationStore` actor + turn verbs
 
-**Status:** 🚧 **IN PROGRESS** — opened 2026-07-27 at the M4 boundary. **Phases 0–2 reviewed; Phase 3 landed 2026-07-27, awaiting its review gate.** Phase 4 (cancellation, deletion, snapshot refresh, chaos) is next.
+**Status:** 🚧 **IN PROGRESS** — opened 2026-07-27 at the M4 boundary. **Phases 0–3 reviewed; Phase 4 landed 2026-07-28, awaiting its review gate.** Phase 5 (rev 8 ratification + alignment) closes the milestone.
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M5 section) · [SPEC.md](./SPEC.md) §6.5, §11, §7.2, §7.4, §7.5, §9, §10.4 · [M4-PLAN.md](./M4-PLAN.md) §7 (the five inherited handoffs)
 **Baseline:** M0–M4 done and audited, **266 tests green** (245 `LedgerKit` + 21 `Understudy`), both packages warning-free. **SPEC rev 8 open** (Appendix F — post-M4-audit amendments); it accumulates M5's items and **ratifies at this milestone's boundary** (agreed 2026-07-27).
 **Spec work:** rev 8 is already open, so M5 amendments *extend Appendix F* rather than opening a new revision. The inventory is §6 of this plan; SPEC edits require approval first, drafted scratch-first per the standing pattern.
@@ -558,36 +558,79 @@ logs, including a flush landing mid-generation.
 
 ### Phase 4 — Cancellation, deletion, snapshot refresh, chaos
 
+**Status:** ✅ **code landed 2026-07-28; review gate open.** 331 tests green
+(310 `LedgerKit` + 21 `Understudy`), both packages warning-free.
+
 **Goal:** everything that interrupts a generation, and the §10.4 suite.
 
-- [ ] `cancelGeneration(in:)` — canonical path via the live set; **no-op if
+- [x] `cancelGeneration(in:)` — canonical path via the live set; **no-op if
       none** (per §11: not throwing); winds the driver down through task
       cancellation; the loop appends `generationEnded(.cancelled)`; the
       suspended verb returns `.cancelled`.
-- [ ] §7.2 straddle: Task-cancel **pre-append** throws `CancellationError`
+- [x] §7.2 straddle: Task-cancel **pre-append** throws `CancellationError`
       (nothing started, nothing recorded — verified); **post-append** returns
-      `.cancelled` (the recording succeeded). Both points enumerated via D26's
-      parking, not timing.
-- [ ] Cancel racing natural terminal: benign — first append wins, exactly one
-      terminal (I3), asserted by outcome invariant.
-- [ ] `deleteConversation(_:)` — cancel-first sequencing through the actor
+      `.cancelled`. Both points enumerated via D26's parking, not timing.
+- [x] Cancel racing natural terminal: benign — first append wins, exactly one
+      terminal (I3), asserted by outcome invariant over 40 runs.
+- [x] `deleteConversation(_:)` — cancel-first sequencing through the actor
       (§9), then the seam's transactional delete; cache evicted; in-flight
       verb returns `.cancelled`, never a persistence error.
-- [ ] Snapshot refresh (M4 handoff 2): best-effort async after each terminal
-      append; 500-event floor; failures shrugged (`try?` *here*, per the
-      `Snapshots.swift` division of labor); a test proves a cold reopen after
-      refresh replays ≤ one generation's suffix (the M4 criterion, now
-      exercised through the actor's own trigger).
-- [ ] **Chaos suite (§10.4):** cancellation at every parked point of every
+- [x] Snapshot refresh (M4 handoff 2): after each terminal append; event floor;
+      failures shrugged (`try?` *here*); a cold reopen after refresh replays
+      **zero** rows, through the actor's own trigger.
+- [x] **Chaos suite (§10.4):** cancellation at every parked point of every
       scripted shape × {cancelGeneration, Task-cancel}; partial-content
-      retention asserted; empty-diagnostics property throughout; live set
-      always ⊆ open generations (P2's store-side half, feeding M7).
+      retention asserted at each; empty-diagnostics property throughout; live
+      set ⊆ open generations (P2's store-side half, feeding M7).
 
 **Review gate:** full §11 sketch runs end-to-end including the stop-button
 lines; mutation tests: remove the pre-terminal flush (partial-loss window) and
 remove the cancel-first in delete — each must be caught; both suites green.
 
----
+**Gate items raised by the implementation:**
+
+1. **⚠️ The biggest finding of the milestone: a cancelled task cannot record its
+   own cancellation.** GRDB honours task cancellation, so any append performed
+   inside a cancelled task **throws instead of writing** — and
+   `generationEnded(.cancelled)` is the entire point of cancelling. Left inline,
+   a stop leaves the generation *open*, which reduces to `.interrupted`: a
+   different state, a different UI treatment, for a thing the user explicitly
+   did (§7.5 — cancelled ≠ failed ≠ interrupted). Measured, not assumed — every
+   cancellation test failed with `CancellationError` escaping the verb.
+   **Resolution:** cancellation stops the *driver*; the recording runs in an
+   unstructured task that does not inherit it. Worth a rev 8 sentence in §7.5.
+2. **The same restructure fixed a quieter loss.** With cancellation ending the
+   *consume* loop, signals the driver had already emitted but the store had not
+   yet read vanished with it — four chaos positions failed on partial retention.
+   Now the loop's only exit is the stream ending, and the stream ends *because*
+   the driver was cancelled, so everything the driver actually produced is
+   drained and recorded first. That is what §7.5's "partial content retained"
+   has to mean.
+3. **`cancelGeneration` during the reservation window is honoured, not dropped.**
+   D24 opens a window between claiming the slot and confirming it, in which
+   there is no task to cancel. Silently ignoring a stop there would run the
+   visible generation to completion after the user pressed stop, so
+   `Reservation.reserved(cancelled:)` records the intent and the loop acts on it
+   the instant it can. **Beyond the plan's checklist; wants sign-off.**
+4. **Snapshot refresh is `await`ed, not detached**, which reads against §9's
+   "best-effort **async**". Detaching would let a save land *after* a
+   `deleteConversation` erased the conversation, resurrecting a snapshot row for
+   a log that no longer exists — the same race §9 takes care to close for
+   terminals. One small blob at a point the verb is already finishing.
+5. **Mutation results.** Ⓗ Remove the pre-terminal flush → caught (10 issues).
+   Ⓘ Remove delete's cancel-first → caught. Ⓙ Recording inside the cancellation
+   scope → caught (this is finding 1, measured before the fix existed).
+   Ⓚ Drop a stop landing in the reservation window → caught.
+6. **⚠️ Ⓘ and Ⓚ are caught as *deadlocks*, and `.timeLimit` does not rescue
+   them.** Both guarantee that something eventually *finishes*, so breaking them
+   hangs rather than fails. The trait was added and then measured: it cancels the
+   **test's** task, while these tests are suspended on `await someTask.value` for
+   an *unstructured* task — an await cancellation cannot interrupt. It is kept
+   for the hang shapes that *are* cancellable, with the limitation stated in the
+   suite. Open question for the gate: is a deadline-racing await helper worth its
+   complexity, given it must leak the hung observer task to work at all?
+7. **`liveGenerations` ships as the M7 handoff.** Keyed by `GenerationID`, not by
+   conversation, because that is what `overlay_live` maps over.
 
 ### Phase 5 — Wrap-up: rev 8 ratification + alignment
 
@@ -642,7 +685,12 @@ approval:
    `persistenceFailure` and leaves an open generation — `.interrupted` on reload,
    the honest state. Also record `LedgerError`'s sixth case,
    `unsupportedTarget(message:)`, and its N10 rationale (gate item 2).
-8. **The Context table's "first Understudy import at M5" row is wrong** and
+8. **§7.5 needs a sentence on recording a cancellation** (Phase 4, gate item 1):
+   the append that records `generationEnded(.cancelled)` must not itself run
+   inside the cancelled task, or the stop erases its own evidence and the
+   generation reads as `.interrupted`. Behaviour unchanged from what §7.5
+   intends; the mechanism was simply never stated, and it is not obvious.
+9. **The Context table's "first Understudy import at M5" row is wrong** and
    should be corrected wherever it is repeated (this plan §2, CLAUDE.md).
    `Cue.park()` is internal, so the import is M6's — see Phase 3 gate item 1.
 
@@ -686,20 +734,20 @@ approval:
 
 | Obligation | Suite / evidence | Status |
 |---|---|---|
-| §11 sketch compiles and runs against scripted driver | `APISketchTests.sketchRuns` — runnable half; cancellation lines at Phase 4 | ◐ |
+| §11 sketch compiles and runs against scripted driver | `APISketchTests.sketchRuns` — whole sketch, stop button and delete included | ☑ |
 | Start atomicity: losing racer records nothing | `StoreSingleFlightTests` — turned-away racer + D24 rollback (mutation Ⓓ) | ☑ |
 | Single-flight per conversation; cross-conversation freedom | `StoreSingleFlightTests` — both, with parked drivers | ☑ |
-| Two-channel contract, per verb, log-untouched proofs | | ☐ |
+| Two-channel contract, per verb, log-untouched proofs | `StoreLifecycleTests` / `StoreTreeVerbTests` / `StoreGenerationTests` / `StoreSingleFlightTests` | ☑ |
 | Target eligibility (respond/regenerate/edit) | `StoreTreeVerbTests` (edit) + `StoreGenerationTests` (respond/regenerate, plus N10's `unsupportedTarget`), all via the shared `target(_:expecting:)` | ☑ |
-| §7.2 straddle (pre-append throws, post-append returns) | | ☐ |
-| Cancel vs. natural terminal: one terminal (I3) | | ☐ |
+| §7.2 straddle (pre-append throws, post-append returns) | `StoreCancellationTests` — both sides parked, plus the reservation-window third case | ☑ |
+| Cancel vs. natural terminal: one terminal (I3) | `StoreCancellationTests.cancelRacingCompletion` — outcome invariant over 40 runs | ☑ |
 | Only deltas coalesce; flush-before-terminal | `StoreFlushTests` — mutations Ⓕ and Ⓖ both caught | ☑ |
-| Healthy-log property over every verb + chaos run | | ☐ |
-| Snapshot refresh trigger + cold reopen ≤ one suffix | | ☐ |
-| Delete cancels first; cache evicted | | ☐ |
+| Healthy-log property over every verb + chaos run | `healthyLogProblems` in every verb suite and at every chaos point | ☑ |
+| Snapshot refresh trigger + cold reopen ≤ one suffix | `StoreSnapshotRefreshTests` — reopen replays **zero** rows; floor and shrugged-failure covered | ☑ |
+| Delete cancels first; cache evicted | `StoreDeletionTests` — mutation Ⓘ caught | ☑ |
 | Timestamps born canonical at the actor | `StoreStampingTests` — asserted on records **as written**, plus `rows == asWritten` (the read-back alone cannot see it) | ☑ |
-| Live set ⊆ open generations (P2 store half) | | ☐ |
-| Mutation tests: D24 rollback, cache advance, pre-terminal flush, cancel-first delete | | ☐ |
+| Live set ⊆ open generations (P2 store half) | `StoreChaosTests` — `liveGenerations` vs. the log's open set | ☑ |
+| Mutation tests: D24 rollback, cache advance, pre-terminal flush, cancel-first delete | All four, plus eight more across Phases 1–4; two catches are deadlocks (Phase 4 gate item 6) | ☑ |
 
 ---
 
@@ -721,6 +769,7 @@ approval:
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-07-28 | Phase 4 landed | 331 (310 + 21) | Cancellation (both entry points + the §7.2 straddle), delete's cancel-first sequencing, snapshot refresh, and the §10.4 chaos suite. **§11 sketch now runs whole, stop button included.** Four mutations run, all caught — two only as deadlocks (gate item 6). Biggest finding: a cancelled task cannot record its own cancellation (gate item 1). Warning-free |
 | 2026-07-27 | Phase 3 landed | 315 (294 + 21) | `send` / `respond` / `regenerate` over one shared start path; D24's reserve→append→confirm-or-rollback; the D25 flush loop; `ScriptedDriver`. **§11 sketch now runs end-to-end** minus cancellation. Four mutations run, all caught. Three items for sign-off: `LedgerError.unsupportedTarget` (N10), §11's throw-channel clause, and the dropped Understudy import. Warning-free |
 | 2026-07-27 | Phase 2 landed | 296 (275 + 21) | `edit` / `switchBranch` / shared `target(_:expecting:)`; live-set storage + `reserve`/`release` (D24's synchronous half, landed early for the mid-stream assertion). Root edit reproduces `Corpus.rootEdit` row for row. Three mutations run, all caught; Ⓐ confirmed the healthy-log property is not a semantic check (Phase 2 gate item 4). Warning-free |
 | 2026-07-27 | Phase 1 landed | 285 (264 + 21) | Cache, stamping site, `createConversation` / `setInstructions` / `setTitle` / `conversation`, healthy-log property. New: `Store/Snapshots.swift` gains `loadedFold(of:)`; tests gain `StoreFixtures.swift` + `ConversationStoreTests.swift`. **D29 proposed.** Four mutations run; ④ found a real hole in the stamping test (read-back repairs a bad stamp) — fixed, and the standing lesson is recorded under Phase 1 gate item 3. Warning-free |

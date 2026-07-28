@@ -11,13 +11,11 @@ import Testing
 // signature is wrong or rev 8 records why the sketch moved. Never silently
 // diverge.
 //
-// The file is in two halves, and the split is the milestone's progress made
-// visible. ``apiSketch`` is **executed** by the suite below — every lifecycle,
-// tree and generation line, end to end against a scripted driver. ``apiShape``
-// is type-checked and never called, holding the lines that must not run here:
-// the file-backed initializer, which no test should scribble a database for, and
-// the cancellation and delete lines, whose verbs land at Phase 4. Phase 4 moves
-// those into the runnable half and this comment shrinks.
+// ``apiSketch`` is **executed** by the suite below — every §11 line, end to end
+// against a scripted driver, including both stop-button paths and the delete.
+// ``apiShape`` holds the single line that must type-check without running: the
+// file-backed initializer, since no test should scribble a database into the
+// filesystem to prove a parameter label.
 //
 // The one deliberate substitution from §11, recorded rather than glossed: §11
 // constructs `GenerationDriver(model: SystemLanguageModel.default,
@@ -75,36 +73,45 @@ private func apiSketch(store: ConversationStore, driver: some GenerationDriving)
     // Branching
     try await store.switchBranch(to: replacement, in: convo.id)           // bare activePathChanged
 
-    return rendered
-}
-
-/// The §11 lines that must type-check here but must not execute: a file-backed
-/// store, and the two verbs Phase 4 implements.
-///
-/// Never called; see the file header.
-private func apiShape(dbURL: URL, driver: some GenerationDriving) async throws {
-    let store = try ConversationStore(persistence: .sqlite(at: dbURL))    // actor
-    let convo = try await store.createConversation()
+    // Cancellation — canonical path; the store outlives any Task handle:
+    await store.cancelGeneration(in: convo.id)                            // no-op if none live; racing a
+                                                                          // natural terminal is benign —
+                                                                          // first append wins, I3 (§7.5)
 
     // send/respond/regenerate THROW only when the generation never started —
-    // i.e. before generationStarted is appended (§7.2): unknown conversation,
-    // unknown/ineligible target, generationInFlight, persistence failure. After
-    // the append, failures are outcomes, not exceptions. One channel for
-    // "couldn't record", one channel for "recorded a failure".
+    // i.e. before generationStarted is appended (§7.2). After the append,
+    // failures are outcomes, not exceptions. One channel for "couldn't record",
+    // one channel for "recorded a failure".
     let generationTask = Task {
-        _ = try await store.send("Explain valley folds", in: convo.id, using: driver)
+        try await store.send("Explain valley folds", in: convo.id, using: driver)
     }
 
     // Stop button — either path, same semantics (§7.5):
-    generationTask.cancel()                      // sugar: dies with its owner
+    generationTask.cancel()            // sugar: dies with its owner
+    // …and §7.2's straddle is a real fork a consumer must write: cancelled
+    // *before* `generationStarted` lands and the call throws, because nothing
+    // started; cancelled *after* and it returns `.cancelled`, because the
+    // recording succeeded. A stop button hits whichever side it lands on.
+    do {
+        rendered.append(render(try await generationTask.value))
+    } catch is CancellationError {
+        rendered.append("cancelled before it started")
+    }
     // or:
-    await store.cancelGeneration(in: convo.id)   // canonical; no-op if none live,
-                                                 // and racing a natural terminal is
-                                                 // benign — first append wins, I3
+    await store.cancelGeneration(in: convo.id)   // canonical
 
     try await store.deleteConversation(convo.id)                          // cancels any in-flight generation
                                                                           // first (§9), then irreversible,
                                                                           // out-of-band delete
+    return rendered
+}
+
+/// The one §11 line that must type-check here but must not execute: no test
+/// should scribble a database into the filesystem to prove a label.
+///
+/// Never called; see the file header.
+private func apiShape(dbURL: URL) throws {
+    _ = try ConversationStore(persistence: .sqlite(at: dbURL))            // actor
 }
 
 /// §11's showpiece: the compiler forces the app to handle interruption and
@@ -148,9 +155,10 @@ private func render(_ outcome: Outcome) -> String {
 @Suite("M5 — the §11 public API")
 struct APISketchTests {
 
-    /// **The milestone's first exit criterion**, minus the cancellation lines
-    /// (Phase 4): every §11 line above runs against a scripted driver, and the
-    /// log it produces is one the reducer accepts without a single diagnostic.
+    /// **The milestone's first exit criterion, whole.** Every §11 line runs
+    /// against a scripted driver — lifecycle, tree verbs, all three generation
+    /// starters, both stop-button paths, and the delete — and the logs it
+    /// produces are ones the reducer accepts without a single diagnostic.
     @Test("the §11 sketch runs end-to-end against a scripted driver")
     func sketchRuns() async throws {
         let fixture = try StoreUnderTest()
@@ -158,21 +166,43 @@ struct APISketchTests {
 
         let rendered = try await apiSketch(store: fixture.store, driver: driver)
 
-        // Three turns, each ending in exactly one terminal outcome (I3).
+        // Three completed turns, each ending in exactly one terminal (I3)…
         #expect(rendered.prefix(3) == [
             "completed (8 output tokens)",
             "completed (8 output tokens)",
             "completed (8 output tokens)",
         ])
-        #expect(rendered.dropFirst(3).contains { $0.hasPrefix("complete: A valley fold") })
-        #expect(driver.received.count == 3)
+        #expect(rendered.contains { $0.hasPrefix("complete: A valley fold") })
+        // …and a fourth that the stop button ended instead, on whichever side of
+        // §7.2's straddle it landed. Both are correct; asserting one would be
+        // asserting a race.
+        #expect(rendered.last?.hasPrefix("cancelled") == true)
 
-        // Every conversation the sketch touched reduces with empty diagnostics.
-        let summaries = try await fixture.backing.conversationSummaries()
-        for summary in summaries {
-            let problems = try await healthyLogProblems(summary.id, in: fixture.store, backedBy: fixture.backing)
-            #expect(problems.isEmpty, "\(summary.id): \(problems)")
-        }
+        // The sketch deletes the conversation it made, so nothing is left —
+        // which is itself §9's claim, since the delete had an in-flight
+        // generation to sequence behind.
+        #expect(try await fixture.backing.conversationSummaries().isEmpty)
+    }
+
+    /// The healthy-log property over the §11 flow, up to the point the sketch
+    /// erases it: a store-written log never carries a diagnostic.
+    @Test("the §11 flow produces a log the reducer accepts without diagnostics")
+    func sketchProducesHealthyLogs() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+        try await fixture.store.setInstructions("You are an origami tutor.", in: convo.id)
+
+        let driver = ScriptedDriver(saying: "A valley fold is a fold toward you.")
+        _ = try await fixture.store.send("Explain valley folds", in: convo.id, using: driver)
+        let user = try #require(try await fixture.store.conversation(convo.id).activeMessages.first)
+        let replacement = try await fixture.store.edit(user.id, content: "Explain mountain folds", in: convo.id)
+        _ = try await fixture.store.respond(to: replacement, in: convo.id, using: driver)
+        let assistant = try #require(try await fixture.store.conversation(convo.id).activeMessages.last)
+        _ = try await fixture.store.regenerate(assistant.id, in: convo.id, using: driver)
+        try await fixture.store.switchBranch(to: replacement, in: convo.id)
+
+        let problems = try await healthyLogProblems(convo.id, in: fixture.store, backedBy: fixture.backing)
+        #expect(problems.isEmpty, "\(problems)")
     }
 
     @Test("opening an in-memory store succeeds and migrates")

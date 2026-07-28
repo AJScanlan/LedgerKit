@@ -63,6 +63,10 @@ public actor ConversationStore {
     private struct CachedFold {
         var state: FoldedState
         var lastSequence: Int64
+        /// The sequence the newest checkpoint covers — 0 when none was used.
+        /// Only the §9 event floor reads it, and only to answer "how far has
+        /// this conversation drifted from its last checkpoint".
+        var snapshotAt: Int64 = 0
     }
 
     /// A conversation's generation slot (§6.5, D24).
@@ -74,11 +78,18 @@ public actor ConversationStore {
     /// precisely the window the race lives in.
     private enum Reservation {
         /// Claimed, nothing appended yet — D24 step 1.
-        case reserved
+        ///
+        /// `cancelled` closes the one gap a stop button would otherwise have:
+        /// a cancel arriving *during* the start append has no task to cancel
+        /// yet, and silently ignoring it would mean the visible generation runs
+        /// to completion after the user pressed stop. Recording the intent lets
+        /// the loop honour it the instant there is something to honour it with.
+        case reserved(cancelled: Bool)
         /// Confirmed and running — D24 step 3. The handle is what
-        /// ``cancelGeneration(in:)`` cancels (Phase 4); a generation the store
-        /// cannot reach is a generation the stop button cannot stop.
-        case running(Task<Outcome, Never>)
+        /// ``cancelGeneration(in:)`` cancels and what ``deleteConversation(_:)``
+        /// waits on; a generation the store cannot reach is one the stop button
+        /// cannot stop and the delete cannot sequence behind.
+        case running(generation: GenerationID, task: Task<Outcome, Error>)
     }
 
     /// Accumulates stream text until the flush policy says it is worth a
@@ -94,7 +105,8 @@ public actor ConversationStore {
     /// clock control at all.
     private struct DeltaBuffer {
         private let policy: DeltaFlushPolicy
-        private var text = ""
+        /// Readable but not clearable from outside — see ``reset(at:)``.
+        private(set) var text = ""
         /// Tracked incrementally: `String.count` is O(n), and calling it per
         /// delta would make buffering quadratic in a long generation.
         private var characters = 0
@@ -105,29 +117,27 @@ public actor ConversationStore {
             self.openedAt = openedAt
         }
 
+        var isEmpty: Bool { text.isEmpty }
+
+        /// Whether the policy says the buffer is worth a transaction.
+        var isDue: Bool {
+            !text.isEmpty
+                && (characters >= policy.characterCount || ContinuousClock.now - openedAt >= policy.interval)
+        }
+
         mutating func append(_ delta: String) {
             text += delta
             characters += delta.count
         }
 
-        /// The buffered text if the policy says it is due, resetting the buffer.
-        mutating func takeIfDue(at instant: ContinuousClock.Instant = .now) -> String? {
-            guard !text.isEmpty,
-                  characters >= policy.characterCount || instant - openedAt >= policy.interval
-            else { return nil }
-            return take(at: instant)
-        }
-
-        /// The buffered text whatever the policy says, resetting the buffer —
-        /// the pre-terminal flush, which is not a policy choice (§7.4).
-        mutating func take(at instant: ContinuousClock.Instant = .now) -> String? {
-            guard !text.isEmpty else { return nil }
-            defer {
-                text = ""
-                characters = 0
-                openedAt = instant
-            }
-            return text
+        /// Clears the buffer. **Called only after a successful append**, which
+        /// is why it is separate from reading ``text``: a flush that failed
+        /// leaves its text pending, so the wind-down writes it rather than the
+        /// stream losing it (§7.5's partial retention).
+        mutating func reset(at instant: ContinuousClock.Instant = .now) {
+            text = ""
+            characters = 0
+            openedAt = instant
         }
     }
 
@@ -263,7 +273,30 @@ public actor ConversationStore {
     /// - Throws: ``LedgerError/unknownConversation(_:)``, or a persistence
     ///   failure.
     public func deleteConversation(_ conversation: ConversationID) async throws {
-        fatalError("ConversationStore.deleteConversation is M5 Phase 4")
+        _ = try await existingFold(of: conversation)
+
+        // §9's cancel-first sequencing, and the `await` is the whole of it. The
+        // cancel runs to its terminal through the normal path — the suspended
+        // verb returns `.cancelled`, not a persistence error — and only then
+        // does the DELETE commit. Actor isolation alone would *not* be enough:
+        // the actor yields at every await, so a generation still winding down
+        // would happily append `generationEnded` into a conversation this verb
+        // had already erased, leaving a genesis-less row and a stale index entry.
+        cancelGeneration(in: conversation)
+        if case .running(_, let task) = live[conversation] {
+            // Swallowed: whatever that generation's own verb reports is its
+            // caller's business, not this one's.
+            _ = try? await task.value
+        }
+
+        do {
+            try await persistence.deleteConversation(conversation)
+        } catch let error as CancellationError {
+            throw error
+        } catch {
+            throw LedgerError.wrapping(error)
+        }
+        evict(conversation)
     }
 
     // MARK: - Reading
@@ -494,7 +527,17 @@ public actor ConversationStore {
     /// terminal is benign: first append wins and I3 quarantines the loser, so
     /// exactly one terminal exists either way.
     public func cancelGeneration(in conversation: ConversationID) {
-        fatalError("ConversationStore.cancelGeneration is M5 Phase 4")
+        switch live[conversation] {
+        case .running(_, let task):
+            task.cancel()
+        case .reserved:
+            // The start append is still in flight, so there is nothing to
+            // cancel *yet*. Recording the intent is what stops a stop from
+            // being silently dropped in that window.
+            live[conversation] = .reserved(cancelled: true)
+        case nil:
+            break
+        }
     }
 
     // MARK: - The cache
@@ -528,7 +571,7 @@ public actor ConversationStore {
             return cached
         }
 
-        let loaded: (state: FoldedState, lastSequence: Int64)
+        let loaded: LoadedFold
         do {
             loaded = try await persistence.loadedFold(of: conversation)
         } catch let error as CancellationError {
@@ -549,7 +592,11 @@ public actor ConversationStore {
             return current
         }
 
-        let entry = CachedFold(state: loaded.state, lastSequence: loaded.lastSequence)
+        let entry = CachedFold(
+            state: loaded.state,
+            lastSequence: loaded.lastSequence,
+            snapshotAt: loaded.snapshotSequence
+        )
         folds[conversation] = entry
         return entry
     }
@@ -633,13 +680,36 @@ public actor ConversationStore {
         guard live[conversation] == nil else {
             throw LedgerError.generationInFlight(conversation)
         }
-        live[conversation] = .reserved
+        live[conversation] = .reserved(cancelled: false)
     }
 
     /// Upgrades a reservation to a running generation — D24 step 3, reached only
     /// after the start append committed.
-    private func confirm(_ conversation: ConversationID, running task: Task<Outcome, Never>) {
-        live[conversation] = .running(task)
+    ///
+    /// Reports whether a cancel arrived while the slot was merely reserved, so
+    /// the caller can honour it immediately rather than dropping it.
+    private func confirm(
+        _ conversation: ConversationID,
+        running task: Task<Outcome, Error>,
+        as generation: GenerationID
+    ) -> Bool {
+        let cancelledEarly = if case .reserved(true) = live[conversation] { true } else { false }
+        live[conversation] = .running(generation: generation, task: task)
+        return cancelledEarly
+    }
+
+    /// The generations currently in flight — **M7's `overlay_live` input**, and
+    /// P2's third clause: the live set is always a subset of *open* (started,
+    /// un-terminated) generations.
+    ///
+    /// Keyed by `GenerationID` rather than by conversation because that is what
+    /// the overlay maps over: `.interrupted → .streaming` for exactly these. A
+    /// reservation that has not started yet contributes nothing — there is no
+    /// generation in the log to overlay.
+    var liveGenerations: Set<GenerationID> {
+        Set(live.values.compactMap { reservation in
+            if case .running(let generation, _) = reservation { generation } else { nil }
+        })
     }
 
     /// Releases the slot — D24's rollback *and* its normal completion path, so
@@ -696,6 +766,11 @@ public actor ConversationStore {
         }
 
         do {
+            // §7.2's straddle, the near side: cancelled *before* the append and
+            // Swift's convention holds — nothing started, so nothing to record
+            // and `CancellationError` is the honest answer. Past the append the
+            // rule inverts and cancellation becomes a returned `.cancelled`.
+            try Task.checkCancellation()
             let tail = try await commit(records, to: conversation)
             foldForward(tail, in: conversation)
         } catch {
@@ -732,52 +807,160 @@ public actor ConversationStore {
         in conversation: ConversationID,
         using driver: some GenerationDriving
     ) async throws -> Outcome {
+        let request = try await rehydrationMaterial(upTo: parent, in: conversation)
+
+        // **One task per generation, and it is unstructured on purpose.**
+        // `cancelGeneration(in:)` is a *different* entry into this actor and
+        // cannot cancel work it holds no handle to; `deleteConversation(_:)`
+        // must wait on that same handle so the terminal lands before the
+        // DELETE (§9). Structured concurrency gives neither. What it does give
+        // — cancellation reaching the verb's own caller — is restored below.
+        let task = Task { [self] in
+            try await drive(generation, in: conversation, on: request, using: driver)
+        }
+        if confirm(conversation, running: task, as: generation) {
+            // A stop arrived while the slot was merely reserved (§7.2's window).
+            task.cancel()
+        }
+
+        // §7.2's far side, and D21 constraint 5's behaviour restored: cancelling
+        // the Task awaiting `send` must reach the generation, exactly as
+        // `cancelGeneration` does. Same semantics, two entry points (§7.5).
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    /// The generation itself: consume, persist on cadence, record one terminal.
+    ///
+    /// **The loop is the store's, not the driver's.** §7.4 attributed delta
+    /// coalescing to "the driver", written before the seam existed; the store
+    /// owns every append, so the *cadence of appends* is necessarily its
+    /// business too. What the driver still owns is the thing §7.4 cared about —
+    /// producing deltas rather than snapshots, which is the diffing on the far
+    /// side of the seam.
+    private func drive(
+        _ generation: GenerationID,
+        in conversation: ConversationID,
+        on request: GenerationRequest,
+        using driver: some GenerationDriving
+    ) async throws -> Outcome {
         defer { release(conversation) }
 
-        let request = try await rehydrationMaterial(upTo: parent, in: conversation)
         let (signals, channel) = GenerationChannel.makeStream()
-        let driving = Task {
-            // The store finishes the stream, always — so the loop below
-            // terminates whether or not the driver was well behaved.
-            defer { channel.finish() }
-            return await driver.generate(request, streamingInto: channel)
-        }
-        confirm(conversation, running: driving)
+        let driving = Task { await Self.produce(request, from: driver, into: channel) }
 
+        // **Cancellation stops the driver, never the recording — and the whole
+        // shape of this method follows from that.**
+        //
+        // GRDB honours task cancellation, so any append performed inside a
+        // cancelled task *throws instead of writing*. Left that way, cancelling
+        // a generation would prevent the one append that makes the cancellation
+        // visible: the generation would stay open and reduce to `.interrupted`,
+        // a different state for a different thing (§7.5 — cancelled ≠ failed ≠
+        // interrupted). Measured, not assumed — inline, every cancellation test
+        // failed with `CancellationError` escaping the verb.
+        //
+        // It also fixes a quieter loss. If cancellation ended the *consume*
+        // loop, signals the driver had already emitted but the store had not yet
+        // read would vanish with it. Here the loop's only exit is the stream
+        // ending, and the stream ends because the driver was cancelled — so
+        // everything the driver actually produced is drained and recorded first.
+        // That is what §7.5's "partial content retained" has to mean.
+        //
+        // Unstructured tasks do not inherit cancellation, which makes this the
+        // smallest scope that survives it.
+        let recording = Task { [self] in
+            let consumed = await consume(signals, of: generation, in: conversation)
+            if consumed.failure != nil {
+                // Stop the driver producing into a stream nobody is reading.
+                driving.cancel()
+            }
+            let outcome = await driving.value
+
+            if let failure = consumed.failure {
+                // §11's principle is "one channel for *couldn't record*", and a
+                // persistence failure is emphatically that. Deliberately **no**
+                // terminal is written: the generation stays open, reduces to
+                // `.interrupted`, and says "something went wrong" — where a
+                // `.completed` terminal missing a flush would claim success.
+                throw failure
+            }
+
+            // §7.4: always flush before the terminal. Not a policy choice — the
+            // unflushed tail is exactly what a stop or a crash would otherwise
+            // cost.
+            if let pending = consumed.pending {
+                try await append(.deltaAppended(generation: generation, text: pending), in: conversation)
+            }
+            try await append(.generationEnded(generation: generation, outcome: outcome), in: conversation)
+            return outcome
+        }
+
+        return try await withTaskCancellationHandler {
+            try await recording.value
+        } onCancel: {
+            // Without this a parked driver would never notice: no signals
+            // arrive, so the loop never runs, so nothing observes the stop.
+            driving.cancel()
+        }
+    }
+
+    /// Runs the driver and closes the stream behind it.
+    ///
+    /// `nonisolated static` so it executes off the actor: a generation holding
+    /// the store's isolation would serialize every other conversation's verbs
+    /// behind it, which is the opposite of §6.5's cross-conversation freedom.
+    private nonisolated static func produce(
+        _ request: GenerationRequest,
+        from driver: some GenerationDriving,
+        into channel: GenerationChannel
+    ) async -> Outcome {
+        // The store finishes the stream, always — so the consume loop
+        // terminates whether or not the driver was well behaved.
+        defer { channel.finish() }
+        return await driver.generate(request, streamingInto: channel)
+    }
+
+    /// Consumes signals, persisting them on the flush policy (§7.4, D25).
+    ///
+    /// **Only `deltaAppended` coalesces.** A tool record forces the buffer out
+    /// first, or the log would claim the tool ran before text that preceded it.
+    ///
+    /// Returns the first persistence failure rather than throwing it, because
+    /// the caller has a decision to make that an unwound stack would take away:
+    /// a generation that started must still be accounted for, and *how* depends
+    /// on what failed. The buffer is only reset **after** a successful append,
+    /// so a failed flush leaves its text pending rather than dropping it.
+    private func consume(
+        _ signals: AsyncStream<GenerationSignal>,
+        of generation: GenerationID,
+        in conversation: ConversationID
+    ) async -> (pending: String?, failure: (any Error)?) {
         var buffer = DeltaBuffer(policy: deltaFlush)
-        do {
-            for await signal in signals {
+        for await signal in signals {
+            do {
                 switch signal {
                 case .delta(let text):
                     buffer.append(text)
-                    if let due = buffer.takeIfDue() {
-                        try await append(.deltaAppended(generation: generation, text: due), in: conversation)
+                    if buffer.isDue {
+                        try await append(.deltaAppended(generation: generation, text: buffer.text), in: conversation)
+                        buffer.reset()
                     }
                 case .toolRecord(let record):
-                    if let pending = buffer.take() {
-                        try await append(.deltaAppended(generation: generation, text: pending), in: conversation)
+                    if !buffer.isEmpty {
+                        try await append(.deltaAppended(generation: generation, text: buffer.text), in: conversation)
+                        buffer.reset()
                     }
                     try await append(.toolInvocationRecorded(generation: generation, record: record), in: conversation)
                 }
+            } catch {
+                return (buffer.isEmpty ? nil : buffer.text, error)
             }
-            if let pending = buffer.take() {
-                try await append(.deltaAppended(generation: generation, text: pending), in: conversation)
-            }
-        } catch {
-            // A persistence failure mid-stream. Wind the driver down rather than
-            // leave it producing into a stream nobody is reading, then report on
-            // the throw channel: §11's principle is "one channel for *couldn't
-            // record*", and this is emphatically that. The log keeps an open
-            // generation, which reduces to `.interrupted` — the honest state,
-            // and the one the recovery UX already handles.
-            driving.cancel()
-            _ = await driving.value
-            throw error
         }
-
-        let outcome = await driving.value
-        try await append(.generationEnded(generation: generation, outcome: outcome), in: conversation)
-        return outcome
+        return (buffer.isEmpty ? nil : buffer.text, nil)
     }
 
     /// What the driver needs to rebuild a session (§7.1), from reduction output
@@ -828,6 +1011,47 @@ public actor ConversationStore {
     private func append(_ payload: LedgerEvent.Payload, in conversation: ConversationID) async throws {
         let tail = try await commit([mint(payload, in: conversation)], to: conversation)
         foldForward(tail, in: conversation)
+
+        let isTerminal = if case .generationEnded = payload { true } else { false }
+        await refreshSnapshotIfDue(in: conversation, afterTerminal: isTerminal)
+    }
+
+    // MARK: - Snapshots
+
+    /// §9's refresh policy, and M4 handoff 2 — the trigger nothing owned until
+    /// now.
+    ///
+    /// After each `generationEnded`, because that is the natural quiescent point
+    /// and generations dominate event volume, so a cold open replays at most one
+    /// generation's suffix. Plus a floor, for logs that reach no terminal at all
+    /// — a conversation of nothing but edits and branch switches would otherwise
+    /// never checkpoint.
+    ///
+    /// **Awaited rather than detached**, which is a deliberate reading of §9's
+    /// "best-effort async". Detaching would let a save land *after* a
+    /// `deleteConversation` had erased the conversation, resurrecting a snapshot
+    /// row for a log that no longer exists — the same race §9 takes care to
+    /// close for terminals. The write is one small blob at a point the verb is
+    /// already finishing, so sequencing it costs nothing worth a race.
+    private func refreshSnapshotIfDue(in conversation: ConversationID, afterTerminal: Bool) async {
+        guard let entry = folds[conversation] else { return }
+        let due = (afterTerminal && snapshots.refreshesAfterEachGeneration)
+            || entry.lastSequence - entry.snapshotAt >= Int64(snapshots.maximumEventsBetweenRefreshes)
+        guard due else { return }
+
+        // **`try?` belongs *here*, and nowhere below.** `saveSnapshot` throws so
+        // that this layer can tell a checkpoint it chose to skip from one that
+        // failed; §9's "best-effort" is a statement about *this* caller's
+        // policy. A missed refresh costs replay time, never correctness — truth
+        // is the log — so a failure is shrugged off and retried at the next
+        // quiescent point.
+        guard (try? await persistence.saveSnapshot(of: entry.state, upTo: entry.lastSequence)) != nil else { return }
+
+        // Re-read rather than reusing `entry`: the save awaited, so the cache
+        // may have advanced or been dropped underneath it (D29).
+        if folds[conversation]?.lastSequence == entry.lastSequence {
+            folds[conversation]?.snapshotAt = entry.lastSequence
+        }
     }
 
     /// Mints one wire record — **the stamping site** (M4 handoff 1).

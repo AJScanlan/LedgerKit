@@ -65,6 +65,24 @@ extension Snapshot {
     }
 }
 
+/// A cold-loaded conversation: the fold, where it stopped, and where its newest
+/// usable checkpoint sat (SPEC §9).
+///
+/// The third field exists only for §9's **event floor** — "refresh every 500
+/// events for pathological logs". Without it a store that reopened a
+/// long-checkpointless conversation would measure drift from *this session's*
+/// first append rather than from the last checkpoint, and a log that never
+/// reaches a terminal would keep deferring the refresh that exists precisely for
+/// it. `0` means "replayed from genesis", which reads correctly in the
+/// subtraction.
+struct LoadedFold: Sendable {
+    var state: FoldedState
+    /// The last sequence folded into `state`.
+    var lastSequence: Int64
+    /// The checkpoint `state` resumed from; 0 if it replayed from genesis.
+    var snapshotSequence: Int64
+}
+
 // MARK: - The read path
 
 extension PersistenceStore {
@@ -116,17 +134,22 @@ extension PersistenceStore {
     /// `foldedState(of:)` is expressed in terms of this rather than beside it: two
     /// compositions of the snapshot fast-path would be two things to get wrong, and
     /// rev 3 already shipped that mistake once (P3 exists because of it).
-    func loadedFold(of conversation: ConversationID) async throws -> (state: FoldedState, lastSequence: Int64) {
+    func loadedFold(of conversation: ConversationID) async throws -> LoadedFold {
         if let snapshot = try? await latestSnapshot(for: conversation),
            let resumed = snapshot.foldedState {
             let suffix = try await events(in: conversation, from: snapshot.upToSequence + 1)
-            return (
-                fold(resuming: resumed, after: snapshot.upToSequence, with: suffix),
-                suffix.last?.sequence ?? snapshot.upToSequence
+            return LoadedFold(
+                state: fold(resuming: resumed, after: snapshot.upToSequence, with: suffix),
+                lastSequence: suffix.last?.sequence ?? snapshot.upToSequence,
+                snapshotSequence: snapshot.upToSequence
             )
         }
         let rows = try await events(in: conversation, from: 1)
-        return (fold(rows, for: conversation), rows.last?.sequence ?? 0)
+        return LoadedFold(
+            state: fold(rows, for: conversation),
+            lastSequence: rows.last?.sequence ?? 0,
+            snapshotSequence: 0
+        )
     }
 
     /// Checkpoints `state` as of `sequence`, replacing any existing checkpoint.

@@ -695,7 +695,7 @@ struct StoreGenerationTests {
 /// across them. Every interleaving below is driven by `Latch` at a point the
 /// test chose (D26) — no sleeps, no seeds, and a failure reproduces by
 /// re-running.
-@Suite("Store — single-flight and start atomicity")
+@Suite("Store — single-flight and start atomicity", .timeLimit(.minutes(1)))
 struct StoreSingleFlightTests {
 
     @Test("a second starter throws generationInFlight and records nothing")
@@ -909,7 +909,7 @@ struct StoreFlushTests {
 /// `await`, so both hazards below involve a verb resuming into a world that
 /// changed underneath it. Both are driven by `Latch` at a point the test chose
 /// rather than by timing (D26's discipline, one phase early).
-@Suite("Store — cache reentrancy")
+@Suite("Store — cache reentrancy", .timeLimit(.minutes(1)))
 struct StoreCacheReentrancyTests {
 
     /// A cold load that resumes *after* someone else already advanced the cache
@@ -976,5 +976,452 @@ struct StoreCacheReentrancyTests {
 
         let problems = try await healthyLogProblems(id, in: fixture.store, backedBy: backing)
         #expect(problems.isEmpty, "\(problems)")
+    }
+}
+
+// MARK: - Phase 4: cancellation, deletion, snapshot refresh
+
+/// §7.5's two entry points, one semantics — and §7.2's straddle, which is the
+/// line between them.
+///
+/// Every point below is *parked*, not slept on (D26): the test cancels at a
+/// moment it chose, so there is no seed to manage, no flake, and a failure
+/// reproduces by re-running.
+/// `.timeLimit` here is a backstop with a **known limit, measured rather than
+/// assumed**. Two of the guards these suites protect — delete's cancel-first
+/// sequencing, and honouring a stop that lands in the reservation window — fail
+/// as *deadlocks* rather than as wrong answers, because what they guarantee is
+/// that something eventually finishes. Mutating either hangs the suite, and the
+/// time limit does **not** rescue it: the trait cancels the *test's* task, while
+/// these tests are suspended on `await someTask.value` for an **unstructured**
+/// task that never completes — an await cancellation cannot interrupt.
+///
+/// It is kept because it does cover the hang shapes that *are* cancellable, and
+/// because a stated limitation beats an unstated one. Diagnose a genuine hang
+/// from the last `Test "…" started` line.
+@Suite("Store — cancellation", .timeLimit(.minutes(1)))
+struct StoreCancellationTests {
+
+    /// The number of `generationEnded` events in a conversation — I3's
+    /// "exactly one terminal per generation", counted rather than argued.
+    private func terminals(in rows: [LoadedEvent]) -> [Outcome] {
+        rows.compactMap { row in
+            guard case .decoded(let event) = row,
+                  case .generationEnded(_, let outcome) = event.payload
+            else { return nil }
+            return outcome
+        }
+    }
+
+    @Test("cancelGeneration winds the driver down and records .cancelled")
+    func cancelRecordsATerminal() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+        let latch = Latch()
+
+        let running = Task {
+            try await fixture.store.send(
+                "q",
+                in: convo.id,
+                using: ScriptedDriver([.delta("half an ans"), .pause(latch), .delta("wer")])
+            )
+        }
+        await latch.waitForArrival()
+        await fixture.store.cancelGeneration(in: convo.id)
+
+        // §11's documented deviation: the recording operation *succeeded*, so
+        // cancellation is a returned terminal, not a thrown error.
+        #expect(try await running.value == .cancelled)
+
+        let rows = try await fixture.rows(of: convo.id)
+        #expect(terminals(in: rows) == [.cancelled])
+
+        // §7.5: partial content retained. Cancelled ≠ failed ≠ interrupted —
+        // three distinct UI treatments, and this is the first.
+        let read = try await fixture.store.conversation(convo.id)
+        #expect(read.activeMessages.last?.state == .cancelled(partial: "half an ans"))
+    }
+
+    @Test("cancelGeneration with nothing live is a no-op, not a throw")
+    func cancelWithNothingLive() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+
+        await fixture.store.cancelGeneration(in: convo.id)
+        await fixture.store.cancelGeneration(in: Fix.foreign)
+
+        #expect(fixture.written.count == 1, "only the genesis")
+    }
+
+    /// §7.2's far side: cancelled *after* the append, so the call returns
+    /// `.cancelled` — the same place `cancelGeneration` lands, by design.
+    @Test("Task-cancel after the start append returns .cancelled")
+    func taskCancelPostAppendReturns() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+        let latch = Latch()
+
+        let running = Task {
+            try await fixture.store.send(
+                "q",
+                in: convo.id,
+                using: ScriptedDriver([.delta("partial"), .pause(latch)])
+            )
+        }
+        await latch.waitForArrival()
+        running.cancel()
+
+        #expect(try await running.value == .cancelled)
+        #expect(terminals(in: try await fixture.rows(of: convo.id)) == [.cancelled])
+    }
+
+    /// §7.2's near side: cancelled *before* the append, so Swift's convention
+    /// holds — nothing started, nothing to record, `CancellationError`. Parked
+    /// on the cold load, which is the one suspension point before the reserve.
+    @Test("Task-cancel before the start append throws CancellationError")
+    func taskCancelPreAppendThrows() async throws {
+        let backing = try SQLitePersistenceStore(.inMemory)
+        let seed = Log.opened(title: "seeded")
+        _ = try await backing.append(seed.records, to: seed.conversation)
+
+        let latch = Latch()
+        let fixture = try StoreUnderTest(
+            over: ParkingStore(backing, parkingFirst: .events, at: latch),
+            identifiers: ScriptedIdentifiers(eventsFrom: 0x101, messagesFrom: 0x1F, generationsFrom: 0x2F),
+            clockFrom: Log.base.addingTimeInterval(1)
+        )
+
+        let running = Task {
+            try await fixture.store.send("q", in: seed.conversation, using: ScriptedDriver(saying: "never"))
+        }
+        await latch.waitForArrival()
+        running.cancel()
+        await latch.release()
+
+        await #expect(throws: CancellationError.self) { try await running.value }
+
+        // Nothing started, so nothing recorded — and the slot is not wedged.
+        #expect(fixture.written.isEmpty)
+        #expect(try await backing.events(in: seed.conversation, from: 1) == seed.rows)
+        try await fixture.store.reserve(seed.conversation)
+    }
+
+    /// The window D24 opens: a stop pressed while the start append is still in
+    /// flight has no task to cancel yet. Dropping it would run the generation to
+    /// completion after the user said stop.
+    @Test("a stop during the reservation window is honoured once the generation starts")
+    func cancelDuringTheReservationWindow() async throws {
+        let backing = try SQLitePersistenceStore(.inMemory)
+        let seed = Log.opened(title: "seeded")
+        _ = try await backing.append(seed.records, to: seed.conversation)
+
+        let latch = Latch()
+        let fixture = try StoreUnderTest(
+            over: ParkingStore(backing, parkingFirst: .append, at: latch),
+            identifiers: ScriptedIdentifiers(eventsFrom: 0x101, messagesFrom: 0x1F, generationsFrom: 0x2F),
+            clockFrom: Log.base.addingTimeInterval(1)
+        )
+
+        let neverReleased = Latch()
+        let running = Task {
+            try await fixture.store.send(
+                "q",
+                in: seed.conversation,
+                using: ScriptedDriver([.pause(neverReleased), .delta("unreachable")])
+            )
+        }
+        // The start batch has committed and is parked *inside* the append, so
+        // the slot is still `.reserved` — there is no task to cancel.
+        await latch.waitForArrival()
+        await fixture.store.cancelGeneration(in: seed.conversation)
+        await latch.release()
+
+        #expect(try await running.value == .cancelled)
+        #expect(terminals(in: try await fixture.rows(of: seed.conversation)) == [.cancelled])
+    }
+
+    /// The one genuinely racy case, and §7.5 already calls it benign: first
+    /// append wins, I3 quarantines any loser. Asserted by **outcome invariant**
+    /// over many runs rather than by controlling the timing (D26).
+    @Test("cancel racing a natural terminal still yields exactly one terminal")
+    func cancelRacingCompletion() async throws {
+        for _ in 0..<40 {
+            let fixture = try StoreUnderTest()
+            let convo = try await fixture.store.createConversation()
+
+            let running = Task {
+                try await fixture.store.send("q", in: convo.id, using: ScriptedDriver(saying: "quick"))
+            }
+            await fixture.store.cancelGeneration(in: convo.id)
+            let outcome = try await running.value
+
+            let rows = try await fixture.rows(of: convo.id)
+            let ends = terminals(in: rows)
+            #expect(ends.count == 1, "exactly one terminal (I3)")
+            #expect(ends.first == outcome, "the returned outcome is the recorded one")
+
+            let problems = try await healthyLogProblems(convo.id, in: fixture.store, backedBy: fixture.backing)
+            #expect(problems.isEmpty, "\(problems)")
+        }
+    }
+}
+
+/// §9's deletion semantics: cancel first, then an irreversible transactional
+/// DELETE — and the cache goes with it.
+@Suite("Store — deletion", .timeLimit(.minutes(1)))
+struct StoreDeletionTests {
+
+    @Test("delete removes the conversation and evicts its cache")
+    func deleteRemovesEverything() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation(title: "doomed")
+        _ = try await fixture.store.send("q", in: convo.id, using: ScriptedDriver(saying: "a"))
+
+        try await fixture.store.deleteConversation(convo.id)
+
+        #expect(try await fixture.rows(of: convo.id).isEmpty)
+        #expect(try await fixture.backing.conversationSummaries().isEmpty)
+        await #expect(throws: LedgerError.unknownConversation(convo.id)) {
+            try await fixture.store.conversation(convo.id)
+        }
+    }
+
+    /// **Cancel-first (§9).** The in-flight verb returns `.cancelled`, never a
+    /// persistence error, and no row outlives the DELETE — which is only true
+    /// because the delete *waits* for the terminal rather than trusting actor
+    /// isolation to order it.
+    @Test("delete cancels an in-flight generation first, and nothing survives it")
+    func deleteCancelsFirst() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+        let latch = Latch()
+
+        let running = Task {
+            try await fixture.store.send(
+                "q",
+                in: convo.id,
+                using: ScriptedDriver([.delta("half"), .pause(latch), .delta("rest")])
+            )
+        }
+        await latch.waitForArrival()
+
+        try await fixture.store.deleteConversation(convo.id)
+
+        #expect(try await running.value == .cancelled)
+        #expect(try await fixture.rows(of: convo.id).isEmpty, "a terminal appended after the DELETE would resurrect the log")
+        #expect(try await fixture.backing.conversationSummaries().isEmpty)
+    }
+
+    @Test("deleting an unknown conversation throws")
+    func deleteUnknown() async throws {
+        let fixture = try StoreUnderTest()
+        await #expect(throws: LedgerError.unknownConversation(Fix.foreign)) {
+            try await fixture.store.deleteConversation(Fix.foreign)
+        }
+    }
+}
+
+/// §9's refresh policy — M4 handoff 2, the trigger nothing owned until now.
+@Suite("Store — snapshot refresh")
+struct StoreSnapshotRefreshTests {
+
+    @Test("a terminal checkpoints the conversation")
+    func terminalRefreshesTheSnapshot() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+
+        #expect(try await fixture.backing.latestSnapshot(for: convo.id) == nil)
+        _ = try await fixture.store.send("q", in: convo.id, using: ScriptedDriver(saying: "a"))
+
+        let snapshot = try #require(try await fixture.backing.latestSnapshot(for: convo.id))
+        #expect(snapshot.upToSequence == 5, "genesis + user + start + delta + terminal")
+        #expect(snapshot.foldedState != nil, "the checkpoint is usable, not merely present")
+    }
+
+    /// The M4 cold-open criterion, now driven by the actor's **own** trigger
+    /// rather than a hand-placed snapshot: reopening replays at most the suffix
+    /// after the newest terminal.
+    @Test("a cold reopen after refresh replays at most one generation's suffix")
+    func coldReopenReplaysASuffix() async throws {
+        let fixture = try StoreUnderTest(deltaFlush: DeltaFlushPolicy(interval: .zero, characterCount: 1))
+        let convo = try await fixture.store.createConversation()
+        for turn in 0..<5 {
+            _ = try await fixture.store.send(
+                "q\(turn)",
+                in: convo.id,
+                using: ScriptedDriver([.delta("a"), .delta("b"), .delta("c")])
+            )
+        }
+
+        let before = fixture.rowsRead
+        _ = try await fixture.reopened().conversation(convo.id)
+        let replayed = fixture.rowsRead - before
+
+        #expect(replayed == 0, "the newest checkpoint sits on the last terminal, so nothing is left to replay")
+    }
+
+    /// The floor exists for logs that reach no terminal at all — a conversation
+    /// of nothing but metadata edits would otherwise never checkpoint.
+    @Test("the event floor checkpoints a conversation that never terminates")
+    func eventFloorFires() async throws {
+        let backing = try SQLitePersistenceStore(.inMemory)
+        let store = ConversationStore(
+            persistence: backing,
+            snapshots: SnapshotPolicy(refreshesAfterEachGeneration: true, maximumEventsBetweenRefreshes: 4),
+            identifiers: ScriptedIdentifiers(),
+            now: SteppingClock().now
+        )
+        let convo = try await store.createConversation()
+
+        // Genesis is sequence 1, so drift is measured from there: two titles
+        // leave the log at 3, one short of the floor.
+        for index in 0..<2 {
+            try await store.setTitle("t\(index)", in: convo.id)
+        }
+        #expect(try await backing.latestSnapshot(for: convo.id) == nil, "three events is under the floor of four")
+
+        try await store.setTitle("t2", in: convo.id)
+        let snapshot = try #require(try await backing.latestSnapshot(for: convo.id))
+        #expect(snapshot.upToSequence == 4)
+    }
+
+    /// Best-effort means best-effort: a checkpoint that cannot be written costs
+    /// replay time, never the generation.
+    @Test("a snapshot save failure is shrugged off")
+    func snapshotFailuresAreShrugged() async throws {
+        let fixture = try StoreUnderTest(over: SnapshotHostileStore(try SQLitePersistenceStore(.inMemory)))
+        let convo = try await fixture.store.createConversation()
+
+        let outcome = try await fixture.store.send("q", in: convo.id, using: ScriptedDriver(saying: "a"))
+
+        #expect(outcome == .completed(Fix.stopInfo))
+        let problems = try await healthyLogProblems(convo.id, in: fixture.store, backedBy: fixture.backing)
+        #expect(problems.isEmpty, "\(problems)")
+    }
+}
+
+/// §10.4's chaos suite, made **deterministic** (D26): every enumerable
+/// cancellation point of every scripted shape, crossed with both stop
+/// mechanisms. Fixture scripts are tiny, so this is exhaustive rather than
+/// sampled — no seed, no flake, and a failure reproduces by re-running.
+@Suite("Store — cancellation chaos", .timeLimit(.minutes(1)))
+struct StoreChaosTests {
+
+    private enum Stop: CaseIterable {
+        case storeCancel
+        case taskCancel
+    }
+
+    /// The script bodies, with a park inserted at every position.
+    private func shapes(parkingAt latch: Latch) -> [[ScriptedDriver.Step]] {
+        let body: [ScriptedDriver.Step] = [
+            .delta("one "),
+            .toolRecord(ToolRecord(name: "lookupFold", status: .succeeded)),
+            .delta("two "),
+            .delta("three"),
+        ]
+        return (0...body.count).map { position in
+            var script = body
+            script.insert(.pause(latch), at: position)
+            return script
+        }
+    }
+
+    @Test("cancelling at every parked point yields exactly one terminal and a healthy log")
+    func cancellationAtEveryPoint() async throws {
+        for stop in Stop.allCases {
+            for (position, script) in shapes(parkingAt: Latch()).enumerated() {
+                // Each run gets its own latch, store and conversation, so a
+                // failure names exactly one (mechanism, position) pair.
+                let latch = Latch()
+                let rescripted = script.map { step -> ScriptedDriver.Step in
+                    if case .pause = step { .pause(latch) } else { step }
+                }
+                let fixture = try StoreUnderTest(deltaFlush: DeltaFlushPolicy(interval: .zero, characterCount: 1))
+                let convo = try await fixture.store.createConversation()
+
+                let running = Task {
+                    try await fixture.store.send("q", in: convo.id, using: ScriptedDriver(rescripted))
+                }
+                await latch.waitForArrival()
+
+                switch stop {
+                case .storeCancel: await fixture.store.cancelGeneration(in: convo.id)
+                case .taskCancel: running.cancel()
+                }
+
+                let context = "\(stop) at position \(position)"
+                #expect(try await running.value == .cancelled, "\(context): the verb returns .cancelled")
+
+                let rows = try await fixture.rows(of: convo.id)
+                let ends = rows.compactMap { row -> Outcome? in
+                    guard case .decoded(let event) = row,
+                          case .generationEnded(_, let outcome) = event.payload
+                    else { return nil }
+                    return outcome
+                }
+                #expect(ends == [.cancelled], "\(context): exactly one terminal (I3)")
+
+                // Whatever the driver managed to emit before the stop is still
+                // there — §7.5's partial retention, at every point.
+                let emitted = script.prefix(position).compactMap { step -> String? in
+                    if case .delta(let text) = step { text } else { nil }
+                }.joined()
+                #expect(
+                    try await fixture.store.conversation(convo.id).activeMessages.last?.state
+                        == .cancelled(partial: emitted),
+                    "\(context): partial retained"
+                )
+
+                let problems = try await healthyLogProblems(convo.id, in: fixture.store, backedBy: fixture.backing)
+                #expect(problems.isEmpty, "\(context): \(problems)")
+
+                // The slot is free and the overlay input is empty again.
+                #expect(await fixture.store.liveGenerations.isEmpty, "\(context): live set drained")
+            }
+        }
+    }
+
+    /// **P2's store-side half**, feeding M7: the live set is always a subset of
+    /// *open* (started, un-terminated) generations. Checked while one is
+    /// provably parked, which is the only moment the set is non-empty.
+    @Test("the live set is exactly the open generation while one is in flight")
+    func liveSetTracksOpenGenerations() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation()
+        let latch = Latch()
+
+        #expect(await fixture.store.liveGenerations.isEmpty)
+
+        let running = Task {
+            try await fixture.store.send("q", in: convo.id, using: ScriptedDriver([.delta("a"), .pause(latch)]))
+        }
+        await latch.waitForArrival()
+
+        let live = await fixture.store.liveGenerations
+        let open = try await openGenerations(of: convo.id, in: fixture.backing)
+        #expect(live == [Fix.genA])
+        #expect(live.isSubset(of: open), "live ⊄ open would make overlay_live forge a .streaming bubble")
+
+        await latch.release()
+        _ = try await running.value
+        #expect(await fixture.store.liveGenerations.isEmpty, "recovery is the overlay disappearing")
+    }
+
+    /// Generations that started and have not terminated, read from the log.
+    private func openGenerations(
+        of conversation: ConversationID,
+        in backing: any PersistenceStore
+    ) async throws -> Set<GenerationID> {
+        var started: Set<GenerationID> = []
+        for row in try await backing.events(in: conversation, from: 1) {
+            guard case .decoded(let event) = row else { continue }
+            switch event.payload {
+            case .generationStarted(let generation, _, _, _): started.insert(generation)
+            case .generationEnded(let generation, _): started.remove(generation)
+            default: break
+            }
+        }
+        return started
     }
 }
