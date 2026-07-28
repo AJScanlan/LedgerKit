@@ -12,8 +12,11 @@ import Foundation
 ///   identifier types do expose `init(_ uuid: UUID)` — decoding and fixtures
 ///   need it — but nothing in LedgerKit *mints* a value without a generator
 ///   someone had to hand it, so no code path can quietly inherit production
-///   randomness. The store owns one generator and mints inside its append
-///   transaction (SPEC §6.1).
+///   randomness. The `ConversationStore` actor owns one generator and mints as it
+///   assembles a verb's records — *before* handing them to the seam, since the
+///   transaction belongs to the backend and identity belongs above it (SPEC §6.1).
+///   `sequence` is the one identifier minted the other way round, inside the write
+///   transaction, because only the write lock can decide it (SPEC §9).
 public struct IDGenerator<RandomSource: RandomNumberGenerator & Sendable>: Sendable {
 
     private var uuidV7 = UUIDv7Generator()

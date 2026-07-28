@@ -20,9 +20,11 @@ import GRDB
 final class SQLitePersistenceStore: PersistenceStore {
 
     /// Errors that mean the *caller* got it wrong, as opposed to the data being
-    /// damaged. Internal: the public error surface is `LedgerError`, designed at
-    /// M5 against the real verbs, and inventing a public error here would commit
-    /// to a shape before the callers that must live with it exist.
+    /// damaged. Internal: the public error surface is ``LedgerError``, which M5
+    /// designed against the real verbs — deferring it was what stopped M4
+    /// committing to a shape before the callers who must live with it existed.
+    /// Anything thrown here reaches a consumer as `.persistenceFailure`, opaque
+    /// by ADR-003 rule 1.
     enum StoreError: Error, Equatable {
         /// A record in the batch names a different conversation than the one
         /// being appended to. Thrown *before* anything is written, so the batch's
@@ -232,8 +234,11 @@ final class SQLitePersistenceStore: PersistenceStore {
     /// *second* `conversationCreated` appended through the seam upserts this
     /// row's title, while the reducer quarantines that same event (§6.6 row 5) —
     /// so a hostile append can leave the index advertising a title the reduction
-    /// rejects. Unreachable through the store actor's verbs (M5 never appends a
-    /// second genesis), and the index is a rebuildable projection, so the
+    /// rejects. **Unreachable through the store actor's verbs, and since M5 that
+    /// is a tested property rather than an assurance:** `createConversation` is
+    /// the only verb that writes a genesis and it mints a fresh identifier every
+    /// time, while the healthy-log property asserts that no store-written log ever
+    /// reduces with a diagnostic. The index is also a rebuildable projection, so the
     /// divergence is contained and cheap. Deliberately not guarded here: doing
     /// so would put fold semantics below the seam, which ADR-003 rule 2 forbids.
     private static func updateIndex(_ db: Database, for records: [LedgerEvent.Record]) throws {

@@ -1,8 +1,8 @@
 # M5 Implementation Plan — `ConversationStore` actor + turn verbs
 
-**Status:** 🚧 **IN PROGRESS** — opened 2026-07-27 at the M4 boundary. **Phases 0–3 reviewed; Phase 4 landed 2026-07-28, awaiting its review gate.** Phase 5 (rev 8 ratification + alignment) closes the milestone.
+**Status:** ✅ **DONE 2026-07-28.** All six phases landed and reviewed; **SPEC rev 8 ratified at this boundary** (Appendix F — two M4-audit items, nine from M5). **331 tests green** (310 `LedgerKit` + 21 `Understudy`), both packages warning-free. Subsequent spec amendments open rev 9.
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M5 section) · [SPEC.md](./SPEC.md) §6.5, §11, §7.2, §7.4, §7.5, §9, §10.4 · [M4-PLAN.md](./M4-PLAN.md) §7 (the five inherited handoffs)
-**Baseline:** M0–M4 done and audited, **266 tests green** (245 `LedgerKit` + 21 `Understudy`), both packages warning-free. **SPEC rev 8 open** (Appendix F — post-M4-audit amendments); it accumulates M5's items and **ratifies at this milestone's boundary** (agreed 2026-07-27).
+**Baseline:** M0–M4 done and audited, 266 tests green. **Outcome:** M5 done, **331 tests green** (+65), **rev 8 ratified 2026-07-28**.
 **Spec work:** rev 8 is already open, so M5 amendments *extend Appendix F* rather than opening a new revision. The inventory is §6 of this plan; SPEC edits require approval first, drafted scratch-first per the standing pattern.
 
 > **How to use this document.** This plan persists across sessions, agents, and
@@ -18,7 +18,8 @@
 > `LedgerError`, the driver *protocol* (implemented at M6), the live set, and the
 > snapshot-refresh trigger. The two design centers are **D21** (what the store asks
 > of a driver) and **D24** (how the §6.5 critical section survives actor reentrancy).
-> The test center is **deterministic cancellation chaos via `Cue`** (D26) plus a new
+> The test center is **deterministic cancellation chaos via enumerated parked points**
+> (D26 — via a test-target `Latch`, not `Cue`; see the Context table) plus a new
 > standing property: *a store-written log always reduces with empty diagnostics.*
 > Still zero Foundation Models — the dev machine runs macOS 26 and nothing here
 > may need 27 to execute.
@@ -634,25 +635,54 @@ remove the cancel-first in delete — each must be caught; both suites green.
 
 ### Phase 5 — Wrap-up: rev 8 ratification + alignment
 
+**Status:** ✅ **done 2026-07-28.** Rev 8 ratified; alignment complete. 331
+tests green (310 `LedgerKit` + 21 `Understudy`), warning-free.
+
 **Goal:** close the milestone the way M3/M4 closed — docs aligned, spec
 ratified, handoffs recorded.
 
-- [ ] Draft §6's rev 8 items to a scratch file; item-by-item sign-off; land in
-      SPEC Appendix F; **ratify rev 8 at the boundary** (header flips to
-      ratified; subsequent amendments open rev 9).
-- [ ] **Alignment checklist** (codifying what M4 Phase 5 did ad hoc):
-      ROADMAP M5 strike-through + exit criteria + M6/M7 section touch-ups;
-      CLAUDE.md status + new landmarks (store actor, driver seam, chaos
-      suites, first Understudy import); **`Sources/**` doc-comment sweep for
-      claims rev 8 just made stale** (the standing rule added at the M4
-      audit); this plan's §8 traceability + §9/§10 logs.
-- [ ] Handoffs to M6 and M7 (§7 below) verified against what actually landed.
-- [ ] Both suites green, warning-free; counts recorded in §10.
+- [x] Draft §6's rev 8 items to a scratch file; sign-off; land in SPEC
+      Appendix F; **ratify rev 8 at the boundary**. → **Approved and applied
+      2026-07-28.** Nine items: §11 (`LedgerError` + `unsupportedTarget`, and
+      the throw channel covering "couldn't record"), §7.5 (×3 — the
+      cancellation-recording rule, partial retention via stream-end, the start
+      window), **§7.9 (new — the driver seam)**, §7.4 (attribution), §9
+      (refresh sequencing), §10.4 (parked not randomized), §6.5 (the
+      healthy-log property, *with its limit*). Header flipped to ratified;
+      rev 9 opens on the next amendment.
+- [x] **Alignment checklist:** ROADMAP M5 struck through with met exit criteria,
+      plus M6 touch-ups (the seam it inherits, the corrected Understudy import);
+      CLAUDE.md status rewritten with the M5 landmarks; **`Sources/**`
+      doc-comment sweep** — see gate item 1; this plan's §8 traceability (all
+      rows filled) and §9/§10 logs.
+- [x] Handoffs to M6 and M7 (§7) verified against what actually landed — two
+      new M6 items (the cancellation-recording trap, `ScriptedDriver` as the
+      shape to imitate) and one new M7 item (the Playground, inherited from M4).
+- [x] Both suites green, warning-free; counts recorded in §10.
 
-**Review gate:** milestone-complete review with Alexander; ROADMAP M5 exit
-criteria all check.
+**Review gate:** ✅ milestone-complete; ROADMAP M5 exit criteria all check.
 
----
+**Gate items raised by the implementation:**
+
+1. **⚠️ The doc-comment sweep found a false citation, which is exactly what it is
+   for.** `Snapshots.swift` asserted "§9 says a discard is logged" and built an
+   argument on it about the obligation belonging to the store actor. **§9 says no
+   such thing** — verified by re-reading it, the M4 audit's standing lesson
+   applied to my own prose. Corrected: a discard is silent, and silence is right
+   anyway, because this is a *cache miss* rather than an error. Two smaller
+   corrections alongside it: `IDGenerator` claimed the store "mints inside its
+   append transaction" (it mints *before* the append — `sequence` is the one
+   identifier minted inside the write lock), and `SQLitePersistenceStore`'s
+   index non-rule now says the divergence is unreachable *as a tested property*
+   rather than as an assurance.
+2. **The deadline-racing await helper is deferred, not dropped** (Phase 4 gate
+   item 6). Agreed 2026-07-28: a correct one must leak the hung observer task,
+   and the two regressions it would catch are still diagnosable from the last
+   `Test "…" started` line. Revisit if a third deadlock-shaped guard appears.
+3. **Rev 8's draft corrects one of its own earlier items.** §6 item 4 said §10.4
+   should specify `Cue`-enumerated cancellation points; the spec should say
+   *parked*, without naming a type, since `Cue` is right for M6 and wrong for a
+   store-level double.
 
 ## 6. Rev 8 inventory (amendments M5 expects to add — draft at Phase 5, not from memory)
 
@@ -698,28 +728,45 @@ approval:
 
 ## 7. Explicit handoffs (recorded so they aren't lost)
 
-**To M6 (`GenerationDriver` — the session seam):**
-1. **The D21 protocol is the contract.** M6 implements it over
-   `LanguageModelSession`: rehydration (§7.1) from the request material the
-   store hands over, snapshot→delta diffing (§7.3, segment-aware preferred),
-   error normalization (§8, both error families), the `isResponding` gate
-   (§7.2), tool-record observation (§7.6). If the protocol needs to move, that
-   is a rev 9 conversation *first*, not a silent widening.
-2. **The end-to-end round trip becomes assertable**: scripted fragment →
+**To M6 (`GenerationDriver` — the session seam):** *verified against what landed,
+2026-07-28.*
+1. **`GenerationDriving` is the contract**, in `Store/GenerationDriving.swift`.
+   M6 implements it over `LanguageModelSession`: rehydration (§7.1) from the
+   `GenerationRequest` the store hands over, snapshot→delta diffing (§7.3,
+   segment-aware preferred), error normalization (§8, both error families), the
+   `isResponding` gate (§7.2), tool-record observation (§7.6). **The call does
+   not throw and must not start doing so** — that is what makes "exactly one
+   terminal" structural. If the protocol needs to move, that is a rev 9
+   conversation *first*, not a silent widening.
+2. ⚠️ **A cancellation-aware backend cannot record its own cancellation from
+   inside the cancelled task** (Phase 4, finding 1). The store already handles
+   this for its own appends; **M6 must not reintroduce it** — a driver that
+   performs cleanup writes inside its cancelled scope hits the same wall. Its
+   obligation on cancellation stays §7.5's: wind down and return `.cancelled`.
+3. **The end-to-end round trip becomes assertable**: scripted fragment →
    framework accumulation → snapshot → driver diff → `deltaAppended` recovers
    the script exactly (§7.3). M5's store chaos + M6's driver = the whole
    pipeline; the corpus should gain the fixture then, not before.
-3. **The four behavioural residues** (§14 head) are unchanged and still M6's:
+4. **The four behavioural residues** (§14 head) are unchanged and still M6's:
    thrown-or-trapped `concurrentRequests`, real-provider segment revision,
    usage-total inclusivity, the on-device context budget.
-4. `ScriptedLanguageModel` first *executes* under a 27 runtime — M6 inherits
-   the `.enabled(if:)` gating pattern for anything that runs a real session.
+5. **The first `Understudy` import is M6's**, not M5's — `Cue.park()` is
+   internal, so a store-level double used `Latch`. At M6 the arrangement inverts
+   and `Cue` works as designed. `ScriptedLanguageModel` also first *executes*
+   under a 27 runtime there; inherit the `.enabled(if:)` gating pattern.
+6. **`ScriptedDriver` (test target) is the shape to imitate, not to replace.**
+   It is the only other `GenerationDriving` conformance, and every store
+   behaviour is already pinned against it — so a store-side regression at M6
+   points at M6.
 
-**To M7 (projection + `overlay_live`):**
-1. **The live set is the overlay's input** — M5 ships it actor-side with the
-   invariant (live ⊆ open) already tested; M7 surfaces it into
-   `overlay_live` and completes P2 by passing the real overlay to the
-   existing harness (`ProjectionChecks.swift` — change no assertion).
+**To M7 (projection + `overlay_live`):** *verified against what landed,
+2026-07-28.*
+1. **`ConversationStore.liveGenerations` is the overlay's input** — internal,
+   keyed by `GenerationID` (not by conversation, because that is what the
+   overlay maps over), with P2's third clause (live ⊆ open) already tested.
+   M7 surfaces it into `overlay_live` and completes P2 by passing the real
+   overlay to the existing harness (`ProjectionChecks.swift` — change no
+   assertion).
 2. **`conversationList`** reads the index via the seam's
    `conversationSummaries` + GRDB value observation surfaced as an
    `AsyncSequence` (the deliberate omission noted in `Persistence.swift`).
@@ -727,8 +774,11 @@ approval:
    the ~frame-rate main-actor hop is M7's own knob. The app's
    `RecoverabilityMapping` override also lands projection-side (D28 kept the
    store read on `.default`).
-
----
+4. **The Playground still hand-builds a tree and needs `@testable`** (inherited
+   from M4 Phase 0, still open). Converting it to a
+   `Conversation(reducing:)` example is invisible to `swift build`, so it must
+   be done in Xcode — M7 is the natural moment, since that is when there is a
+   UI to preview it against.
 
 ## 8. Coverage traceability (fill at Phase 5)
 
@@ -769,6 +819,7 @@ approval:
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-07-28 | **M5 done** | 331 (310 + 21) | Phase 5: **rev 8 ratified** (11 items in Appendix F, incl. the new §7.9 driver seam); ROADMAP + CLAUDE.md aligned; `Sources/**` sweep found a **false citation** (`Snapshots.swift` claimed §9 requires logging a snapshot discard — it does not) plus two smaller corrections; M6/M7 handoffs verified against what landed |
 | 2026-07-28 | Phase 4 landed | 331 (310 + 21) | Cancellation (both entry points + the §7.2 straddle), delete's cancel-first sequencing, snapshot refresh, and the §10.4 chaos suite. **§11 sketch now runs whole, stop button included.** Four mutations run, all caught — two only as deadlocks (gate item 6). Biggest finding: a cancelled task cannot record its own cancellation (gate item 1). Warning-free |
 | 2026-07-27 | Phase 3 landed | 315 (294 + 21) | `send` / `respond` / `regenerate` over one shared start path; D24's reserve→append→confirm-or-rollback; the D25 flush loop; `ScriptedDriver`. **§11 sketch now runs end-to-end** minus cancellation. Four mutations run, all caught. Three items for sign-off: `LedgerError.unsupportedTarget` (N10), §11's throw-channel clause, and the dropped Understudy import. Warning-free |
 | 2026-07-27 | Phase 2 landed | 296 (275 + 21) | `edit` / `switchBranch` / shared `target(_:expecting:)`; live-set storage + `reserve`/`release` (D24's synchronous half, landed early for the mid-stream assertion). Root edit reproduces `Corpus.rootEdit` row for row. Three mutations run, all caught; Ⓐ confirmed the healthy-log property is not a semantic check (Phase 2 gate item 4). Warning-free |

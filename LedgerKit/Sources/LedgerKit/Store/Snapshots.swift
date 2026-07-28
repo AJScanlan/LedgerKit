@@ -50,10 +50,14 @@ extension Snapshot {
     /// migration path, by design — §9 forbids one, because the alternative is
     /// carrying every historical shape of the reducer's output forever.
     ///
-    /// §9 says a discard is logged. There is no logger below M5, and inventing one
-    /// here would be the same mistake §8 avoided by putting "logged loudly" at
-    /// normalization time: the obligation belongs to the layer that *has* a
-    /// logger, which is the store actor.
+    /// **A discard is silent, and the earlier claim that §9 requires otherwise was
+    /// wrong** (corrected at the M5 Phase 5 sweep, by re-reading §9 rather than
+    /// citing it from memory — the M4 audit's standing lesson). §9 asks only that
+    /// the checkpoint be discarded, and silence is the right disposition anyway:
+    /// this is a **cache miss**, not an error. It costs a replay, the store actor
+    /// has no logging surface at all, and §9's privacy stance points the same way.
+    /// If a diagnostic ever earns its keep it belongs above the seam, where a
+    /// caller can be told; it does not belong to storage.
     var foldedState: FoldedState? {
         guard reducerVersion == LedgerSchema.reducerVersion,
               schemaVersion == LedgerSchema.payloadVersion,
