@@ -203,8 +203,13 @@ no jitter to canonicalize.
 
 **Tested** in `WireFormatTests` ("Timestamp canonicalization"), over a 2,000-date sweep rather
 than a fixture, in both directions: canonical stamps round-trip equal and are idempotent; a raw
-sub-millisecond `Date` provably does not round-trip, which is why the rule exists. The store's
-stamping site lands at M5.
+sub-millisecond `Date` provably does not round-trip, which is why the rule exists.
+
+**The stamping site landed at M5**, in `ConversationStore.mint(_:in:)` — the one place a
+timestamp is minted, canonicalized at birth. `PersistenceStore.append` *debug-asserts* its
+records arrive canonical and deliberately does not repair them: repairing at write time
+would give every event two identities depending on whether it had been to disk, which is
+the bug class this rule exists to prevent.
 
 ## Consequence discovered at implementation: tolerant decode is **lossy**
 

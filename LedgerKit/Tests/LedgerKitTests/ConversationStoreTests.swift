@@ -791,9 +791,9 @@ struct StoreFlushTests {
 
     /// Deterministic without controlling a clock: a one-character bound makes
     /// every delta due, and `.zero` would too.
-    private static let everyDelta = DeltaFlushPolicy(interval: .zero, characterCount: 1)
+    private static let everyDelta: DeltaFlushPolicy = .flushing(every: .zero, orAfterCharacters: 1)
     /// Nothing is ever due, so only the mandatory pre-terminal flush fires.
-    private static let never = DeltaFlushPolicy(interval: .seconds(3600), characterCount: .max)
+    private static let never: DeltaFlushPolicy = .flushing(every: .seconds(3600), orAfterCharacters: .max)
 
     @Test("a flush-per-delta policy writes one row per delta")
     func flushesPerDelta() async throws {
@@ -1166,6 +1166,116 @@ struct StoreCancellationTests {
     }
 }
 
+/// **The rehydration gap** (M6-PLAN A2, from the M5 boundary audit 2026-07-28).
+///
+/// The read that assembles a `GenerationRequest` (§7.1) is the last thing that
+/// can fail *after* the start append, and it used to sit in a place covered by no
+/// guard at all: past `generate`'s rollback, ahead of `drive`'s `defer`. Two
+/// failures live there and both were mishandled — a throw wedged single-flight
+/// forever, and a task-cancel escaped as a post-append `CancellationError`, which
+/// §7.2 says cannot happen.
+///
+/// Both tests need the read to go to **disk**, since a warm cache reads nothing.
+/// The eviction is *injected* rather than raced: D29 drops the cache whenever a
+/// tail does not continue it, which a mid-flight `edit` can cause for real, but
+/// reproducing that by racing two verbs would test the scheduler instead of the
+/// gap.
+@Suite("Store — the rehydration gap", .timeLimit(.minutes(1)))
+struct StoreRehydrationGapTests {
+
+    /// Seeds a genesis **below** every wrapper — arming the park or the read gate
+    /// must not consume either during setup — and returns a store whose **start
+    /// append parks**, so a test can hold the window between the commit and the
+    /// rehydration read open and act inside it.
+    private func parkedStart() async throws -> (
+        fixture: StoreUnderTest,
+        conversation: ConversationID,
+        reads: ReadHostileStore,
+        latch: Latch
+    ) {
+        let sqlite = try SQLitePersistenceStore(.inMemory)
+        let seed = Log.opened(title: "seeded")
+        _ = try await sqlite.append(seed.records, to: seed.conversation)
+
+        let reads = ReadHostileStore(sqlite)
+        let latch = Latch()
+        let fixture = try StoreUnderTest(
+            over: ParkingStore(reads, parkingFirst: .append, at: latch),
+            identifiers: ScriptedIdentifiers(eventsFrom: 0x101, messagesFrom: 0x1F, generationsFrom: 0x2F),
+            clockFrom: Log.base.addingTimeInterval(1)
+        )
+        return (fixture, seed.conversation, reads, latch)
+    }
+
+    @Test("a failed rehydration read throws, frees the slot, and leaves the generation open")
+    func readFailureDoesNotWedgeSingleFlight() async throws {
+        let (fixture, conversation, reads, latch) = try await parkedStart()
+
+        let running = Task {
+            try await fixture.store.send("q", in: conversation, using: ScriptedDriver(saying: "never reached"))
+        }
+        // Parked *inside* the start append: the batch has committed, so the
+        // generation exists in the log and §7.2 is now in force.
+        await latch.waitForArrival()
+        await fixture.store.evict(conversation)
+        reads.isFailingReads = true
+        await latch.release()
+
+        do {
+            _ = try await running.value
+            Issue.record("expected the rehydration read to fail")
+        } catch let error as LedgerError {
+            // Rev 8's "couldn't record" clause, not "never started".
+            guard case .persistenceFailure = error else {
+                Issue.record("expected .persistenceFailure, got \(error)")
+                return
+            }
+        }
+
+        // **The wedge.** A throw in that window left the slot claimed forever, so
+        // the conversation could never generate again — a failure the verb's own
+        // caller has no way to see and no way to clear.
+        try await fixture.store.reserve(conversation)
+        await fixture.store.release(conversation)
+
+        // No terminal was written, deliberately: the generation stays open and
+        // reduces to `.interrupted`, which says something went wrong where a
+        // `.completed` missing its content would claim success.
+        reads.isFailingReads = false
+        let read = try await fixture.store.conversation(conversation)
+        #expect(read.activeMessages.last?.state == .interrupted(partial: ""))
+    }
+
+    @Test("a cancellation during the rehydration read returns .cancelled and records its terminal")
+    func cancellationDuringTheReadIsRecorded() async throws {
+        let (fixture, conversation, _, latch) = try await parkedStart()
+
+        let running = Task {
+            try await fixture.store.send("q", in: conversation, using: ScriptedDriver(saying: "never reached"))
+        }
+        await latch.waitForArrival()
+        await fixture.store.evict(conversation)
+        // Cancelled with the start append already committed — §7.2's far side, so
+        // the answer is a recorded terminal rather than a thrown error, even
+        // though the cancellation lands on a *store* read rather than on the
+        // driver.
+        running.cancel()
+        await latch.release()
+
+        #expect(try await running.value == .cancelled)
+
+        let rows = try await fixture.rows(of: conversation)
+        let terminals = rows.compactMap { row -> Outcome? in
+            guard case .decoded(let event) = row,
+                  case .generationEnded(_, let outcome) = event.payload
+            else { return nil }
+            return outcome
+        }
+        #expect(terminals == [.cancelled], "the cancellation must be recorded, not merely returned")
+        try await fixture.store.reserve(conversation)
+    }
+}
+
 /// §9's deletion semantics: cancel first, then an irreversible transactional
 /// DELETE — and the cache goes with it.
 @Suite("Store — deletion", .timeLimit(.minutes(1)))
@@ -1212,6 +1322,67 @@ struct StoreDeletionTests {
         #expect(try await fixture.backing.conversationSummaries().isEmpty)
     }
 
+    /// **The reservation window** (M6-PLAN A1, from the M5 boundary audit
+    /// 2026-07-28). Waiting only on `.running` left D24's window uncovered: a
+    /// `.reserved` slot means the start append is *in flight*, holding a
+    /// transaction this verb cannot see. Racing it produces one of the two
+    /// artifacts ``ConversationStore/deleteConversation(_:)``'s own doc says
+    /// cannot happen — rows written into an erased conversation, or a terminal
+    /// appended after the DELETE — depending only on which commit wins.
+    @Test("delete waits out a claimed-but-unconfirmed start")
+    func deleteWaitsOutTheReservationWindow() async throws {
+        let sqlite = try SQLitePersistenceStore(.inMemory)
+        let seed = Log.opened(title: "doomed")
+        _ = try await sqlite.append(seed.records, to: seed.conversation)
+
+        let latch = Latch()
+        let fixture = try StoreUnderTest(
+            over: ParkingStore(sqlite, parkingFirst: .append, at: latch),
+            identifiers: ScriptedIdentifiers(eventsFrom: 0x101, messagesFrom: 0x1F, generationsFrom: 0x2F),
+            clockFrom: Log.base.addingTimeInterval(1)
+        )
+
+        let neverReleased = Latch()
+        let starting = Task {
+            try await fixture.store.send(
+                "q",
+                in: seed.conversation,
+                using: ScriptedDriver([.pause(neverReleased), .delta("unreachable")])
+            )
+        }
+        // The start batch has committed and is parked inside the append, so the
+        // slot is `.reserved`: nothing to cancel, no terminal, and a DELETE
+        // issued now would race a transaction it cannot observe.
+        await latch.waitForArrival()
+
+        let deleting = Task { try await fixture.store.deleteConversation(seed.conversation) }
+        // A rendezvous, not a hoped-for interleaving (§10.4's discipline applied
+        // to a wait): releasing the append before the delete is *inside* its wait
+        // would silently fall back to exercising the already-correct `.running`
+        // path, and the test would pass without touching the bug.
+        try await spin(until: { await fixture.store.conversationsAwaitingStart.contains(seed.conversation) })
+        await latch.release()
+        try await deleting.value
+
+        // §9's contract, unchanged: the overridden generation's own verb reports
+        // `.cancelled`, never a persistence error.
+        #expect(try await starting.value == .cancelled)
+
+        // The terminal was recorded *and then erased*, in that order — which is
+        // the whole claim. A terminal appended after the DELETE would still be
+        // there, and it would be a genesis-less row.
+        let wroteTerminal = fixture.written.contains { record in
+            if case .generationEnded = record.payload { true } else { false }
+        }
+        #expect(wroteTerminal, "the cancellation must be recorded before the DELETE")
+        #expect(try await fixture.rows(of: seed.conversation).isEmpty, "no row may outlive the DELETE")
+        #expect(try await fixture.backing.conversationSummaries().isEmpty)
+
+        // And the slot is not left claimed on a conversation that no longer exists.
+        #expect(await fixture.store.conversationsAwaitingStart.isEmpty)
+        try await fixture.store.reserve(seed.conversation)
+    }
+
     @Test("deleting an unknown conversation throws")
     func deleteUnknown() async throws {
         let fixture = try StoreUnderTest()
@@ -1243,7 +1414,7 @@ struct StoreSnapshotRefreshTests {
     /// after the newest terminal.
     @Test("a cold reopen after refresh replays at most one generation's suffix")
     func coldReopenReplaysASuffix() async throws {
-        let fixture = try StoreUnderTest(deltaFlush: DeltaFlushPolicy(interval: .zero, characterCount: 1))
+        let fixture = try StoreUnderTest(deltaFlush: .flushing(every: .zero, orAfterCharacters: 1))
         let convo = try await fixture.store.createConversation()
         for turn in 0..<5 {
             _ = try await fixture.store.send(
@@ -1267,7 +1438,7 @@ struct StoreSnapshotRefreshTests {
         let backing = try SQLitePersistenceStore(.inMemory)
         let store = ConversationStore(
             persistence: backing,
-            snapshots: SnapshotPolicy(refreshesAfterEachGeneration: true, maximumEventsBetweenRefreshes: 4),
+            snapshots: .refreshing(afterEachGeneration: true, orAfterEvents: 4),
             identifiers: ScriptedIdentifiers(),
             now: SteppingClock().now
         )
@@ -1337,7 +1508,7 @@ struct StoreChaosTests {
                 let rescripted = script.map { step -> ScriptedDriver.Step in
                     if case .pause = step { .pause(latch) } else { step }
                 }
-                let fixture = try StoreUnderTest(deltaFlush: DeltaFlushPolicy(interval: .zero, characterCount: 1))
+                let fixture = try StoreUnderTest(deltaFlush: .flushing(every: .zero, orAfterCharacters: 1))
                 let convo = try await fixture.store.createConversation()
 
                 let running = Task {

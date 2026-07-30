@@ -126,5 +126,12 @@ equivalent is FileVault, which is not ours to set). Two honest gaps: `-wal` and 
 not exist until the first write, so they are protected on the *next* open rather than the
 first; and the robust answer is protection on the containing *directory*, which belongs to
 the app because the app chose the directory. This is a floor, not a guarantee — §9's
-guidance that sensitive domains layer their own encryption stands. Worth revisiting at M5
-when `ConversationStore` owns database creation end to end.
+guidance that sensitive domains layer their own encryption stands.
+
+**Deferred to M9's hardening pass, deliberately and on the record** (rolled forward at M6
+Phase 0; the note previously said "revisit at M5"). M5 came and went: `ConversationStore`
+now owns database creation end to end and nothing about that changed the two gaps, because
+both are properties of *where the app put the file* rather than of who opens it. Neither is
+a correctness issue, and the honest fix — directory-level protection, or an explicit
+`PersistenceConfiguration` knob for it — is a public-API decision that belongs with the
+other 0.1.0 packaging choices rather than mid-milestone.

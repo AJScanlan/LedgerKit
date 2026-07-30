@@ -2,9 +2,26 @@
 
 import PackageDescription
 
-// Platform floor is 26, not the 27 the spec targets (SPEC header): M1–M5 are pure
-// Swift and must stay verifiable on any Mac with no Apple Intelligence
-// eligibility. Bump to 27 at M6, when `Session/` first touches Foundation Models.
+// Platform floor is 26, not the 27 the spec targets (SPEC header): the core is
+// pure Swift and must stay verifiable on any Mac with no Apple Intelligence
+// eligibility.
+//
+// **The floor does not move at M6, and an earlier note here saying it would was
+// wrong** (M6-PLAN D31). `Session/` is availability-gated instead — every
+// declaration `@available(macOS 27, iOS 27, …)`, byte-for-byte the pattern
+// `Understudy` already ships for `ScriptedLanguageModel`. A 27 floor would make
+// the *entire* test binary unlaunchable on a macOS 26 host — all of it, not just
+// the driver's — and force every consumer to 27 for a library whose core is
+// deliberately 26-clean. Gating costs one attribute per declaration; bumping
+// costs the suite.
+//
+// The 27-only tests still execute here, on the iOS 27 simulator runtime, which is
+// what keeps them honest rather than dormant (M6-PLAN Phase 0, substrate spike):
+//
+//     xcodebuild test -workspace LedgerKit.xcworkspace -scheme LedgerKit \
+//       -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0'
+//
+// The deployment target stays 26 there, so the same sources serve both.
 let package = Package(
     name: "LedgerKit",
     platforms: [

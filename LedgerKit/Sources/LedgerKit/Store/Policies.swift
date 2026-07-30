@@ -9,10 +9,20 @@ import Foundation
 // of knobs is certain to grow. As enums, each new knob reshapes the type; as
 // structs, each is additive, and call sites are identical either way.
 //
-// Phase 0 ships the defaults and nothing else, deliberately. A factory for
-// varying them is trivial to add and impossible to remove, and the honest moment
-// to price one is when the loop that reads these exists to price it against
-// (Phase 3's review gate, which also settles where they attach).
+// **Both are publicly constructible as of M6 Phase 0 (D32).** M5 shipped
+// `.default` alone on the grounds that a factory is trivial to add and impossible
+// to remove, and that the honest moment to price one is when the loop reading it
+// exists. That loop has existed since M5 Phase 3 and is mutation-tested, and the
+// spec has promised configurability since rev 2 (§7.4 "make both cadences
+// configurable", §9 "both configurable") — so the halfway state was two `init`
+// parameters that accepted exactly one value each: API noise pretending to be
+// flexibility.
+//
+// Named factories rather than public memberwise inits, per D12: the phrasing is
+// what carries the **or** semantics. `.flushing(every:orAfterCharacters:)` says
+// *whichever comes first*, where `init(interval:characterCount:)` leaves a reader
+// guessing whether both must be satisfied. The inits stay internal, so adding a
+// third knob remains additive.
 
 /// How often a streaming generation's text reaches disk (SPEC §7.4).
 ///
@@ -35,21 +45,42 @@ import Foundation
 /// has nothing to do with this one.
 public struct DeltaFlushPolicy: Sendable, Equatable {
 
-    /// §7.4's default: every ~250 ms or N characters, whichever comes first, and
-    /// **always before `generationEnded`** — the pre-terminal flush is not a
+    /// §7.4's default: every ~250 ms or 512 characters, whichever comes first,
+    /// and **always before `generationEnded`** — the pre-terminal flush is not a
     /// policy choice, so it is not represented here.
     public static let `default` = Self(interval: .milliseconds(250), characterCount: 512)
 
     let interval: Duration
     let characterCount: Int
 
-    /// Internal, not private: the *public* surface is `.default` alone until
-    /// Phase 3 prices a factory against the loop that reads these, but the
-    /// module's own tests need to vary the cadence — a flush-every-character
-    /// policy is how "always flush before the terminal" gets a failing case.
+    /// Internal: ``flushing(every:orAfterCharacters:)`` is the public spelling,
+    /// and keeping the memberwise shape unexported is what makes a third knob
+    /// additive instead of source-breaking.
     init(interval: Duration, characterCount: Int) {
         self.interval = interval
         self.characterCount = characterCount
+    }
+
+    /// A cadence of *whichever comes first* (§7.4).
+    ///
+    /// ```swift
+    /// let store = try ConversationStore(
+    ///     persistence: .sqlite(at: dbURL),
+    ///     deltaFlush: .flushing(every: .milliseconds(100), orAfterCharacters: 128)
+    /// )
+    /// ```
+    ///
+    /// Tighten it and a crash costs less text while the log grows more rows;
+    /// loosen it and the reverse. Neither end changes what the *user* sees while
+    /// streaming — that is the projection's display cadence, a separate knob
+    /// (§7.4's truth hierarchy) — so this trades durability against write volume
+    /// and nothing else.
+    ///
+    /// - Parameters:
+    ///   - interval: Maximum time buffered text may wait for disk.
+    ///   - characters: Character count that forces a flush sooner.
+    public static func flushing(every interval: Duration, orAfterCharacters characters: Int) -> Self {
+        Self(interval: interval, characterCount: characters)
     }
 }
 
@@ -74,10 +105,37 @@ public struct SnapshotPolicy: Sendable, Equatable {
     /// branch switches reaches no terminal and would otherwise never checkpoint.
     let maximumEventsBetweenRefreshes: Int
 
-    /// Internal for the same reason as ``DeltaFlushPolicy``'s: a test that wants
-    /// to reach the floor without writing 500 events has to be able to lower it.
+    /// Internal for the same reason as ``DeltaFlushPolicy``'s:
+    /// ``refreshing(afterEachGeneration:orAfterEvents:)`` is the public spelling.
     init(refreshesAfterEachGeneration: Bool, maximumEventsBetweenRefreshes: Int) {
         self.refreshesAfterEachGeneration = refreshesAfterEachGeneration
         self.maximumEventsBetweenRefreshes = maximumEventsBetweenRefreshes
+    }
+
+    /// A checkpoint cadence (§9).
+    ///
+    /// ```swift
+    /// // A bulk importer: no generations to hang a checkpoint off, so only the
+    /// // floor does any work.
+    /// let store = try ConversationStore(
+    ///     persistence: .sqlite(at: dbURL),
+    ///     snapshots: .refreshing(afterEachGeneration: false, orAfterEvents: 5_000)
+    /// )
+    /// ```
+    ///
+    /// Both knobs only ever buy or spend **replay time** — snapshots are
+    /// disposable and the log is the truth (§9), so no setting here can be
+    /// incorrect, only slow. That is why `afterEachGeneration: false` is a
+    /// supported shape rather than a foot-gun: a writer with no terminals to
+    /// checkpoint after should not pay for a policy keyed on them.
+    ///
+    /// - Parameters:
+    ///   - afterEachGeneration: Checkpoint at each `generationEnded` — the
+    ///     natural quiescent point, and the reason a cold open replays at most
+    ///     one generation's suffix.
+    ///   - events: The floor: checkpoint once this many events have accumulated
+    ///     since the last one, whatever they were.
+    public static func refreshing(afterEachGeneration: Bool = true, orAfterEvents events: Int) -> Self {
+        Self(refreshesAfterEachGeneration: afterEachGeneration, maximumEventsBetweenRefreshes: events)
     }
 }

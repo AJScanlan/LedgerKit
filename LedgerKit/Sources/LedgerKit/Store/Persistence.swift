@@ -5,8 +5,9 @@ import Foundation
 /// LedgerKit's storage needs are three tables and six verbs; the backend —
 /// GRDB, per ADR-003 — sits behind this file so its types never leak into
 /// public API and the choice stays swappable (raw sqlite3 remains the §12
-/// cut-line fallback). Nothing here is wired until M4; this file is the
-/// *decision*, recorded as code.
+/// cut-line fallback). This file is the *decision*, recorded as code; the one
+/// conformance is `SQLitePersistenceStore` (wired at M4, ADR-003 Accepted), and
+/// it is the only place in the package where GRDB appears or bytes are decoded.
 ///
 /// Two design rules, both consequences of "the log is the truth":
 ///
@@ -56,15 +57,15 @@ public struct PersistenceConfiguration: Sendable {
     /// A single SQLite database file — the production shape (§9).
     ///
     /// Labelled `at:` per Foundation's convention for file locations
-    /// (`FileManager.createDirectory(at:)`); §11's sketch spells it `url:`,
-    /// which is illustrative per §6.1's standing rule.
+    /// (`FileManager.createDirectory(at:)`). §11's sketch agrees as of rev 8,
+    /// which adopted this spelling at the M4 boundary audit.
     public static func sqlite(at url: URL) -> Self {
         Self(.sqlite(url: url))
     }
 
     /// Ephemeral, for tests and previews — the persistence counterpart of
-    /// `ScriptedLanguageModel` (tenet 5). Maps to an in-memory `DatabaseQueue`
-    /// at M4.
+    /// `ScriptedLanguageModel` (tenet 5). An in-memory `DatabaseQueue` below the
+    /// seam, where the file-backed shape gets a `DatabasePool`.
     public static let inMemory = Self(.inMemory)
 }
 
@@ -108,8 +109,8 @@ struct Snapshot: Sendable, Equatable {
 }
 
 /// The six verbs LedgerKit needs from a storage backend. Implemented by the
-/// GRDB store at M4; conformances must be `Sendable` because the
-/// `ConversationStore` actor calls across its isolation boundary.
+/// GRDB store (`SQLitePersistenceStore`); conformances must be `Sendable`
+/// because the `ConversationStore` actor calls across its isolation boundary.
 ///
 /// Deliberately *not* here: value observation of the index (an M4/M7 concern
 /// — GRDB's `ValueObservation` will feed the projection's

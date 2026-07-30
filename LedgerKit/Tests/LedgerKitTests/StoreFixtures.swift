@@ -354,6 +354,25 @@ actor Latch {
     }
 }
 
+/// Spins until `condition` holds — the rendezvous for something suspended inside
+/// the actor that hands out no continuation to wait on.
+///
+/// ``Latch`` is the better tool wherever the subject can be made to park on one;
+/// this exists for the case where it cannot, which today is exactly one: a verb
+/// waiting out D24's reservation window (M6-PLAN A1) is suspended on the store's
+/// *own* continuation, and only the store's state says so.
+///
+/// **Cancellation awareness is not a nicety here.** A bare `Task.yield()` loop
+/// cannot be interrupted, so `.timeLimit` cannot end it: a subject that never
+/// arrives would wedge the entire run instead of failing one test. Measured the
+/// hard way — the first draft of A1's mutation run had to be killed by hand.
+func spin(until condition: @Sendable () async -> Bool) async throws {
+    while await condition() == false {
+        try Task.checkCancellation()
+        await Task.yield()
+    }
+}
+
 /// Wraps a store and parks the **first** call to one chosen verb, so a test can
 /// interleave two entries into the actor at a point it picked.
 ///
@@ -558,6 +577,52 @@ final class SnapshotHostileStore: PersistenceStore {
 
     func save(_ snapshot: Snapshot) async throws {
         throw FailingStore.Failure(reason: "no checkpoints today")
+    }
+
+    func deleteConversation(_ conversation: ConversationID) async throws {
+        try await wrapped.deleteConversation(conversation)
+    }
+
+    func conversationSummaries() async throws -> [ConversationSummary] {
+        try await wrapped.conversationSummaries()
+    }
+}
+
+/// Everything works except `events`, and only while ``isFailingReads`` is set —
+/// the one way to fail a *read* at a moment the test picks (M6-PLAN A2).
+///
+/// A gate rather than a call count, because the read worth failing is the
+/// rehydration one (§7.1) and how many reads precede it is an implementation
+/// detail no test should have to track. Writes keep working throughout: the
+/// window this exists for opens *after* the start append committed.
+final class ReadHostileStore: PersistenceStore {
+    private let wrapped: any PersistenceStore
+    private let failing = Mutex(false)
+
+    init(_ wrapped: any PersistenceStore) {
+        self.wrapped = wrapped
+    }
+
+    var isFailingReads: Bool {
+        get { failing.withLock { $0 } }
+        set { failing.withLock { $0 = newValue } }
+    }
+
+    func append(_ records: [LedgerEvent.Record], to conversation: ConversationID) async throws -> [LedgerEvent] {
+        try await wrapped.append(records, to: conversation)
+    }
+
+    func events(in conversation: ConversationID, from sequence: Int64) async throws -> [LoadedEvent] {
+        guard !isFailingReads else { throw FailingStore.Failure(reason: "no reads today") }
+        return try await wrapped.events(in: conversation, from: sequence)
+    }
+
+    func latestSnapshot(for conversation: ConversationID) async throws -> Snapshot? {
+        try await wrapped.latestSnapshot(for: conversation)
+    }
+
+    func save(_ snapshot: Snapshot) async throws {
+        try await wrapped.save(snapshot)
     }
 
     func deleteConversation(_ conversation: ConversationID) async throws {

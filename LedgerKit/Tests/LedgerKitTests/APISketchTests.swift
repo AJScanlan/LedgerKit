@@ -210,6 +210,27 @@ struct APISketchTests {
         _ = try ConversationStore(persistence: .inMemory)
     }
 
+    /// **D32: both cadences are configurable from outside the module**, which
+    /// §7.4 and §9 have promised since rev 2 while the public surface offered
+    /// exactly one value each.
+    ///
+    /// The *behaviour* of each knob is asserted where it belongs —
+    /// `StoreFlushTests` for the flush cadence, `StoreSnapshotRefreshTests` for
+    /// the refresh floor — and both of those now construct through these
+    /// factories, so this test's job is only the shape: that a consumer can name
+    /// a cadence at all, and that naming one produces something other than the
+    /// default it was meant to replace.
+    @Test("both cadence policies are publicly constructible and reach the store")
+    func policiesAreConfigurable() throws {
+        let flush = DeltaFlushPolicy.flushing(every: .milliseconds(50), orAfterCharacters: 64)
+        let snapshots = SnapshotPolicy.refreshing(afterEachGeneration: false, orAfterEvents: 5_000)
+
+        #expect(flush != .default)
+        #expect(snapshots != .default)
+
+        _ = try ConversationStore(persistence: .inMemory, deltaFlush: flush, snapshots: snapshots)
+    }
+
     /// Guardrail 4 at the one place it is testable today. ADR-003 rule 1 says
     /// GRDB never appears in a thrown type; the failure a caller sees is
     /// `LedgerError`, and the underlying description rides along as prose the

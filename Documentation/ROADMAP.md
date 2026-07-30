@@ -1,6 +1,6 @@
 # LedgerKit v0.1 — Build Roadmap
 
-**Companion to:** [SPEC.md](./SPEC.md) — **rev 8 open** (2026-07-27, post-M4-audit amendments, Appendix F; ratifies at the next milestone boundary). Rev 7 ratified 2026-07-26 at the M4 boundary. (Rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
+**Companion to:** [SPEC.md](./SPEC.md) — **rev 8 ratified 2026-07-28** at the M5 boundary (Appendix F). Further amendments open **rev 9**, which ratifies at the M6 boundary. (Rev 7: M4 boundary, 2026-07-26; rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
 **Target:** tagged `0.1.0` before iOS 27 GA (~Sept 2026). Estimate from spec §12: **4–6 weeks part-time**, assuming the ⚠️ beta verifications hold.
 **Sequencing strategy:** *pure core first* — build and fully test everything platform-agnostic (§6) before touching the beta-coupled session seam (§7).
 
@@ -190,6 +190,19 @@ The concurrency boundary and the public write API (§6.5, §11). Still no FM —
 
 ### M6 — `GenerationDriver`: the session seam (⚠️ ALL beta risk)
 The one OS-coupled module (§7). Expect one verification evening per beta — but **a much shorter one than this roadmap was planned around**: OQ1–9 are all closed as of rev 7, every one by reading the SDK, and what is left here is four *behavioural* residues (table under Beta-verification, below). The API shapes this milestone consumes are known; what is unknown is how they act.
+
+**Build order, decision log (D30–D37) and phase gates: [M6-PLAN.md](./M6-PLAN.md)** (drafted 2026-07-28 at the M5 boundary; Phase 0 landed 2026-07-29).
+
+> **Phase 0 done 2026-07-29 — hygiene, the substrate answer, and the reading session; 335 tests green** (314 `LedgerKit` + 21 `Understudy`, warning-free). The M5 boundary audit's two store bugs are fixed *with the tests that would have caught them* — the delete-versus-reservation race, and the rehydration read that sat outside every `release` guard — plus rev 8's throw-channel docs, and `DeltaFlushPolicy`/`SnapshotPolicy` gained public construction (D32), so §7.4's and §9's "both configurable" promises are real rather than aspirational. Three mutations run, all caught.
+>
+> **The substrate question is settled, and better than this roadmap assumed: 27-gated tests *execute* on this machine.** The iOS 27.0 simulator runtime runs the whole suite —
+> ```bash
+> xcodebuild test -workspace LedgerKit.xcworkspace -scheme LedgerKit \
+>   -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0'
+> ```
+> — with the deployment target still 26, so one test target serves both the any-Mac tier and the 27-only tier, and the `.enabled(if:)` tier is **live rather than dormant**. **The floor stays 26** (M6-PLAN D31): a 27 floor would make the *entire* test binary unlaunchable on the macOS 26 host and force every consumer to 27. The `Package.swift` comment recommending a bump "at M6" was wrong and is corrected.
+>
+> **Also from the reading session, and it moves work earlier:** all nine `LanguageModelError` payload structs have public initializers, so §10.5's fixtures need no device — but the *current* family is 27-only while the **deprecated iOS 26 family is available at 26**, so the two families land in different test tiers, the opposite way round from intuition. That deprecated family also carries two cases §8's coverage table does not account for — `assetsUnavailable` and `decodingFailure` — which is a rev 9 item, because §8 states its totality as a *checkable* claim and two silent fall-throughs would repeat the defect rev 6 fixed for the four `unsupported*` cases.
 
 - **Conforms to `GenerationDriving`, the seam M5 defined** — if that protocol needs to move, it is a rev 9 conversation first, never a silent widening.
 - Takes `any LanguageModel`; per-conversation session cache (§7.8 cardinality).

@@ -1,14 +1,25 @@
 import Foundation
 
-/// Why a `ConversationStore` verb never started (SPEC §11, §7.2; M5-PLAN D22).
+/// Why a `ConversationStore` verb could not **record** what it was asked to
+/// (SPEC §11, §7.2; M5-PLAN D22).
 ///
 /// **This is one half of a two-channel contract, and the halves are disjoint by
 /// construction.** `try` guards *did it start*; the return value and the observed
-/// state answer *how did it end*. Every case below is a failure detected
-/// **before** the verb's first append, so a throw means the log is untouched —
-/// no rows, no consumed sequence numbers, no index update (§9's all-or-nothing
-/// batch). After the append there are no `LedgerError`s at all: failures are
-/// `Outcome.failed`, including zero-token ones like an auth rejection, because
+/// state answer *how did it end*.
+///
+/// Five of the six cases are detected **before** the verb's first append, so a
+/// throw means the log is untouched — no rows, no consumed sequence numbers, no
+/// index update (§9's all-or-nothing batch).
+/// ``persistenceFailure(description:)`` is the exception, and rev 8 says so
+/// explicitly: a backend failure while flushing deltas or recording a terminal
+/// happens *after* the start append, so this channel covers **"couldn't
+/// record"** and not merely the pre-start case. The older, narrower phrasing
+/// described what happened in practice and predated anything that implemented a
+/// terminal append; it is paraphrased rather than quoted here so a sweep for
+/// retired wording keeps finding only genuinely stale sites.
+///
+/// What never crosses this channel is a *generation* failure. Those are
+/// `Outcome.failed` — including zero-token ones like an auth rejection, because
 /// an error thrown into a `Task` nobody is switching over could never render
 /// §11's reauth bubble.
 ///
@@ -82,7 +93,16 @@ public enum LedgerError: Error, Sendable, Equatable {
     /// relaxation* rather than a migration, since the log already tolerates them.
     case generationInFlight(ConversationID)
 
-    /// The storage backend failed. Nothing was recorded.
+    /// The storage backend failed.
+    ///
+    /// **The one case that can arrive after a generation started** (rev 8, §11).
+    /// Before the first append nothing is recorded, which is the ordinary shape.
+    /// But a failure while flushing deltas or recording the terminal leaves the
+    /// start — and whatever text was already flushed — in the log, with
+    /// deliberately **no terminal**: the generation stays open and reduces to
+    /// `.interrupted`, which says *something went wrong* where a `.completed`
+    /// terminal missing its content would claim success. The recovery UX for
+    /// `.interrupted` already exists (G4), so this needs no new affordance.
     ///
     /// **The payload is prose, and that is the design** (ADR-003 rule 1): GRDB
     /// must never leak — not in a signature, not in a thrown type, not by

@@ -13,9 +13,12 @@ import Foundation
 ///
 /// Stated once here and restated on every verb that has one, because it is the
 /// single rule a consumer must internalize: **`try` guards *did it start*; the
-/// return value and the observed state answer *how did it end*.** A throw means
-/// the log is untouched — nothing started, nothing recorded (``LedgerError``).
-/// Once `generationStarted` is in the log, failures are `Outcome`s, and a
+/// return value and the observed state answer *how did it end*.** A throw is a
+/// failure to **record** (``LedgerError``): usually the verb never started and
+/// the log is untouched, and in the one post-start case — a backend failure while
+/// flushing or recording a terminal — the start persists with no terminal and
+/// reduces to `.interrupted` (rev 8's "couldn't record" clause). Once
+/// `generationStarted` is in the log, *generation* failures are `Outcome`s, and a
 /// cancelled generation *returns* `.cancelled` rather than throwing (§7.2,
 /// §11's documented deviation).
 ///
@@ -160,6 +163,15 @@ public actor ConversationStore {
     /// completion changes state in place and emits no path event, so the bubble
     /// stays wherever the user left it.
     private var live: [ConversationID: Reservation] = [:]
+    /// Verbs suspended until a `.reserved` slot resolves (M6-PLAN A1).
+    ///
+    /// Only ``deleteConversation(_:)`` waits today, and only because it is the
+    /// one verb that *overrides* a generation rather than respecting it. A
+    /// continuation rather than a yield-loop for two reasons: a spin would burn
+    /// the actor for the whole duration of an append it is waiting on, and it
+    /// would leave the wait unobservable, so a test could only *hope* it had
+    /// reached the window rather than know it.
+    private var startWaiters: [ConversationID: [CheckedContinuation<Void, Never>]] = [:]
 
     /// Opens (or creates) a store.
     ///
@@ -275,14 +287,28 @@ public actor ConversationStore {
     public func deleteConversation(_ conversation: ConversationID) async throws {
         _ = try await existingFold(of: conversation)
 
-        // §9's cancel-first sequencing, and the `await` is the whole of it. The
-        // cancel runs to its terminal through the normal path — the suspended
-        // verb returns `.cancelled`, not a persistence error — and only then
-        // does the DELETE commit. Actor isolation alone would *not* be enough:
-        // the actor yields at every await, so a generation still winding down
-        // would happily append `generationEnded` into a conversation this verb
-        // had already erased, leaving a genesis-less row and a stale index entry.
+        // §9's cancel-first sequencing, and the two awaits are the whole of it.
+        // The cancel runs to its terminal through the normal path — the
+        // suspended verb returns `.cancelled`, not a persistence error — and
+        // only then does the DELETE commit. Actor isolation alone would *not* be
+        // enough: the actor yields at every await, so a generation still winding
+        // down would happily append `generationEnded` into a conversation this
+        // verb had already erased, leaving a genesis-less row and a stale index
+        // entry.
+        //
+        // **Waiting only on `.running` was not enough either** (M6-PLAN A1, from
+        // the M5 boundary audit). D24's reservation window is precisely an
+        // interval in which a generation is claimed and its start append is
+        // *in flight* — invisible to a `.running` check, and holding a
+        // transaction this verb cannot see. Racing it produces one of the two
+        // artifacts this doc says cannot occur, depending on which commit lands
+        // first: rows written into an erased conversation, or a terminal
+        // appended after the DELETE. So the reserved case is waited out first,
+        // which converges it onto the running case — the starter confirms, the
+        // recorded early cancel fires, the terminal lands, and only then is
+        // there anything for the DELETE to erase.
         cancelGeneration(in: conversation)
+        await waitForStartToResolve(in: conversation)
         if case .running(_, let task) = live[conversation] {
             // Swallowed: whatever that generation's own verb reports is its
             // caller's business, not this one's.
@@ -398,17 +424,21 @@ public actor ConversationStore {
     /// more: auto-extend is a fold rule, not an event (§6.4). Suspends until the
     /// generation reaches a terminal and the terminal is **durable**.
     ///
-    /// Two channels (§7.2): this `throws` only when the generation never
-    /// started, and then the log is untouched — a losing single-flight racer
-    /// records nothing at all. Everything after the append is the returned
-    /// `Outcome`, including zero-token request-time failures (auth, instant
+    /// Two channels (§7.2): this `throws` when the generation could not be
+    /// **recorded** — almost always because it never started, and then the log is
+    /// untouched, so a losing single-flight racer records nothing at all. Every
+    /// *generation* failure after the start append is the returned `Outcome`
+    /// instead, including zero-token request-time failures (auth, instant
     /// guardrail), which land as `.failed(partial: "", …)`; an empty failed
     /// bubble showing *how to recover* is the feature.
     ///
     /// - Throws: ``LedgerError/unknownConversation(_:)``,
-    ///   ``LedgerError/generationInFlight(_:)``, a persistence failure, or
-    ///   `CancellationError` if the task is cancelled before the append lands
-    ///   (§7.2 — after it, cancellation *returns* `.cancelled`).
+    ///   ``LedgerError/generationInFlight(_:)``,
+    ///   ``LedgerError/persistenceFailure(description:)`` — which alone may land
+    ///   *after* the start, leaving an open generation that reduces to
+    ///   `.interrupted` (rev 8) — or `CancellationError` if the task is cancelled
+    ///   before the append lands (§7.2 — after it, cancellation *returns*
+    ///   `.cancelled`).
     public func send(
         _ text: String,
         in conversation: ConversationID,
@@ -446,8 +476,9 @@ public actor ConversationStore {
     /// "partial retained as its own branch" falls out of the model rather than
     /// being a feature.
     ///
-    /// Two channels (§7.2): `throws` only before the append; everything after is
-    /// the returned `Outcome`.
+    /// Two channels (§7.2): `throws` when the generation could not be recorded —
+    /// before the append in every case but a persistence failure; every
+    /// *generation* failure after it is the returned `Outcome`.
     ///
     /// - Throws: ``LedgerError/unknownConversation(_:)``,
     ///   ``LedgerError/unknownMessage(_:)``,
@@ -695,8 +726,43 @@ public actor ConversationStore {
     ) -> Bool {
         let cancelledEarly = if case .reserved(true) = live[conversation] { true } else { false }
         live[conversation] = .running(generation: generation, task: task)
+        resumeStartWaiters(in: conversation)
         return cancelledEarly
     }
+
+    /// Suspends until this conversation's slot is no longer merely *reserved*
+    /// (M6-PLAN A1). Returns immediately when nothing is claimed, or when the
+    /// generation is already running.
+    ///
+    /// **Bounded by the start append, which is why no timeout is needed:** a
+    /// reservation resolves when that append commits (``confirm(_:running:as:)``)
+    /// or fails (``release(_:)``), and both are the same one transaction the
+    /// caller would otherwise be racing. There is deliberately no cancellation
+    /// path — a caller cancelled here waits out the same bounded window, exactly
+    /// as it already does on the `.running` handle, and abandoning the wait would
+    /// re-open the race the wait exists to close.
+    private func waitForStartToResolve(in conversation: ConversationID) async {
+        guard case .reserved = live[conversation] else { return }
+        // No lost wakeup: the body runs synchronously on the actor before
+        // suspending, and only actor-isolated code resolves a reservation — so
+        // nothing can resolve it between the check above and the append below.
+        await withCheckedContinuation { continuation in
+            startWaiters[conversation, default: []].append(continuation)
+        }
+    }
+
+    private func resumeStartWaiters(in conversation: ConversationID) {
+        guard let waiting = startWaiters.removeValue(forKey: conversation) else { return }
+        for continuation in waiting { continuation.resume() }
+    }
+
+    /// Conversations where a verb is waiting out a claimed-but-unconfirmed start.
+    ///
+    /// Internal for the same reason ``liveGenerations`` is: it exists to be
+    /// *observed*. A test driving the reservation window needs to know the waiter
+    /// has arrived rather than hope it has — which is the parked-point discipline
+    /// (§10.4) applied to a wait instead of to a stream.
+    var conversationsAwaitingStart: Set<ConversationID> { Set(startWaiters.keys) }
 
     /// The generations currently in flight — **M7's `overlay_live` input**, and
     /// P2's third clause: the live set is always a subset of *open* (started,
@@ -717,6 +783,10 @@ public actor ConversationStore {
     /// finished.
     func release(_ conversation: ConversationID) {
         live[conversation] = nil
+        // The rollback half of A1's wait: a start that failed resolves its
+        // reservation too, and a waiter that only woke on *success* would hang
+        // on precisely the case where nothing was recorded.
+        resumeStartWaiters(in: conversation)
     }
 
     // MARK: - Generating
@@ -786,29 +856,20 @@ public actor ConversationStore {
         return try await run(generation, from: parent, in: conversation, using: driver)
     }
 
-    /// Consumes a driver's signals, persists them on the flush policy, and
-    /// records the one terminal (D25, §7.4).
+    /// Hands the generation to a task the store can reach, confirms the
+    /// reservation, and bridges cancellation into it (D24 step 3, §7.5).
     ///
-    /// **The loop is the store's, not the driver's.** §7.4 attributed delta
-    /// coalescing to "the driver", written before the seam existed; the store
-    /// owns every append, so the *cadence of appends* is necessarily its
-    /// business too. What the driver still owns is the thing §7.4 cared about —
-    /// producing deltas rather than snapshots, which is the diffing on the far
-    /// side of the seam.
-    ///
-    /// **Only deltas coalesce** (§7.4). A tool record forces the buffer out
-    /// first, or the log would claim the tool ran before text that preceded it;
-    /// and the terminal is always preceded by a flush, which is not a policy
-    /// choice — the unflushed tail is exactly what a crash costs, and losing it
-    /// at the very end would lose a *completed* generation's last words.
+    /// Deliberately thin: everything about *running* a generation is
+    /// ``drive(_:from:in:using:)``'s, including the rehydration read as of
+    /// M6-PLAN A2. What can only happen here is the pairing of a task handle with
+    /// the slot that owns it — the reservation cannot be confirmed before the
+    /// handle exists, and the handle must not outlive the confirmation.
     private func run(
         _ generation: GenerationID,
         from parent: MessageID,
         in conversation: ConversationID,
         using driver: some GenerationDriving
     ) async throws -> Outcome {
-        let request = try await rehydrationMaterial(upTo: parent, in: conversation)
-
         // **One task per generation, and it is unstructured on purpose.**
         // `cancelGeneration(in:)` is a *different* entry into this actor and
         // cannot cancel work it holds no handle to; `deleteConversation(_:)`
@@ -816,8 +877,13 @@ public actor ConversationStore {
         // DELETE (§9). Structured concurrency gives neither. What it does give
         // — cancellation reaching the verb's own caller — is restored below.
         let task = Task { [self] in
-            try await drive(generation, in: conversation, on: request, using: driver)
+            try await drive(generation, from: parent, in: conversation, using: driver)
         }
+        // **Nothing suspends between that line and this one, and that is
+        // load-bearing.** The task body is actor-isolated, so it cannot begin
+        // until this method yields — which means `drive` never observes an
+        // unconfirmed slot, and the reservation window closes here rather than
+        // spanning a read (M6-PLAN A2).
         if confirm(conversation, running: task, as: generation) {
             // A stop arrived while the slot was merely reserved (§7.2's window).
             task.cancel()
@@ -833,7 +899,8 @@ public actor ConversationStore {
         }
     }
 
-    /// The generation itself: consume, persist on cadence, record one terminal.
+    /// The generation itself: rehydrate, consume, persist on cadence, record one
+    /// terminal (D25, §7.4).
     ///
     /// **The loop is the store's, not the driver's.** §7.4 attributed delta
     /// coalescing to "the driver", written before the seam existed; the store
@@ -841,13 +908,42 @@ public actor ConversationStore {
     /// business too. What the driver still owns is the thing §7.4 cared about —
     /// producing deltas rather than snapshots, which is the diffing on the far
     /// side of the seam.
+    ///
+    /// **Only deltas coalesce** (§7.4). A tool record forces the buffer out
+    /// first, or the log would claim the tool ran before text that preceded it;
+    /// and the terminal is always preceded by a flush, which is not a policy
+    /// choice — the unflushed tail is exactly what a crash costs, and losing it
+    /// at the very end would lose a *completed* generation's last words.
     private func drive(
         _ generation: GenerationID,
+        from parent: MessageID,
         in conversation: ConversationID,
-        on request: GenerationRequest,
         using driver: some GenerationDriving
     ) async throws -> Outcome {
         defer { release(conversation) }
+
+        // **The rehydration read belongs inside this guard** (M6-PLAN A2, from
+        // the M5 boundary audit). It used to sit in `run`, between `generate`'s
+        // rollback and the `defer` above — covered by neither. It reads from the
+        // cache in the warm case and from disk in the cold one (a mid-flight
+        // `edit` racing this start lands D29's eviction), so it is a real
+        // suspension point with two real failures, and both were mishandled: a
+        // throw wedged single-flight forever, and a task-cancel escaped as a
+        // **post-append `CancellationError`**, which §7.2 says is impossible.
+        let request: GenerationRequest
+        do {
+            request = try await rehydrationMaterial(upTo: parent, in: conversation)
+        } catch is CancellationError {
+            // Past the start append, "how it ended" has exactly one channel
+            // (§7.2): a recorded terminal. Nothing streamed, so there is no
+            // partial to flush — and the wind-down runs outside this cancelled
+            // scope for the reason §7.5 spells out.
+            return try await windDown(generation, in: conversation, flushing: nil, as: .cancelled)
+        }
+        // A persistence failure falls through as `persistenceFailure` with the
+        // generation left **open** — rev 8's "couldn't record" clause, which is
+        // already the contract: `.interrupted` on reload says something went
+        // wrong, where a terminal claiming success would lie.
 
         let (signals, channel) = GenerationChannel.makeStream()
         let driving = Task { await Self.produce(request, from: driver, into: channel) }
@@ -889,14 +985,7 @@ public actor ConversationStore {
                 throw failure
             }
 
-            // §7.4: always flush before the terminal. Not a policy choice — the
-            // unflushed tail is exactly what a stop or a crash would otherwise
-            // cost.
-            if let pending = consumed.pending {
-                try await append(.deltaAppended(generation: generation, text: pending), in: conversation)
-            }
-            try await append(.generationEnded(generation: generation, outcome: outcome), in: conversation)
-            return outcome
+            return try await windDown(generation, in: conversation, flushing: consumed.pending, as: outcome)
         }
 
         return try await withTaskCancellationHandler {
@@ -906,6 +995,32 @@ public actor ConversationStore {
             // arrive, so the loop never runs, so nothing observes the stop.
             driving.cancel()
         }
+    }
+
+    /// The wind-down: §7.4's pre-terminal flush, then the one terminal.
+    ///
+    /// **Always outside the cancelled scope, whoever calls it** (§7.5, rev 8). A
+    /// cancellation-aware backend makes writes inside a cancelled task throw
+    /// instead of writing, so a stop performed here would erase its own
+    /// evidence — no terminal, generation left open, and the conversation reads
+    /// `.interrupted` for something the user explicitly did. The inner task is
+    /// redundant when the caller is already outside that scope and free when it
+    /// is not, which is the price of having **one** wind-down rather than two
+    /// that could drift: the flush-before-terminal rule (§7.4) is not a policy
+    /// choice, so it must not be a thing a second caller can forget.
+    private func windDown(
+        _ generation: GenerationID,
+        in conversation: ConversationID,
+        flushing pending: String?,
+        as outcome: Outcome
+    ) async throws -> Outcome {
+        try await Task { [self] in
+            if let pending {
+                try await append(.deltaAppended(generation: generation, text: pending), in: conversation)
+            }
+            try await append(.generationEnded(generation: generation, outcome: outcome), in: conversation)
+        }.value
+        return outcome
     }
 
     /// Runs the driver and closes the stream behind it.

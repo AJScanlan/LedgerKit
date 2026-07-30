@@ -1,6 +1,10 @@
 # M6 Implementation Plan — `GenerationDriver`: the session seam
 
-**Status:** 🗒 **DRAFT — 2026-07-28**, opened at the M5 boundary. No phase has started.
+**Status:** 🚧 **IN PROGRESS** — drafted 2026-07-28 at the M5 boundary; **Phase 0
+landed 2026-07-29** (335 green: 314 `LedgerKit` + 21 `Understudy`, warning-free,
+and the 314 also green on the iOS 27 simulator). **Next: Phase 1** — the pure
+components. Three items are still awaiting gate sign-off; they are listed under
+Phase 0's *Gate state*, and none of them blocks Phase 1.
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M6 section) · [SPEC.md](./SPEC.md) §7 (all of it), §8, §10.4–10.5, §14 (the four residues) · [M4-PLAN.md](./M4-PLAN.md) §2 (the SDK fact table + its correction) · [M5-PLAN.md](./M5-PLAN.md) §7 (the six inherited handoffs)
 **Baseline:** M0–M5 done and audited, **331 tests green** (310 `LedgerKit` + 21 `Understudy`), SPEC **rev 8 ratified 2026-07-28**. The M5 boundary audit (2026-07-28) found two store bugs and four contract-surface issues, **all folded into Phase 0 below** — the store must enter M6 clean, because M6 is the milestone where a store regression has to unambiguously point at M6 (M5 handoff 6).
 **Spec work:** rev 9 opens with its first amendment and **ratifies at the M6 boundary**. The inventory is §6; SPEC edits require approval first, drafted scratch-first per the standing pattern.
@@ -99,6 +103,28 @@ Phase below acts on it.
 | `Understudy` deliberately does not depend on LedgerKit; floor 26; only the conformance is `@available(macOS 27)` | `Understudy/Package.swift` | The import direction is LedgerKitTests → Understudy, necessarily a **path** dependency (D37) — with a consumability consequence flagged to M9 |
 | Store determinism under injection: `ScriptedIdentifiers`, `SteppingClock`, `StoreUnderTest.continuing(_:)`, `RecordingStore` (observe writes, not read-backs), `Latch`, `healthyLogProblems` | `StoreFixtures.swift`; M5-PLAN | Phase 3's end-to-end fixtures reuse all of it. Assertions about what was written must observe the write — the wire formatter repairs a bad stamp on the way back out |
 | `Log.isStoreReplayable` states which fixtures round-trip through the store | `ReducerFixtures.swift` | The Phase 3 corpus fixture must qualify (gapless, single-stream, no byte-built rows) or state why it is excluded |
+
+---
+
+## 2a. What Phase 0's reading session found (2026-07-29)
+
+Read from the installed 27 SDK interface (path in CLAUDE.md, 3,583 lines) —
+**extending** M4-PLAN §2's thirteen rows, not repeating them. Every row below is
+here because a later phase acts on it. Re-read the citation before depending on
+it; M4-PLAN §2 exists because one row was once wrong.
+
+| Question | Answer | Consequence |
+|---|---|---|
+| **Are Apple's errors constructible for §10.5 fixtures?** (D35's open item) | **Yes, all nine.** Every `LanguageModelError` payload struct has a public init — `ContextSizeExceeded(contextSize:tokenCount:debugDescription:metadata:)`, `RateLimited(resetDate:debugDescription:metadata:)`, `Timeout(debugDescription:metadata:)`, and so on. `LanguageModelSession.Error` is two bare cases. The deprecated family needs only `GenerationError.Context(debugDescription:)` | **Constructibility was never the binding constraint — availability is**, which is the opposite of what D35 anticipated. `LanguageModelError` is `@available(27)`, so its fixtures are tier 2; the **deprecated `LanguageModelSession.GenerationError` family is `@available(macOS 26)`**, so *those* fixtures are tier 1 and run in every `swift test`. The 26-family normalizer can also live outside an availability gate |
+| **What does the deprecated family actually contain?** | `exceededContextWindowSize`, `assetsUnavailable`, `guardrailViolation`, `unsupportedGuide`, `unsupportedLanguageOrLocale`, `decodingFailure`, `rateLimited`, `concurrentRequests` (the only case marked deprecated), `refusal` — each carrying a `Context { debugDescription }` | ⚠️ **Unplanned finding: two cases have no §8 analogue.** `assetsUnavailable` plausibly maps to `modelUnavailable(.modelNotReady)`; `decodingFailure` is guided-generation-only, which v0.1 never requests (N8). Phase 1 must *decide and record* both rather than let them fall through `unrecognized` by accident — the mistake rev 6 caught §8 making with the four `unsupported*` cases. Rev 9 inventory item 8 |
+| **`isResponding`'s surface** | `final public var isResponding: Bool { get }` — synchronous, non-async, on the session | §7.2's gate is a plain `if`, no await, no isolation dance |
+| **Is `LanguageModelSession` isolated?** | A `final public class`, `@unchecked Sendable`, `nonisolated Observable`. Not an actor, not `@MainActor` | Nothing forces D33's hand: the actor is a choice about owning mutable state, not a requirement of the session. Also means the session offers **no** concurrency protection of its own — `isResponding` plus store single-flight is the whole defence |
+| **The streaming call** | `streamResponse(to: Prompt, options:) -> sending ResponseStream<String>` — **neither `async` nor `throws`**; 27 adds overloads taking `contextOptions:` and `metadata:`. `ResponseStream` is an `AsyncSequence` of `Snapshot`, with `collect()` for the non-streaming shape | Phase 2's loop puts the `do/catch` around the `for try await`, **not** around the call. A provider failure therefore arrives mid-iteration, which is exactly where the partial already exists — so §7.2's zero-token case is the *first* iteration throwing, not a separate path |
+| **`Snapshot`'s shape** | `{ content: Content.PartiallyGenerated, rawContent, transcriptEntries: ArraySlice<Transcript.Entry> (27), usage: Usage (27) }` | Confirms rev 7. For `Content == String`, `content` is the flat fallback and `transcriptEntries` the segment-aware path |
+| **What identifies a segment?** (D34's premise) | `Transcript.Segment` is `Identifiable` with `ID == String`; `TextSegment { id: String, content: String }` | **D34's `(segmentID: String, text: String)` pair *is* a text segment**, so extraction is one `map` and the differ owes nothing to Foundation Models. The design was proposed on a guess; the interface confirms it |
+| **Rehydration entry construction** | `Transcript(entries: some Sequence<Entry>)`; `Instructions(id:segments:toolDefinitions:)`; `Prompt(id:metadata:segments:options:responseFormat:contextOptions:)`; `Response(id:metadata:segments:)` — all public | The three entries §7.1 needs are constructible. No API risk left in the ledger→transcript direction |
+| **Usage construction** | `Usage(input:output:metadata:)`, `Usage.Input(totalTokenCount:cachedTokenCount:)`, `Usage.Output(totalTokenCount:reasoningTokenCount:)` — all public; plus a computed `Usage.totalTokenCount` | §7.7's 1:1 mapping onto `TokenUsage` is **fixture-testable without a device**, so only the *inclusivity* residue needs hardware |
+| **`Refusal`'s asymmetry** | Stores `{ debugDescription, metadata }` but its init takes `explanation:`, and `explanation` is a separate `async throws Response<String>` | Consistent with rev 7's reading: the explanation is generated on demand, not stored. Nothing to project (§8) |
 
 ---
 
@@ -271,7 +297,8 @@ closes the milestone and ratifies rev 9.
 
 ### Phase 0 — Hygiene, the substrate answer, and the reading session
 
-**Status:** ☐ not started
+**Status:** ☑ **landed 2026-07-29** — 314 `LedgerKit` + 21 `Understudy` green,
+both warning-free. Awaiting the review gate below.
 
 **Goal:** the M5 audit's findings are fixed with tests; the two questions that
 shape every later phase (execution substrate; Apple-error constructibility) are
@@ -279,7 +306,7 @@ answered; no Foundation Models code yet.
 
 **Store fixes (from the boundary audit):**
 
-- [ ] **A1 — delete waits for the reservation to resolve.**
+- [x] **A1 — delete waits for the reservation to resolve.**
       `deleteConversation` currently waits only on `.running`; a `.reserved`
       slot lets the DELETE race the in-flight start append (either ordering
       leaves genesis-less rows or a terminal appended into an erased
@@ -296,7 +323,25 @@ answered; no Foundation Models code yet.
       are **no row outlives the DELETE, no genesis-less row ever exists, the
       starter returns `.cancelled`, and the slot is released**. Mutation: revert
       to the `.running`-only wait — the new test must catch it.
-- [ ] **A2 — close the rehydration gap.** The `rehydrationMaterial` read in
+      **Landed as specified.** Mechanism: `startWaiters` (per-conversation
+      continuations) resolved by `confirm` *and* `release`, so a rolled-back start
+      wakes its waiters too; `waitForStartToResolve(in:)` sits between
+      `cancelGeneration` and the existing `.running` wait. Chosen over a
+      yield-loop because a spin would burn the actor for the duration of the very
+      append it is waiting on, *and* would leave the wait unobservable — the test
+      must know the delete has reached the window rather than hope so, so
+      `conversationsAwaitingStart` is exposed internally beside
+      `liveGenerations`. Test:
+      `StoreDeletionTests.deleteWaitsOutTheReservationWindow`. Mutation Ⓐ (drop
+      the wait) **caught**, as a 60 s time-limit failure — and the pre-existing
+      `deleteCancelsFirst` still passed under it, which is the proof that window
+      really was uncovered.
+      ⚠️ **Found while doing it:** a rendezvous spun on bare `Task.yield()`
+      cannot be interrupted, so `.timeLimit` never fires and a broken subject
+      wedges the whole run instead of failing one test (the first Ⓐ run had to be
+      killed by hand). The harness helper `spin(until:)` checks cancellation for
+      exactly that reason, and any future polling loop must too.
+- [x] **A2 — close the rehydration gap.** The `rehydrationMaterial` read in
       `run` sits between `generate`'s rollback and `drive`'s
       `defer { release }`: a throw there wedges single-flight forever, and a
       task-cancel during it (reachable when a mid-flight `edit` racing the
@@ -313,7 +358,25 @@ answered; no Foundation Models code yet.
       the commit, shrinking D24's window to the append alone. Tests: both
       throw paths, each asserting the slot is released; mutation: restore the
       read to its old position — the wedge test must catch it.
-- [ ] **B1 — rewrite the throw-channel docs to rev 8's contract.** Four sites:
+      **Landed as proposed.** The read now sits under `drive`'s
+      `defer { release }`, and `drive` takes `from parent:` instead of a
+      pre-built request. The two dispositions differ and both are exercised:
+      `catch is CancellationError` routes to the wind-down, everything else
+      propagates. The wind-down itself is now **one** helper,
+      `windDown(_:in:flushing:as:)`, shared with the ordinary terminal path — two
+      copies of "flush, then terminal" is exactly how §7.4's non-optional
+      pre-terminal flush would get forgotten on the second path. Tests:
+      `StoreRehydrationGapTests` (both throw paths, both asserting the slot frees);
+      the *only* way to reach a cold read at that moment is to inject D29's
+      eviction, since a warm cache reads nothing — racing a real `edit` would
+      test the scheduler instead. New double: `ReadHostileStore` (gated `events`
+      failures). Mutations: Ⓑ (release guard installed after the read) caught by
+      **both** tests, reporting `generationInFlight` — the wedge, named; Ⓒ (drop
+      the cancellation conversion) caught with `Caught error: CancellationError()`,
+      **which is the evidence GRDB really does throw from a read inside a
+      cancelled task** — without it the new branch would have been unreachable
+      decoration rather than a fix.
+- [x] **B1 — rewrite the throw-channel docs to rev 8's contract.** Four sites:
       `LedgerError`'s type doc ("a throw means the log is untouched" — only
       true pre-append), `persistenceFailure`'s "Nothing was recorded",
       `ConversationStore`'s headline doc, and `send`/`respond`'s `- Throws:`
@@ -323,37 +386,86 @@ answered; no Foundation Models code yet.
       **Verification: grep `Sources/` for the retired phrasing** ("never
       started", "log is untouched", "Nothing was recorded") — the mechanism the
       CLAUDE.md sweep rule now names.
-- [ ] **D32 — public policy construction** (shape decided at this gate; doc
+      **Done; all four rewritten.** The grep found **nine** hits and only four
+      were stale — the other five are true statements about other subjects
+      (`append`'s all-or-nothing *batch*; a **generation** that never started, in
+      `QuarantineReason`; a failing-store test's own log-untouched assertion). So
+      the mechanism finds *candidates*; judgement closes them, and the sweep rule
+      should be read that way. One refinement worth keeping: the corrections
+      **paraphrase** the retired wording instead of quoting it, because a
+      correction quoting the sentence it replaces would make every future sweep
+      report the very site already fixed.
+- [x] **D32 — public policy construction** (shape decided at this gate; doc
       comments carry the disk-vs-display cadence positioning; the two
       `ConversationStore.init` parameters stop being decorative).
-- [ ] **D31 — fix the `Package.swift` comment** (floor stays 26; `Session/` is
+      **Landed as named factories, not public memberwise inits** —
+      `DeltaFlushPolicy.flushing(every:orAfterCharacters:)` and
+      `SnapshotPolicy.refreshing(afterEachGeneration:orAfterEvents:)`, inits
+      staying internal. The deciding argument is that the phrasing carries the
+      **or** semantics: `init(interval:characterCount:)` leaves a reader guessing
+      whether both bounds must be met, where "every 100 ms or after 128
+      characters" cannot be misread. `afterEachGeneration: false` covers D32's
+      floor-only shape (what a bulk importer wants) without a separate factory.
+      The three test sites that vary these now construct through the public
+      spelling, so the *behavioural* suites cover it and `APISketchTests`
+      only has to assert the shape.
+- [x] **D31 — fix the `Package.swift` comment** (floor stays 26; `Session/` is
       gated; bumping would strand the suite on this machine).
+      Done, and it now also records the simulator invocation, since that is the
+      thing a reader tempted by a floor bump actually needs.
 
-**Staleness batch (audit finding C — mechanical):**
+**Staleness batch (audit finding C — mechanical): all done.**
 
-- [ ] ROADMAP header line: rev 8 is **ratified** (2026-07-28); amendments open
+- [x] ROADMAP header line: rev 8 is **ratified** (2026-07-28); amendments open
       rev 9. (The M5 section already says so; the header disagrees.)
-- [ ] `Store/Persistence.swift`: "Nothing here is wired until M4" (it was, two
+- [x] `Store/Persistence.swift`: "Nothing here is wired until M4" (it was, two
       milestones ago); "Maps to … at M4"; the `.sqlite(at:)` doc justifying
-      itself against a §11 sketch that rev 8 already fixed.
-- [ ] `Store/Policies.swift`: the two "Phase 3's review gate" forward
-      references — resolved by D32 landing.
-- [ ] ADR-001 R-5: "The store's stamping site lands at M5" → landed.
-- [ ] ADR-003's dangling "revisit at M5" (file protection): roll forward
+      itself against a §11 sketch that rev 8 already fixed. All three replaced
+      with what is now true (the one conformance, the queue/pool split, and rev
+      8's agreement on the label).
+- [x] `Store/Policies.swift`: the two "Phase 3's review gate" forward
+      references — resolved by D32 landing. The file header now argues the
+      *decision* instead of deferring it, and the two internal-init rationales
+      were corrected too: they claimed the inits existed for tests, which stopped
+      being true the moment the tests moved to the public factories.
+- [x] ADR-001 R-5: "The store's stamping site lands at M5" → landed. Now names
+      `ConversationStore.mint(_:in:)` and restates why `append` asserts rather
+      than repairs.
+- [x] ADR-003's dangling "revisit at M5" (file protection): roll forward
       explicitly to M9 hardening with one sentence, so the deferral is a
-      record rather than a memory.
-- [ ] SPEC §7.7's `TokenUsage` cross-reference nit → **not** edited now; it is
-      §6 inventory item 5 (SPEC edits open rev 9 and need approval).
+      record rather than a memory. Recorded *with the reason M5 changed nothing*:
+      both gaps are properties of where the app put the file, not of who opens
+      it, so owning creation end-to-end did not touch them.
+- [x] SPEC §7.7's `TokenUsage` cross-reference nit → **not** edited now; it is
+      §6 inventory item 5 (SPEC edits open rev 9 and need approval). Confirmed
+      still deferred; SPEC.md is untouched by this phase.
 
-**The two questions (answers recorded in §2's table):**
+**The two questions — both answered; see §2a below for the findings.**
 
-- [ ] **Substrate spike:** can the iOS 27 simulator runtime execute the
+- [x] **Substrate spike:** can the iOS 27 simulator runtime execute the
       `.enabled(if:)`-gated tests on this macOS 26 host — e.g. `xcodebuild
       test` against an iOS 27 simulator destination, through the workspace or
       per-package? Record the exact working invocation, or the failure, in this
       plan. This decides whether tier 2 is *live* or *dormant* for the rest of
       M6.
-- [ ] **Reading session** (extend M4-PLAN §2's table; re-read citations before
+      ### ✅ **TIER 2 IS LIVE.** All 310 tests ran on the iOS 27.0 simulator
+      (`** TEST SUCCEEDED **`, 1.7 s) via:
+      ```bash
+      xcodebuild test -workspace LedgerKit.xcworkspace -scheme LedgerKit \
+        -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0'
+      ```
+      The runtime `iOS 27.0 (24A5390f)` is installed; the auto-generated package
+      scheme builds the test target with `-sdk iPhoneSimulator27.0.sdk -target
+      arm64-apple-ios26.0-simulator`. **The mechanism is why D31 and D36
+      reinforce each other rather than trade off:** the *deployment target* stays
+      26, so the same sources still launch on the macOS 26 host, while the
+      *runtime* is 27, so `#available(iOS 27, *)` succeeds and gated bodies
+      execute. One test target serves both tiers, and no gate in Phases 2–3 has
+      to be recorded dormant. Invocation duplicated into `LedgerKit/Package.swift`
+      beside the floor comment, where someone tempted to bump the floor will see
+      it. (`xcodebuild -list` prints "Supported platforms … is empty" — noise from
+      the generated scheme, not a failure; ignore it.)
+- [x] **Reading session** (extend M4-PLAN §2's table; re-read citations before
       depending on them): Apple error **constructibility** for §10.5 fixtures
       (`LanguageModelError` cases and payload structs; the deprecated 26
       enum); `LanguageModelSession` streaming call signatures and options;
@@ -362,11 +474,22 @@ answered; no Foundation Models code yet.
       the tool/reasoning entries; confirm the three M6 actually needs);
       `Sendable`/isolation annotations on session and model types (drives
       D33's actor shape); `LanguageModelCapabilities` interaction if any.
+      **Done — findings in §2a.** Every question answered by reading, none by
+      running, which is now three milestones of the same lesson.
 
 **Review gate:** both suites green with the new tests (count recorded in §10);
 mutations run and caught; D31/D32 signed off with final spellings; the
 substrate answer and reading-session findings written into §2; no retired
 phrasing greps back.
+
+**Gate state (for review, 2026-07-29):** ✅ 314 + 21 green, both packages
+warning-free, and the 314 also pass on the iOS 27 simulator. ✅ Three mutations
+run (Ⓐ, Ⓑ, Ⓒ), all caught, all reverted. ✅ Retired-phrase grep clean of stale
+sites (nine hits, five legitimately unrelated — see B1). ✅ Substrate and
+reading-session findings recorded in §2a. **Awaiting sign-off on:** D32's final
+spelling (named factories — the two-line argument is under D32 above); D33–D37
+promotion from Proposed to Accepted, all five now with evidence rather than
+expectation; and the two rev 9 inventory additions (items 8–9).
 
 ---
 
@@ -569,6 +692,23 @@ Extend as phases surface more; the M4/M5 pattern.
    section it changes (§7.2, §7.3, §7.7, N3).
 7. Anything Phases 2–4 surface that changes a §7 sentence — logged here as
    discovered.
+8. **§8 — the deprecated family's two unaccounted cases** (Phase 0's reading
+   session; §2a). `LanguageModelSession.GenerationError` carries
+   `assetsUnavailable` and `decodingFailure`, and §8's coverage table accounts
+   for neither. §8 claims *totality* over Apple's taxonomy and now states that
+   claim as a checkable table, so two silent fall-throughs to `unrecognized`
+   would repeat exactly the defect rev 6 fixed for the four `unsupported*`
+   cases. Proposed: `assetsUnavailable → modelUnavailable(.modelNotReady)`
+   (same condition `systemNotReady` already normalizes to), and
+   `decodingFailure → unrecognized`, **with the reason recorded** — it is
+   guided-generation-only, which N8 puts outside v0.1, so the loud floor is the
+   honest landing rather than an oversight. Phase 1 decides; the fixtures are
+   tier 1 either way, since that family is available at 26.
+9. **§7.2 — the throw/return boundary covers store-side *reads*, not just
+   appends** (audit A2's fix, generalized). The straddle is currently written in
+   terms of the start append; Phase 0 made a cancellation during the *rehydration
+   read* return `.cancelled` with a recorded terminal. Overlaps item 2 and should
+   probably land as one sentence with it.
 
 ---
 
@@ -607,10 +747,10 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 
 | Obligation | Suite / evidence | Status |
 |---|---|---|
-| A1: delete during the reservation window | parked-append delete test + mutation | ☐ |
-| A2: rehydration gap (wedge + post-append cancel) | both throw-path tests + mutation | ☐ |
-| B1: throw-channel docs match rev 8 | retired-phrase grep clean | ☐ |
-| D32: policy knobs publicly constructible | API + doc review; init params no longer decorative | ☐ |
+| A1: delete during the reservation window | `StoreDeletionTests.deleteWaitsOutTheReservationWindow` + mutation Ⓐ (caught as a time-limit failure) | ☑ |
+| A2: rehydration gap (wedge + post-append cancel) | `StoreRehydrationGapTests`, both throw paths + mutations Ⓑ and Ⓒ | ☑ |
+| B1: throw-channel docs match rev 8 | four sites rewritten; grep clean of stale hits (five unrelated, triaged in Phase 0) | ☑ |
+| D32: policy knobs publicly constructible | `APISketchTests.policiesAreConfigurable` for shape; `StoreFlushTests` / `StoreSnapshotRefreshTests` now construct through the public factories, so behaviour is covered by the suites that already assert it | ☑ |
 | Differ: prefix property + non-prefix verdicts | tier-1 exhaustive suite | ☐ |
 | Normalization: §10.5 fixtures, both families, lift rules, busy-session exclusion | tier-1 (+ tier-2/3 per constructibility) | ☐ |
 | §7.3 round-trip: script ≡ recovered deltas | tier-2 property, corpus fixture | ☐ |
@@ -627,17 +767,18 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 
 | # | Decision | Status |
 |---|---|---|
-| D30 | M6 opens with the audit hygiene phase; every fix lands with its test | **Accepted** 2026-07-28 |
-| D31 | Floor stays 26; `Session/` availability-gated (Understudy's pattern); Package.swift comment corrected | **Accepted** 2026-07-28 |
-| D32 | `DeltaFlushPolicy`/`SnapshotPolicy` gain public construction; spelling at Phase 0 gate | **Accepted** 2026-07-28 (audit B2, approved) |
-| D33 | Driver is an actor; rebuild-per-generation first; reuse cache later-or-never behind a validity rule | Proposed — confirm at Phase 0 gate |
-| D34 | Differ is a pure component over `(segmentID, text)` pairs; driver extracts; fail-loud on non-prefix | Proposed — confirm at Phase 0 gate |
-| D35 | Normalization: per-family pure functions, both error families, §10.5 fixtures; Apple-error constructibility is a Phase 0 read | Proposed — confirm at Phase 0 gate |
-| D36 | Three test tiers; gates record live vs. dormant honestly; substrate spike at Phase 0 | Proposed — confirm at Phase 0 gate |
-| D37 | Understudy joins as a path dep, test target only; packaging flagged to M9 | Proposed — confirm at Phase 0 gate |
+| D30 | M6 opens with the audit hygiene phase; every fix lands with its test | **Accepted** 2026-07-28 · **discharged** 2026-07-29: A1/A2/B1/D32/D31 + staleness all landed, three mutations caught |
+| D31 | Floor stays 26; `Session/` availability-gated (Understudy's pattern); Package.swift comment corrected | **Accepted** 2026-07-28 · comment corrected 2026-07-29, and the substrate answer **strengthens** it: a 26 deployment target is what lets one test target serve both tiers |
+| D32 | `DeltaFlushPolicy`/`SnapshotPolicy` gain public construction; spelling at Phase 0 gate | **Accepted** 2026-07-28 (audit B2, approved) · **spelling landed** 2026-07-29 as named factories `.flushing(every:orAfterCharacters:)` / `.refreshing(afterEachGeneration:orAfterEvents:)`, inits internal. Awaiting gate sign-off |
+| D33 | Driver is an actor; rebuild-per-generation first; reuse cache later-or-never behind a validity rule | Proposed — confirm at Phase 0 gate · **evidence in:** the session is a `final class`, `@unchecked Sendable`, not an actor, so the actor shape is a free choice and the `nonisolated let model` the protocol wants is unobstructed |
+| D34 | Differ is a pure component over `(segmentID, text)` pairs; driver extracts; fail-loud on non-prefix | Proposed — confirm at Phase 0 gate · **evidence in:** `TextSegment { id: String, content: String }` *is* the pair, so the seam needs no invention |
+| D35 | Normalization: per-family pure functions, both error families, §10.5 fixtures; Apple-error constructibility is a Phase 0 read | Proposed — confirm at Phase 0 gate · **read done:** all nine constructible, so the open item closes — but the tiering flips from what D35 assumed (deprecated family = tier 1, current family = tier 2), and two deprecated cases need a §8 decision (§2a) |
+| D36 | Three test tiers; gates record live vs. dormant honestly; substrate spike at Phase 0 | Proposed — confirm at Phase 0 gate · **substrate is LIVE** (iOS 27 simulator, invocation in Phase 0). No gate in M6 should need the dormant wording; if one does, that is a finding |
+| D37 | Understudy joins as a path dep, test target only; packaging flagged to M9 | Proposed — confirm at Phase 0 gate · untouched by Phase 0; lands at Phase 3 |
 
 ## 10. Status log
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-07-29 | **Phase 0 landed** | 335 (314 + 21) | Audit fixes A1/A2/B1 + D32/D31 + the whole staleness batch. Three mutations (Ⓐ Ⓑ Ⓒ), all caught, all reverted. **Both questions answered: tier 2 is LIVE** (iOS 27 simulator — 314 tests also green there), and all nine Apple error payloads are constructible, though the *tiering* flips from D35's assumption. Two unplanned findings: the deprecated error family has two cases §8 does not account for (rev 9 item 8), and a `Task.yield()` spin defeats `.timeLimit`, so the harness's `spin(until:)` checks cancellation. Warning-free |
 | 2026-07-28 | Plan drafted | 331 (310 + 21) | Drafted at the M5 boundary from the boundary audit + M5-PLAN §7 handoffs + M4-PLAN §2 fact table. D30–D32 accepted (audit-approved); D33–D37 proposed for the Phase 0 gate. Rev 9 opens on its first amendment and ratifies at this milestone's close |
