@@ -43,6 +43,21 @@ let package = Package(
     // and the seam is what keeps the raw-sqlite3 fallback (§12 cut line) cheap.
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.9.0"),
+        // **Test target only — the library must never depend on this** (M6-PLAN
+        // D37). `Understudy` deliberately does not depend on LedgerKit, and this
+        // is the reverse direction: LedgerKit's driver suites need a
+        // deterministic `LanguageModel` to run a real `LanguageModelSession`
+        // against, and writing a second one here is the "internal imitation" M3's
+        // D11 retired.
+        //
+        // ⚠️ **A path dependency is local-only**, and that is priced rather than
+        // overlooked: it works in this repo and the workspace and would break any
+        // consumer resolving LedgerKit remotely — survivable only because the
+        // repo root has no `Package.swift`, so neither package is remotely
+        // consumable today anyway. M9 must dissolve this into whatever 0.1.0
+        // ships (a root manifest exposing both products, or split repos); the
+        // path dep is the forcing function.
+        .package(path: "../Understudy"),
     ],
     targets: [
         .target(
@@ -62,7 +77,10 @@ let package = Package(
         // keeps `frozen/` unwritable.
         .testTarget(
             name: "LedgerKitTests",
-            dependencies: ["LedgerKit"],
+            dependencies: [
+                "LedgerKit",
+                .product(name: "Understudy", package: "Understudy"),
+            ],
             resources: [.copy("Corpus"), .copy("Registry")]
         ),
     ],

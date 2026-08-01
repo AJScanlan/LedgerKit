@@ -721,50 +721,137 @@ empirical and Phase 4's.
 
 ### Phase 2 — The driver (tier 2 code: 27-gated, compile-verified always)
 
-**Status:** ☐ not started
+**Status:** ☑ **landed 2026-08-01** — 399 green (376 + 23) on both substrates,
+warning-free. **Five of the first ten driver tests failed on the simulator**, and
+that is the phase's real output: four were wrong *expectations* about how the
+framework behaves, and one was a genuine driver bug that would have recorded a
+user's stop as a success. All five are written up under "What running it taught"
+below; three are rev 9 items.
 
 **Goal:** `Session/GenerationDriver.swift` — the one production conformance.
 
-- [ ] The actor (D31 gating, D33 shape): holds the `any LanguageModel`, the
+- [x] The actor (D31 gating, D33 shape): holds the `any LanguageModel`, the
       app-supplied descriptor, the `ToolRecordingPolicy`; `nonisolated let
       model: ModelDescriptor`.
-- [ ] **Init spelling** (gate item): `init(model:descriptor:toolRecording:)`
+      `any LanguageModel` rather than a generic parameter, as §7.8 words it —
+      **implicit existential opening carries it into
+      `LanguageModelSession(model: some LanguageModel, …)`** with no generic
+      leaking into the driver's own type. (One place needs a closure rather than
+      a function reference: `tools.map { Transcript.ToolDefinition(tool: $0) }`,
+      because a generic initializer cannot be passed as a *value* with an
+      existential argument.)
+- [x] **Init spelling** (gate item): `init(model:descriptor:toolRecording:)`
       as the general form; decide whether a `SystemLanguageModel` convenience
       may default the descriptor (keeps §11's sketch line true) or the sketch
       moves instead — either way, §6 item 3 records it for rev 9.
-- [ ] **Rehydration** (§7.1): `GenerationRequest` → `Transcript` — instructions
+      **Both, and the convenience is not a hole in OQ8's reasoning.** Identity is
+      underivable from the *protocol* — that is what OQ8 established — but
+      `SystemLanguageModel` is a concrete type whose provider and model are
+      exactly what its name says, so the convenience defaults the descriptor to
+      `ModelDescriptor(provider: "apple", model: "system")` with **version nil**:
+      which build answered is genuinely unknown, and nil says "not reported"
+      where a guess would be a fabrication in an append-only log. §11's sketch
+      line stays true verbatim; every other provider still states its identity.
+      A `tools:` parameter joins both inits — without it §7.6 is unreachable
+      code, since the framework only invokes tools the session was given.
+- [x] **Rehydration** (§7.1): `GenerationRequest` → `Transcript` — instructions
       entry (exact), prompt/response entries from `context` in path order,
       **partials included** (what the user saw is what the model sees); tool
       entries and reasoning deliberately absent (N11, §7.1 fidelity classes).
       Fresh session per generation (D33) via the OQ1 initializer.
-- [ ] **The outcome boundary** (§7.2): `isResponding` gate before issuing
+- [x] **The outcome boundary** (§7.2): `isResponding` gate before issuing
       (busy ⇒ `.failed(.unrecognized("driver: session busy"))` — a driver
       defect, never a provider signal); every thrown provider error →
       normalize (D35) → `.failed(…)`; zero-token request-time failures land as
       `.failed` with an empty partial already recorded store-side; **the call
       itself never throws** (the protocol's grammar).
-- [ ] **The streaming loop** (§7.3): consume the response stream's cumulative
+- [x] **The streaming loop** (§7.3): consume the response stream's cumulative
       snapshots; extract differ input (segment-aware via `transcriptEntries`,
       flat-content fallback); `channel.emit(.delta(suffix))` per snapshot;
       non-prefix verdict ⇒ terminal
       `.failed(.unrecognized("driver: non-prefix snapshot"))`.
-- [ ] **Cancellation** (§7.5): task cancellation reaches the session call; the
+- [x] **Cancellation** (§7.5): task cancellation reaches the session call; the
       driver drains what it has, emits nothing after the fact, and **returns**
       `.cancelled`. No cleanup writes exist on this side of the seam to trip
       the M5 wall — assert the shape anyway with a parked cancellation test.
-- [ ] **Usage & identity capture** (§7.7–7.8): final usage → `TokenUsage`
+- [x] **Usage & identity capture** (§7.7–7.8): final usage → `TokenUsage`
       (1:1 table); `stopReason`/`resolvedModelID` from provider metadata
       conventions where present — **nil expected on-device, never an error**.
-- [ ] **Tool records** (§7.6): observe `toolCalls`/`toolOutput` transcript
+- [x] **Tool records** (§7.6): observe `toolCalls`/`toolOutput` transcript
       entries mid-stream, pair them, and emit one `ToolRecord` per completed
       invocation (name, status, duration; arguments/result only under
       `.full`). Record, don't orchestrate.
+
+**What running it taught — five findings, three for rev 9.**
+
+The tier-2 suite was written from the spec and then met the framework. What
+follows is what the framework actually does, established by a throwaway probe
+that printed real snapshot sequences (written, run, findings recorded, deleted).
+
+1. ⚠️⚠️ **`ResponseStream` ends *silently* when its consumer is cancelled — it
+   does not throw.** Zero snapshots, no error, the `for try await` simply stops.
+   The driver's first draft fell out of its loop and returned
+   **`.completed`** — recording a *successful* terminal for a generation the
+   user stopped. §7.5 exists to keep cancelled, failed and interrupted distinct
+   with three UI treatments; this collapsed the first into the happiest of the
+   three, silently, in the ledger. Fixed with a `Task.isCancelled` check after
+   the loop; the `catch is CancellationError` arm stays for a provider that
+   *does* throw, because landing there beats landing in the normalizing arm where
+   a stop would be recorded as a failure. **Rev 9: §7.5 should state this** — the
+   section says a driver "winds down and returns `.cancelled`" and never says
+   that detecting cancellation may be the driver's own job.
+   *No mutation needed: the test failed for real before the fix and passes after,
+   which is the observation a mutation only simulates.*
+2. ⚠️ **The framework coalesces fragments, so §7.3's round trip recovers the
+   *text*, not the fragment boundaries.** Three `.emit`s back-to-back arrive as
+   **one** snapshot and therefore one delta; pacing the script produces more.
+   §7.3 and M5 handoff 3 both say the ledger recovers "exactly the fragments the
+   script emitted", and that is not true and cannot be — snapshot cadence is the
+   framework's, and the flush policy reshapes boundaries again downstream (§7.4).
+   What survives exactly is the concatenation, which is the property the ledger
+   needs. **Rev 9: reword §7.3's round-trip claim** and M6's exit criterion with
+   it.
+3. **OQ4's residue, answered — and the answer is that a consumer never sees a
+   revision.** Across six probe runs at three pacings (none, 60 ms, 600 ms
+   between the append and the `replaceTextSegment`), **every snapshot already
+   carried the revised text**; the pre-revision state was never observable. So
+   the accumulated sequence stayed prefix-stable *even though the provider
+   revised*. Consequence: §7.3's fail-loud path stays **insurance**, exactly as
+   rev 7 called it — the differ's refusal is proved exhaustively at tier 1, but
+   the driver's wiring of that verdict to a terminal is **unreachable on this
+   substrate and therefore untested end-to-end**. Recorded rather than papered
+   over; only a real provider on device could change the answer, which makes it
+   Phase 4's to re-ask.
+4. **Usage is framework-*augmented*, not passed through.** A script reporting 8
+   output tokens arrives as 9 — the framework adds its own per-fragment
+   accounting on top of the provider's. The input side comes through verbatim.
+   The fixture asserts the input side exactly and the output side loosely,
+   because pinning the scripted number would pin the framework's internal
+   arithmetic. §7.7's mapping is unaffected; what changes is what a test may
+   claim.
+5. **Two smaller shape facts.** The transcript the *executor* receives includes
+   the prompt entry the framework appends, so the driver seeding history and the
+   framework adding the turn produces exactly **one** prompt entry — which is the
+   assertion that proves the driver did not put the parent in both places. And
+   `transcriptEntries` can be **ahead of** `content` within the same snapshot
+   (entries held the full text while `content` still held a prefix), which is one
+   more argument for §7.3's preference for segment-aware extraction.
 
 **Review gate:** both packages compile warning-free under strict concurrency
 with the floor unchanged; the conformance reviewed line-by-line against §7.9's
 ownership table (nothing store-owned crept driver-side); tier-2 tests written
 and gated; executed now if Phase 0's substrate is live, recorded dormant if
 not.
+
+**Gate state (for review, 2026-08-01):** ✅ 399 green on both substrates,
+warning-free, floor unchanged. ✅ Ten tier-2 tests, **executed** on the iOS 27
+simulator. ✅ §7.9's table holds: the driver writes nothing, owns no cadence, and
+returns exactly one terminal on every path. **Deviations to sign off:** D37's
+path dependency was **pulled forward from Phase 3**, because a driver cannot be
+tested without a model and a throwaway one here would be the internal imitation
+D11 retired; and §7.6's tool-record observation is implemented but **not yet
+exercised** — it needs a script that invokes a tool, which is Phase 3's
+end-to-end work.
 
 ---
 
@@ -933,7 +1020,23 @@ Extend as phases surface more; the M4/M5 pattern.
      because the fact it adds ("a tool failed") is recorded on §7.6's own channel
      and would otherwise be stated twice, in two vocabularies, with only one of
      them classifiable.
-9. **§7.2 — the throw/return boundary covers store-side *reads*, not just
+9. **§7.5 — cancellation may arrive as *silence*, not as an error** (Phase 2's
+   headline finding). `ResponseStream` ends without throwing when its consumer is
+   cancelled, so "the driver winds down and returns `.cancelled`" understates the
+   obligation: detecting the cancellation can be the driver's own job, and a
+   driver that only catches `CancellationError` records a stop as a **success**.
+   One sentence, in the section that already insists cancelled ≠ failed ≠
+   interrupted.
+10. **§7.3 — the round trip recovers text, not fragment boundaries** (Phase 2).
+   The claim that `deltaAppended` rows "recover exactly the fragments the script
+   emitted" is false against the real framework, which coalesces on its own
+   snapshot cadence — and the flush policy reshapes boundaries again anyway
+   (§7.4). The property worth stating is that the *concatenation* survives
+   exactly. M6's exit criterion needs the same edit.
+11. **§7.7 — reported usage is augmented, not passed through** (Phase 2). The
+   framework adds its own output-token accounting on top of a provider's. Worth
+   one clause, because it decides what an app may claim a number *means*.
+12. **§7.2 — the throw/return boundary covers store-side *reads*, not just
    appends** (audit A2's fix, generalized). The straddle is currently written in
    terms of the start append; Phase 0 made a cancellation during the *rehydration
    read* return `.cancelled` with a recorded terminal. Overlaps item 2 and should
@@ -983,6 +1086,11 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 | Differ: prefix property + non-prefix verdicts | `SnapshotDiffTests` — 19 tests; exactness swept over well-behaved *and* hostile pairs; 126-shape exhaustive property; mutations Ⓓ Ⓔ | ☑ |
 | Normalization: §10.5 fixtures, both families, lift rules, busy-session exclusion | `NormalizationTests` (tier 1: rules, `URLError`, the deprecated 26 family) + `AppleErrorNormalizationTests` (tier 2: all four 27 families, **executed** on the simulator). Both layers asserted per fixture; mutation Ⓖ | ☑ |
 | §7.3 round-trip: script ≡ recovered deltas | tier-2 property, corpus fixture | ☐ |
+| §7.1 rehydration: instructions exact, partials included, one prompt entry | `GenerationDriverTests` — asserted on the spy's recorded transcript, which is what the *model* saw | ☑ |
+| §7.2 outcome boundary: provider errors and zero-token failures are `Outcome`s | `GenerationDriverTests` | ☑ |
+| §7.5 cancellation returns `.cancelled` | `GenerationDriverTests` — **found the silent-stream bug**; partial retention asserted as a prefix property, since the framework may have vended nothing yet | ☑ |
+| §7.3 fail-loud on non-prefix | tier 1 exhaustively (`SnapshotDiffTests`); **end-to-end unreachable** — no scripted pacing makes a revision observable (Phase 2 finding 3) | ⚠️ partial |
+| §7.6 tool records | implemented; **not yet exercised** — needs a tool-invoking script (Phase 3) | ☐ |
 | §11 sketch runs against the real driver | 27-gated sketch test | ☐ |
 | Cancellation chaos through the real session | `Cue`-parked suite × both stop mechanisms | ☐ |
 | `isResponding` gate; "driver:" prefix convention | tier-1/2 per surface | ☐ |
@@ -1009,6 +1117,7 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-01 | **Phase 2 landed** | 399 (376 + 23) | `Session/GenerationDriver.swift` — the one production conformance — plus ten tier-2 tests **executed** on the iOS 27 simulator. **Five of the first ten failed**, which is the phase's real output: ⚠️⚠️ `ResponseStream` ends *silently* on cancellation, so the driver returned **`.completed` for a stopped generation** until a `Task.isCancelled` check landed; the framework **coalesces** fragments, so §7.3's round trip recovers text and not fragment boundaries; **a provider revision was never observable** across three pacings, leaving §7.3's fail-loud path as untestable insurance (OQ4's residue, answered); usage is **augmented** rather than passed through; and the executor's transcript carries the framework-appended prompt. Three are rev 9 items (9–11). D37's path dependency pulled forward from Phase 3 — a driver cannot be tested without a model |
 | 2026-08-01 | **Phase 1.5 landed** (unplanned) | 389 (366 + 23) | The SDK error-surface sweep, its tripwires, **CI to run them**, and `Understudy.Script.Step.revise` so §7.3's fail-loud path is reachable end-to-end at Phase 3. Opened because Phase 1 found two error families by accident. **Nine `Error` types exist where §8 names one**; the sweep found a sixth *reachable* family in minutes — `ToolCallError`, thrown when an app-supplied tool fails mid-generation. Now mechanised: an error-surface manifest with per-type dispositions, three pinned declarations (`Transcript.Entry`/`Segment`, the channel's actions), and the **SDK build string pinned** so a toolchain bump *fails* rather than relying on someone remembering the ROADMAP's verification evening. Mutations Ⓗ Ⓘ caught. Two findings: `GenerationID` collides with Apple's inside `@Generable` expansions (**a consumer-facing hazard**, M9 naming review), and the simulator tier caught `Process` — host-only API — in test code |
 | 2026-08-01 | **Phase 1 landed** | 380 (359 + 21) | The differ, both normalization files, `ToolRecordingPolicy`, and the import-boundary test. Four mutations (Ⓓ Ⓔ Ⓕ Ⓖ), all caught. **Tier 2 stopped being theoretical:** six 27-gated tests skip on the host and *execute* on the simulator, constructing real `LanguageModelError` / `SystemLanguageModel.Error` / PCC values. Three findings: a fifth non-prefix shape (`interiorGrowth` — a per-segment append that an append-only ledger cannot express), grapheme-vs-UTF-8 prefix comparison (a combining mark would have failed a well-behaved generation), and **two further Apple error families §8 does not mention**. One recorded deviation: this phase imports Foundation Models, which the phase title said it would not — see the Phase 1 gate |
 | 2026-07-29 | **Phase 0 landed** | 335 (314 + 21) | Audit fixes A1/A2/B1 + D32/D31 + the whole staleness batch. Three mutations (Ⓐ Ⓑ Ⓒ), all caught, all reverted. **Both questions answered: tier 2 is LIVE** (iOS 27 simulator — 314 tests also green there), and all nine Apple error payloads are constructible, though the *tiering* flips from D35's assumption. Two unplanned findings: the deprecated error family has two cases §8 does not account for (rev 9 item 8), and a `Task.yield()` spin defeats `.timeLimit`, so the harness's `spin(until:)` checks cancellation. Warning-free |

@@ -184,6 +184,17 @@ enum DriverDiagnostic: Equatable, Sendable {
     /// rather than the transcript being reconstructed.
     case nonPrefixSnapshot(SnapshotDelta.Reason)
 
+    /// The request's active path does not end in a user message, so there is
+    /// nothing to prompt with (§7.1).
+    ///
+    /// Unreachable from the v0.1 store — `respond` and `regenerate` both resolve
+    /// to a user parent (§6.5's eligibility), and `send` appends one — which is
+    /// exactly why it is a *driver* diagnostic: reaching it means the seam's
+    /// contract was broken, not that a provider misbehaved. The alternative,
+    /// prompting with an assistant message's text, is the continuation shape v0.2
+    /// researches and v0.1 declines to back into by accident (I7, N10).
+    case requestWithoutPrompt
+
     /// The `GenerationError` this condition becomes.
     var error: GenerationError {
         .unrecognized(description: "driver: \(detail)")
@@ -202,6 +213,8 @@ enum DriverDiagnostic: Equatable, Sendable {
             "transcript mutated while responding"
         case .nonPrefixSnapshot(let reason):
             "non-prefix snapshot (\(reason))"
+        case .requestWithoutPrompt:
+            "request has no user message to answer"
         }
     }
 }
