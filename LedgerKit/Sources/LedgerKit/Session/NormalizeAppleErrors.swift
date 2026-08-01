@@ -31,6 +31,28 @@ import FoundationModels
 /// §7.5 gives it its own terminal, and a driver that normalized a
 /// `CancellationError` would turn a user's stop into a failure.
 func normalize(_ error: any Error, since now: Date) -> GenerationError {
+    // **A tool call error is unwrapped first, because it is a wrapper.**
+    // `ToolCallError` says *where* a failure happened — inside an app-supplied
+    // tool — not *what* it was, and everything §8 classifies on lives in the
+    // error underneath. A tool whose network call timed out should give the user
+    // `transport(.timeout)` and a Retry, not an opaque tool-shaped mystery.
+    //
+    // Nothing is lost by unwrapping: "a tool failed" already has its own channel
+    // (§7.6's `toolInvocationRecorded`, carrying the tool's name and a `.failed`
+    // status). The terminal says how the *generation* ended; the tool record says
+    // what the tool did. Two facts, two events, neither standing in for the other.
+    //
+    // Bounded, because `ToolCallError` is publicly constructible and its payload
+    // is `any Error`: a nested chain is representable, and a class-based error
+    // could in principle make one cyclic. Four is generous for "a tool threw a
+    // tool error"; past that the floor catches it, loudly, which is I2's posture
+    // — never trap, never hang — applied on this side of the seam.
+    var error = error
+    for _ in 0..<4 {
+        guard let call = error as? LanguageModelSession.ToolCallError else { break }
+        error = call.underlyingError
+    }
+
     if #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) {
         switch error {
         case let error as LanguageModelError: return normalize(error, since: now)

@@ -207,6 +207,45 @@ struct NormalizationTests {
         #expect(mapping.recoverability(for: error) == .recoverableUpstream(.awaitModelDownload))
     }
 
+    // MARK: - Tool call errors (tier 1 — Tool and ToolCallError are both 26)
+
+    /// **A wrapper, so it is unwrapped.** `ToolCallError` says *where* a failure
+    /// happened, not what it was — and a tool whose network call timed out should
+    /// give the user a Retry, not an opaque tool-shaped mystery.
+    ///
+    /// Found by Phase 1.5's SDK sweep, not by any earlier read: it is the one
+    /// unhandled error type that plainly reaches a *running* generation, since
+    /// tools execute inside the session (§7.6).
+    @Test("a tool call error normalizes to the error underneath it")
+    func toolCallErrorUnwraps() {
+        let wrapped = LanguageModelSession.ToolCallError(tool: StubTool(), underlyingError: URLError(.timedOut))
+
+        #expect(normalize(wrapped, since: normalizationNow) == .transport(.timeout))
+        #expect(mapping.recoverability(for: normalize(wrapped, since: normalizationNow)) == .retryable(after: nil))
+    }
+
+    /// Nesting is bounded rather than trusted: the payload is `any Error` and the
+    /// initializer is public, so a chain is representable. Past the bound the
+    /// floor catches it — I2's "never trap, never hang" posture on this side of
+    /// the seam.
+    @Test("a nested chain of tool call errors terminates")
+    func nestedToolCallErrors() {
+        var error: any Error = URLError(.timedOut)
+        for _ in 0..<3 {
+            error = LanguageModelSession.ToolCallError(tool: StubTool(), underlyingError: error)
+        }
+        #expect(normalize(error, since: normalizationNow) == .transport(.timeout))
+
+        // Deeper than the bound: still terminates, still loud.
+        for _ in 0..<10 {
+            error = LanguageModelSession.ToolCallError(tool: StubTool(), underlyingError: error)
+        }
+        guard case .unrecognized = normalize(error, since: normalizationNow) else {
+            Issue.record("an over-deep chain must land on the floor rather than recurse")
+            return
+        }
+    }
+
     // MARK: - The floor
 
     @Test("an error from no known family lands loudly, without the driver prefix")

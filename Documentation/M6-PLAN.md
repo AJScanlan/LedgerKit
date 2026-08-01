@@ -606,6 +606,82 @@ import-boundary test rather than by a phase boundary, which is strictly stronger
 
 ---
 
+### Phase 1.5 — The SDK surface sweep, and a tripwire for beta churn
+
+**Status:** ☑ **landed 2026-08-01** — 387 green (366 + 21) on both substrates.
+Unplanned; opened because Phase 1 found two error families by accident and the
+question "how many more are there?" had no answer.
+
+**Why it exists, stated once because the diagnosis generalizes.** The gaps were
+not sloppiness. Rev 6 asked *"what are `LanguageModelError`'s cases?"* and
+answered it correctly — but §8 makes a claim one size larger ("a **total**
+normalization of Apple's built-in taxonomy"), and totality needs the answer to
+*"what can be thrown at a driver?"*. Nobody asked the larger question. **The gap
+is exactly the delta between the question asked and the claim it supported**,
+which is a repeatable mistake and therefore worth a mechanism rather than more
+care.
+
+- [x] **The sweep.** Every public `Error`-conforming type in the interface:
+      **nine**, of which §8's coverage table names one. Five are driver-reachable
+      and four are not.
+      ⚠️ **It found a sixth family within minutes: `LanguageModelSession.ToolCallError`**
+      — 26-available, carrying `tool` and `underlyingError`, and thrown when an
+      app-supplied tool fails *during* a generation. It is the one unhandled type
+      that plainly reaches running code (§7.6 is entirely about tools), and no
+      earlier read had any reason to look at it. Normalized by **unwrapping**:
+      the wrapper says *where* the failure happened, not what it was, and a tool
+      whose network call timed out should give the user a Retry rather than an
+      opaque tool-shaped mystery. Nothing is lost, because "a tool failed" already
+      has its own channel — §7.6's `toolInvocationRecorded` with a `.failed`
+      status. Unwrapping is **bounded**, since the payload is `any Error` and the
+      initializer is public.
+- [x] **The manifest** (`AppleErrorSurfaceTests.swift`): every error type with
+      LedgerKit's **disposition** — normalized, or unreachable *with the reason*.
+      Recording the exemptions is the point: "we decided this cannot arrive" and
+      "we never noticed this" look identical in a list that holds only what it
+      handles. Compared against the installed interface on every run, so **a beta
+      that adds an error type fails a test** instead of waiting to be found by
+      luck (mutation Ⓗ). Same move as ADR-001 D-3's registry: a rule nobody can
+      quietly break beats a rule somebody read once.
+- [x] **Pinned declarations** — the sweep's second question, *what does Phase 2
+      consume?* `Transcript.Entry` (6), `Transcript.Segment` (4), and the
+      channel's response actions (7). `Entry` earns its place by history: the M3
+      audit recorded it gaining a seventh case when `Segment` was what grew, and
+      that misreading survived into a fact table. The channel actions earn theirs
+      because `replaceTextSegment` appearing there is what withdrew §7.3's prefix
+      guarantee at rev 7 — a new action is the same class of event (mutation Ⓘ).
+- [x] **The SDK build is pinned** (`26A5388f`). The ROADMAP promises "one
+      verification evening per beta", which is a discipline, and disciplines get
+      skipped in busy weeks. Now the *toolchain moving* is the failing condition,
+      so the evening is scheduled by CI rather than by memory. The fix is one line
+      **after** re-running the checks — trivial edit, non-trivial re-verification,
+      deliberately bundled so the second cannot be skipped while the first is done.
+
+**Two findings worth carrying:**
+
+1. ⚠️ **`GenerationID` collides with `FoundationModels.GenerationID`, and it
+   lands on *consumers*.** `@Generable` expands to code naming `GenerationID`
+   unqualified, so any file importing both LedgerKit and FoundationModels fails
+   to compile with an error pointing into an expansion the author never wrote.
+   `@Generable` is the ordinary way to declare tool arguments, so this is a real
+   collision, not a test artifact. Workaround is to keep `@Generable` types in a
+   file that does not import LedgerKit (which is what `ToolStub.swift` does, and
+   says). **Recorded for M9's naming review** — renaming a core public identifier
+   (ADR-002) is not a decision to take in passing.
+2. **The simulator tier caught host-only API in *test* code.** `Process` does not
+   exist on iOS, so `AppleErrorSurfaceTests` failed to build there — found by the
+   substrate run, not by review. Tier 2 is not only where 27-gated tests execute;
+   it is the only place this class of mistake fails at all.
+
+**Review gate:** ✅ both substrates green; four mechanisms in place (error
+surface, consumed declarations, SDK build, and Phase 1's import boundary); three
+mutations (Ⓗ Ⓘ, plus Ⓕ from Phase 1) caught. **The honest limit, stated so it is
+not mistaken for coverage:** all of this sees *shape*, never *behaviour*. Thrown
+versus trapped, whether real providers revise segments — §14's residues remain
+empirical and Phase 4's.
+
+---
+
 ### Phase 2 — The driver (tier 2 code: 27-gated, compile-verified always)
 
 **Status:** ☐ not started
@@ -802,6 +878,13 @@ Extend as phases surface more; the M4/M5 pattern.
      nil-status transients, that's a mapping override keyed on `code`" — so the
      honest landing is `terminal` with a stable code rather than a 503 the
      provider never sent.
+   - **`LanguageModelSession.ToolCallError`** (26, found by Phase 1.5's sweep) →
+     **unwrapped to its `underlyingError`**, which is the only family member that
+     is a *wrapper* rather than a condition. §8 has no rule for wrappers; the
+     rev 9 text should say that a wrapper is transparent to normalization,
+     because the fact it adds ("a tool failed") is recorded on §7.6's own channel
+     and would otherwise be stated twice, in two vocabularies, with only one of
+     them classifiable.
 9. **§7.2 — the throw/return boundary covers store-side *reads*, not just
    appends** (audit A2's fix, generalized). The straddle is currently written in
    terms of the start append; Phase 0 made a cancellation during the *rehydration
@@ -868,16 +951,17 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 | D30 | M6 opens with the audit hygiene phase; every fix lands with its test | **Accepted** 2026-07-28 · **discharged** 2026-07-29: A1/A2/B1/D32/D31 + staleness all landed, three mutations caught |
 | D31 | Floor stays 26; `Session/` availability-gated (Understudy's pattern); Package.swift comment corrected | **Accepted** 2026-07-28 · comment corrected 2026-07-29, and the substrate answer **strengthens** it: a 26 deployment target is what lets one test target serve both tiers |
 | D32 | `DeltaFlushPolicy`/`SnapshotPolicy` gain public construction; spelling at Phase 0 gate | **Accepted** 2026-07-28 (audit B2, approved) · **spelling landed** 2026-07-29 as named factories `.flushing(every:orAfterCharacters:)` / `.refreshing(afterEachGeneration:orAfterEvents:)`, inits internal. Awaiting gate sign-off |
-| D33 | Driver is an actor; rebuild-per-generation first; reuse cache later-or-never behind a validity rule | Proposed — confirm at Phase 0 gate · **evidence in:** the session is a `final class`, `@unchecked Sendable`, not an actor, so the actor shape is a free choice and the `nonisolated let model` the protocol wants is unobstructed |
-| D34 | Differ is a pure component over `(segmentID, text)` pairs; driver extracts; fail-loud on non-prefix | Proposed — confirm at Phase 0 gate · **evidence in:** `TextSegment { id: String, content: String }` *is* the pair, so the seam needs no invention |
-| D35 | Normalization: per-family pure functions, both error families, §10.5 fixtures; Apple-error constructibility is a Phase 0 read | Proposed — confirm at Phase 0 gate · **read done:** all nine constructible, so the open item closes — but the tiering flips from what D35 assumed (deprecated family = tier 1, current family = tier 2), and two deprecated cases need a §8 decision (§2a) |
-| D36 | Three test tiers; gates record live vs. dormant honestly; substrate spike at Phase 0 | Proposed — confirm at Phase 0 gate · **substrate is LIVE** (iOS 27 simulator, invocation in Phase 0). No gate in M6 should need the dormant wording; if one does, that is a finding |
-| D37 | Understudy joins as a path dep, test target only; packaging flagged to M9 | Proposed — confirm at Phase 0 gate · untouched by Phase 0; lands at Phase 3 |
+| D33 | Driver is an actor; rebuild-per-generation first; reuse cache later-or-never behind a validity rule | **Accepted** 2026-08-01 · evidence: the session is a `final class`, `@unchecked Sendable`, not an actor, so the actor shape is a free choice and the `nonisolated let model` the protocol wants is unobstructed |
+| D34 | Differ is a pure component over `(segmentID, text)` pairs; driver extracts; fail-loud on non-prefix | **Accepted** 2026-08-01 · evidence: `TextSegment { id: String, content: String }` *is* the pair, so the seam needs no invention |
+| D35 | Normalization: per-family pure functions, both error families, §10.5 fixtures; Apple-error constructibility is a Phase 0 read | **Accepted** 2026-08-01 · read done: all nine constructible, so the open item closes — but the tiering flips from what D35 assumed (deprecated family = tier 1, current family = tier 2), and two deprecated cases need a §8 decision (§2a) |
+| D36 | Three test tiers; gates record live vs. dormant honestly; substrate spike at Phase 0 | **Accepted** 2026-08-01 · **substrate is LIVE** (iOS 27 simulator, invocation in Phase 0). No gate in M6 should need the dormant wording; if one does, that is a finding |
+| D37 | Understudy joins as a path dep, test target only; packaging flagged to M9 | **Accepted** 2026-08-01 · untouched by Phases 0–1; lands at Phase 3 |
 
 ## 10. Status log
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-01 | **Phase 1.5 landed** (unplanned) | 387 (366 + 21) | The SDK error-surface sweep and its tripwires, opened because Phase 1 found two error families by accident. **Nine `Error` types exist where §8 names one**; the sweep found a sixth *reachable* family in minutes — `ToolCallError`, thrown when an app-supplied tool fails mid-generation. Now mechanised: an error-surface manifest with per-type dispositions, three pinned declarations (`Transcript.Entry`/`Segment`, the channel's actions), and the **SDK build string pinned** so a toolchain bump *fails* rather than relying on someone remembering the ROADMAP's verification evening. Mutations Ⓗ Ⓘ caught. Two findings: `GenerationID` collides with Apple's inside `@Generable` expansions (**a consumer-facing hazard**, M9 naming review), and the simulator tier caught `Process` — host-only API — in test code |
 | 2026-08-01 | **Phase 1 landed** | 380 (359 + 21) | The differ, both normalization files, `ToolRecordingPolicy`, and the import-boundary test. Four mutations (Ⓓ Ⓔ Ⓕ Ⓖ), all caught. **Tier 2 stopped being theoretical:** six 27-gated tests skip on the host and *execute* on the simulator, constructing real `LanguageModelError` / `SystemLanguageModel.Error` / PCC values. Three findings: a fifth non-prefix shape (`interiorGrowth` — a per-segment append that an append-only ledger cannot express), grapheme-vs-UTF-8 prefix comparison (a combining mark would have failed a well-behaved generation), and **two further Apple error families §8 does not mention**. One recorded deviation: this phase imports Foundation Models, which the phase title said it would not — see the Phase 1 gate |
 | 2026-07-29 | **Phase 0 landed** | 335 (314 + 21) | Audit fixes A1/A2/B1 + D32/D31 + the whole staleness batch. Three mutations (Ⓐ Ⓑ Ⓒ), all caught, all reverted. **Both questions answered: tier 2 is LIVE** (iOS 27 simulator — 314 tests also green there), and all nine Apple error payloads are constructible, though the *tiering* flips from D35's assumption. Two unplanned findings: the deprecated error family has two cases §8 does not account for (rev 9 item 8), and a `Task.yield()` spin defeats `.timeLimit`, so the harness's `spin(until:)` checks cancellation. Warning-free |
 | 2026-07-28 | Plan drafted | 331 (310 + 21) | Drafted at the M5 boundary from the boundary audit + M5-PLAN §7 handoffs + M4-PLAN §2 fact table. D30–D32 accepted (audit-approved); D33–D37 proposed for the Phase 0 gate. Rev 9 opens on its first amendment and ratifies at this milestone's close |
