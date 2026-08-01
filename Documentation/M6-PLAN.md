@@ -991,13 +991,26 @@ changed is which fields it governs).
 
 ### Phase 4 — The residues and provider breadth (tier 3)
 
-**Status:** ☐ not started
+**Status:** ☑ **landed 2026-08-01** — 414 green (391 + 23) on both substrates.
+**One residue answered, three converted from notes into device-gated tests, and
+one cut line invoked.** The substrate turned out to reach further than expected
+in one direction and less far in another; both are recorded below.
 
 **Goal:** the four questions only running code answers, plus the second
 provider family. Requires hardware/eligibility; every deferral is recorded, not
 implied.
 
-- [ ] **Land the residues as an env-flagged *suite*, not as notes** (§10.7's
+**What the substrate can and cannot do, established first because it decides
+everything else.** The iOS 27 simulator reports
+`SystemLanguageModel.default.availability == .available` — and then **fails to
+generate**, with `com.apple.SensitiveContentAnalysisML error 15`. So the model is
+nominally present and practically unusable there. Consequences: anything that
+depends only on `LanguageModelSession`'s own logic is answerable here *now*
+(a scripted provider exercises it identically), and anything needing real
+generation is genuinely hardware-bound. That is the line the two suites in
+`ResidueTests.swift` are drawn on.
+
+- [x] **Land the residues as an env-flagged *suite*, not as notes** (§10.7's
       "device integration behind an env flag"; added at Phase 1.5's review).
       Each of the four below becomes a test gated on
       `.enabled(if: ProcessInfo.processInfo.environment["LEDGERKIT_DEVICE"] != nil)`
@@ -1008,30 +1021,92 @@ implied.
       what the rest of Phase 1.5 bought for *shape* and this buys for
       *behaviour*. A residue that flips at Beta 6 — `concurrentRequests` becoming
       a trap, say — would otherwise be found by a user.
-- [ ] **`concurrentRequests`: thrown or trapped?** (OQ6 residue). Thrown ⇒ the
+- [x] **`concurrentRequests`: thrown or trapped?** (OQ6 residue). Thrown ⇒ the
       gate + normalization exclusion stand as designed. Trapped ⇒ the
       `isResponding` gate is promoted from defence to *the only* protection,
       §7.2's wording changes, and the gate gains a test proving it prevents
       the second issue rather than reporting it.
-- [ ] **Do real providers revise segments?** (OQ4 residue). Observe on-device
+      ### ✅ **ANSWERED: thrown.** A second `streamResponse` on a responding
+      session throws `LanguageModelSession.Error` ("You attempted to call a
+      respond method a second time before the first call completed. This is a
+      programmer error."), and normalization lands it on
+      `unrecognized("driver: session busy")` — §8's exclusion working end to end.
+      `isResponding` was `true` throughout, so §7.2's gate would have caught it
+      first. **Everything stands as designed; no spec wording changes.**
+      Substrate-independent, because the check lives in the *session* rather than
+      in any model — so it runs in CI forever instead of waiting for hardware,
+      which is why it is a permanent tier-2 test rather than a device one.
+- [x] **Do real providers revise segments?** (OQ4 residue). Observe on-device
       output for `replaceTextSegment` on plain text. Either answer feeds §7.3:
       "never observed" keeps the fail-loud path as insurance; "observed" makes
       segment-aware diffing mandatory prose rather than preference.
-- [ ] **Is `Usage.Input.totalTokenCount` inclusive of `cachedTokenCount`?**
+      **Half answered, and the half that is answered is the useful one.** Phase 2
+      established that a *scripted* revision is never observable to a consumer at
+      any pacing (0/60/600 ms) — so the accumulated sequence stays prefix-stable
+      even when the provider revises. The real-provider half is now
+      `DeviceResidueTests.realProviderNeverRevises`, which asserts every snapshot
+      of a real generation is prefix-stable and names the violation if not.
+      **Deferred to hardware**, and executable the moment there is any.
+- [x] **Is `Usage.Input.totalTokenCount` inclusive of `cachedTokenCount`?**
       (§7.7 residue). Decides whether apps may sum; recorded in §7.7 either
       way.
-- [ ] **The real on-device context budget** (N3's ⚠️). Replaces the "~4k
+      **Deferred to hardware, as a test that answers it** —
+      `DeviceResidueTests.usageInclusivity` runs two turns so the cache warms,
+      surfaces all four numbers, and asserts the one thing that is *checkable*
+      rather than merely observable: `cached <= total`. If the total were
+      exclusive of the cache, a warm turn could report `cached > total`, so
+      holding that across a non-zero cache is real evidence for inclusivity.
+- [x] **The real on-device context budget** (N3's ⚠️). Replaces the "~4k
       reported" hedge with a measured number and sizes how soon rehydration
       overflows after process death.
-- [ ] **Claude-package normalization family** (§10.5) if the package is
+      **Deferred to hardware, as a test that measures it** —
+      `DeviceResidueTests.contextBudget` pushes ~2k-token turns until the model
+      refuses and reads `contextSize`/`tokenCount` off Apple's own error, which
+      is precisely why D17 widened `contextSizeExceeded` to carry them.
+- [x] **Claude-package normalization family** (§10.5) if the package is
       obtainable in the current beta ring; otherwise invoke cut line 4 (§12)
       explicitly and ship on-device + deprecated-26-family mappings. The
       deprecated-family fixtures land regardless (constructibility permitting —
       Phase 0's answer).
+      ### **Cut line 4 invoked, explicitly.** The Claude package is not present
+      in this ring and adding a remote dependency is a supply-chain decision that
+      belongs to a person, not to a phase. What ships instead is **broader than
+      §12's cut line assumed**, because Phase 1's sweep found families §8 never
+      listed: on-device (`LanguageModelError`), session misuse
+      (`LanguageModelSession.Error`), assets (`SystemLanguageModel.Error`),
+      **Private Cloud Compute** (`PrivateCloudComputeLanguageModel.Error` — a
+      genuinely second, non-on-device Apple provider), the deprecated iOS 26
+      family, `URLError`, and the generic `ProviderFault` lift rules any
+      HTTP-shaped provider maps onto. So "provider breadth" is served by four
+      Apple families plus the generic tail; what is missing is a *third-party*
+      family, and the generic path is what it would use.
+
+**Two findings with no §14 row:**
+
+1. ⚠️ **Availability is not a promise that generation works.** The simulator
+   reports `.available` and then throws. Recorded because it is the concrete
+   instance of what §7.2 anticipates abstractly: an app that checks availability
+   and *then* generates can still fail, so that failure has to be an `Outcome`
+   rather than something the availability query was supposed to have prevented.
+2. ⚠️ **A real failure from Apple's own model arrived as an untyped `NSError`**
+   in the `FoundationModels.LanguageModelError` *domain* — not as one of the nine
+   typed `LanguageModelError` cases. Normalization lands it on the loud floor,
+   which is correct, but it means `unrecognized` will be reached in the wild more
+   often than §8's "total normalization" framing suggests. Rev 9 should say so:
+   totality is over the *typed* taxonomy, and the framework can deliver errors
+   outside it.
 
 **Review gate:** each residue has an answer or a recorded deferral naming what
 unblocks it; anything that changes spec text is in §6's inventory with its
 proposed wording.
+
+**Gate state (for review, 2026-08-01):** ✅ 414 green (391 + 23) on both
+substrates, with `DeviceResidueTests` correctly reporting **skipped**. ✅ OQ6's
+residue answered, and answered the way that changes nothing. ✅ The other three
+are executable tests, one flag away from answering themselves. ✅ Cut line 4
+invoked with its reasoning. **Sign-off wanted on:** invoking cut line 4 (the
+alternative is adding a remote dependency, which is yours to decide), and rev 9
+item 13 below.
 
 ---
 
@@ -1134,6 +1209,12 @@ Extend as phases surface more; the M4/M5 pattern.
 11. **§7.7 — reported usage is augmented, not passed through** (Phase 2). The
    framework adds its own output-token accounting on top of a provider's. Worth
    one clause, because it decides what an app may claim a number *means*.
+13. **§8/§14 — totality is over the *typed* taxonomy** (Phase 4). A real
+   on-device failure arrived as an untyped `NSError` in Foundation Models' own
+   error domain rather than as a `LanguageModelError` case, so `unrecognized` is
+   a working part of the design rather than a rarely-taken floor. §14 also gains
+   OQ6's answer (**thrown**, not trapped) and the note that availability is
+   advisory — it reports `.available` on a substrate that cannot generate.
 12. **§7.2 — the throw/return boundary covers store-side *reads*, not just
    appends** (audit A2's fix, generalized). The straddle is currently written in
    terms of the start append; Phase 0 made a cancellation during the *rehydration
@@ -1192,7 +1273,7 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 | §11 sketch runs against the real driver | `DriverPipelineTests.sketchRunsAgainstTheRealDriver` | ☑ |
 | Cancellation chaos through the real session | `DriverPipelineTests` — parked point × both stop mechanisms, plus the before-any-text case; partial asserted as a prefix property | ☑ |
 | `isResponding` gate; "driver:" prefix convention | tier-1/2 per surface | ☐ |
-| Four §14 residues answered or deferred-with-reason | Phase 4 record + §6 items | ☐ |
+| Four §14 residues answered or deferred-with-reason | `SessionResidueTests` (OQ6 **answered**: thrown) + `DeviceResidueTests` (three, `LEDGERKIT_DEVICE`-gated, written to answer rather than to stand in) | ☑ |
 | FM import boundary (guardrail 2) | `ImportBoundaryTests` — imports *and* type names, both with vacuity guards; mutation Ⓕ | ☑ |
 | Healthy-log property over driver-produced logs | `DriverPipelineTests` — every pipeline test that writes a log | ☑ |
 
@@ -1215,6 +1296,7 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-01 | **Phase 4 landed** | 414 (391 + 23) | §14's residues become tests rather than notes. **OQ6 answered: `concurrentRequests` is *thrown*** — the gate and §8's exclusion stand as designed, no spec wording changes — and it is substrate-independent, so it runs in CI forever. The other three are device-gated (`LEDGERKIT_DEVICE=1`) and written to *answer* their questions, because the simulator reports the on-device model `.available` and then **fails to generate**. **Cut line 4 invoked** for the Claude package; breadth is served instead by four Apple families the Phase 1 sweep found. Two findings with no §14 row: availability is advisory, and a real Apple failure arrived as an untyped `NSError` outside the typed taxonomy (rev 9 item 13) |
 | 2026-08-01 | **Phase 3.5 landed** (unplanned) | 409 (386 + 23) | `Understudy` gained `Script.Step.callTool`, so §7.6 is exercised end to end at last — one record per invocation, all three recording policies, and the record reaching `Message.toolRecords`. ⚠️ **Found a real bug in a rule that had exempted itself**: `ToolRecord.duration` minted from a `ContinuousClock` did not survive its own encoding, so the store's cache disagreed with disk — ADR-001 **R-5's** two-identities bug, in the field R-5's scope note explicitly excused. Fixed at the minting site; the ADR is corrected with the lesson that *an exemption reasoning from provenance expires when a new site starts producing the value*. Also: the framework refuses tool calling unless the model declares the capability |
 | 2026-08-01 | **Phase 3 landed** | 406 (383 + 23) | The whole pipeline as one assertion — script → framework → driver → store → SQLite → reducer — plus chaos through a real session at a parked point × both stop mechanisms, and §11's sketch against the real driver. **M6's "real stream captured & reduced" exit criterion is met.** Round trip stated as *text* (Phase 2's coalescing finding), and byte-stability recovered by pinning row count with §7.4's flush policy — the store decides how many delta rows exist, so the framework's cadence never reaches disk. No corpus file added, with the reasoning recorded. ⚠️ §7.6's tool records are still unexercised: no `Script.Step` can cause a tool call |
 | 2026-08-01 | **Phase 2 landed** | 399 (376 + 23) | `Session/GenerationDriver.swift` — the one production conformance — plus ten tier-2 tests **executed** on the iOS 27 simulator. **Five of the first ten failed**, which is the phase's real output: ⚠️⚠️ `ResponseStream` ends *silently* on cancellation, so the driver returned **`.completed` for a stopped generation** until a `Task.isCancelled` check landed; the framework **coalesces** fragments, so §7.3's round trip recovers text and not fragment boundaries; **a provider revision was never observable** across three pacings, leaving §7.3's fail-loud path as untestable insurance (OQ4's residue, answered); usage is **augmented** rather than passed through; and the executor's transcript carries the framework-appended prompt. Three are rev 9 items (9–11). D37's path dependency pulled forward from Phase 3 — a driver cannot be tested without a model |
