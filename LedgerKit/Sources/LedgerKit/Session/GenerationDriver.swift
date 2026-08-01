@@ -387,7 +387,25 @@ struct ToolObservation {
                     // ends the generation rather than producing an output entry.
                     // An output entry therefore means it succeeded.
                     status: .succeeded,
-                    duration: firstSeen[output.id].map { ContinuousClock.now - $0 },
+                    // ⚠️ **Canonicalized at birth, for ADR-001 R-5's reason,
+                    // in the field R-5 explicitly exempted.** Its scope note
+                    // reasoned that durations need no canonicalization because
+                    // they "arrive from §8's normalization already coarse — a
+                    // tool duration is measured in ms". That was true while
+                    // nothing *minted* one; this driver measures with a
+                    // `ContinuousClock`, so the value arrives at nanosecond
+                    // precision and does **not** survive its own encoding (the
+                    // wire form is integer milliseconds, R-4).
+                    //
+                    // Left raw, a tool record means one thing in the store's
+                    // fold-forward cache and another once it has been to disk —
+                    // the two-identities bug R-5 exists to prevent, and the
+                    // healthy-log property caught it here as "cached state
+                    // disagrees with a re-read of the log".
+                    duration: firstSeen[output.id].map { start in
+                        let measured = ContinuousClock.now - start
+                        return Duration(wireMilliseconds: measured.wireMilliseconds)
+                    },
                     argumentsJSON: arguments[output.id],
                     resultJSON: policy.recordsPayloads ? outputText(output) : nil
                 ))

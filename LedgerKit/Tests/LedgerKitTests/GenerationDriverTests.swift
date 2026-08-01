@@ -320,6 +320,83 @@ struct GenerationDriverTests {
         #expect(result.outcome == .failed(.transport(.connectivity)))
     }
 
+    // MARK: - Tool records (§7.6)
+
+    /// A model that will ask for `StubTool`, then answer once it has run.
+    ///
+    /// **Two scripts, because a tool call ends the model's turn**: the framework
+    /// executes the tool, appends its output to the transcript, and asks the
+    /// model again. And `capabilities` must declare `.toolCalling` — the
+    /// framework checks, and refuses with "the selected model does not support
+    /// tool calling" otherwise. `ScriptedLanguageModel` declares nothing by
+    /// default, deliberately ("a double should not promise capabilities it has no
+    /// way to honour"), so this is the first place that default has bitten.
+    @available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
+    private func toolUsingDriver(_ policy: ToolRecordingPolicy) -> GenerationDriver {
+        GenerationDriver(
+            model: ScriptedLanguageModel(
+                scripts: [
+                    [.callTool("StubTool", arguments: #"{"value":"valley"}"#)],
+                    ["The fold is a valley fold."],
+                ],
+                capabilities: LanguageModelCapabilities([.toolCalling])
+            ),
+            descriptor: descriptor,
+            tools: [StubTool()],
+            toolRecording: policy
+        )
+    }
+
+    /// **Record, don't orchestrate** (§7.6). The framework runs the tool inside
+    /// the session; the driver only watches `transcriptEntries` go by and emits
+    /// one record per *completed* invocation.
+    @Test("a completed tool invocation crosses the seam as one record")
+    func toolInvocationsAreRecorded() async throws {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+        let result = await collect(from: toolUsingDriver(.metadataOnly), request())
+
+        let records = result.signals.compactMap { signal -> ToolRecord? in
+            if case .toolRecord(let record) = signal { record } else { nil }
+        }
+        #expect(records.count == 1, "one record per invocation, not one per snapshot")
+        let record = try #require(records.first)
+        #expect(record.name == "StubTool")
+        #expect(record.status == .succeeded)
+        // Measured by the driver from its own observation — the framework
+        // reports no timing — so it exists but is deliberately not asserted to a
+        // value.
+        #expect(record.duration != nil)
+
+        // The default policy keeps the *content* out of the ledger (§7.6's
+        // privacy rationale): tool results routinely carry fetched data, and the
+        // ledger outlives the session.
+        #expect(record.argumentsJSON == nil)
+        #expect(record.resultJSON == nil)
+
+        // And the generation still ends normally, with the answer the model gave
+        // after the tool ran.
+        #expect(text(of: result.signals) == "The fold is a valley fold.")
+    }
+
+    /// `.full` is opt-in precisely because these two fields are the ones that
+    /// carry fetched content into a durable log.
+    @Test("full recording adds arguments and result; off records nothing")
+    func toolRecordingPolicyIsHonoured() async throws {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+
+        let full = await collect(from: toolUsingDriver(.full), request())
+        let recorded = try #require(full.signals.compactMap { signal -> ToolRecord? in
+            if case .toolRecord(let record) = signal { record } else { nil }
+        }.first)
+        #expect(recorded.argumentsJSON?.contains("valley") == true)
+        #expect(recorded.resultJSON == "valley", "the stub tool echoes its argument")
+
+        let off = await collect(from: toolUsingDriver(.off), request())
+        #expect(!off.signals.contains { if case .toolRecord = $0 { true } else { false } })
+        // The tool still *ran* — `.off` changes the ledger, never the generation.
+        #expect(text(of: off.signals) == "The fold is a valley fold.")
+    }
+
     // MARK: - Cancellation (§7.5)
 
     /// Parked at a point the *test* chose, then cancelled — `Cue` used as

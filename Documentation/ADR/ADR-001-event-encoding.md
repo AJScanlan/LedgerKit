@@ -196,10 +196,25 @@ configured once and never mutated, Foundation's date formatters are documented t
 formatting and parsing, and this is a private cache inside an internal helper rather than a
 `Sendable` conformance on public API, which is what tenet 6 actually prohibits.
 
-**Scope.** Timestamps are the only field minted from a high-precision ambient clock, so they are
-the only field needing this. Durations truncate too (R-4), but they arrive from §8's normalization
-already coarse — a `Retry-After` is whole seconds, a tool duration is measured in ms — so there is
-no jitter to canonicalize.
+**Scope — corrected at M6 Phase 3.5, and the correction is the interesting part.**
+This note used to say timestamps were the only field minted from a high-precision ambient clock, and
+that durations needed nothing because they "arrive from §8's normalization already coarse — a
+`Retry-After` is whole seconds, a tool duration is measured in ms". The first half is still right.
+The second was reasoning about a value's *provenance*, and the provenance changed the moment
+something started minting one: `GenerationDriver` measures a tool invocation with a
+`ContinuousClock`, so `ToolRecord.duration` arrives at nanosecond precision and does **not** survive
+its own encoding (the wire form is integer milliseconds, R-4).
+
+**So R-5 governs `ToolRecord.duration` too, at the same "canonicalize at birth" moment**, and the
+driver truncates before the record leaves it. Left raw, a tool record meant one thing in the store's
+fold-forward cache and another once it had been to disk — precisely the two-identities bug this rule
+exists to prevent. It was caught by the healthy-log property (`cached state disagrees with a re-read
+of the log`) the first time anything end-to-end recorded a tool call.
+
+The generalizable lesson, since this rule has now been wrong once in the same way: **an exemption
+that reasons from where a value comes from expires when a new site starts producing it.** Both
+remaining exemptions — a `Retry-After` normalized from whole seconds, an app-supplied
+`ModelDescriptor` — are exemptions of exactly that shape.
 
 **Tested** in `WireFormatTests` ("Timestamp canonicalization"), over a 2,000-date sweep rather
 than a fixture, in both directions: canonical stamps round-trip equal and are idempotent; a raw

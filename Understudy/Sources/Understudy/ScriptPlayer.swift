@@ -9,6 +9,7 @@ import Foundation
 protocol ScriptSink: Sendable {
     func emit(_ text: String, segmentID: String?, tokenCount: Int) async
     func revise(_ text: String, segmentID: String, tokenCount: Int) async
+    func callTool(_ name: String, id: String, arguments: String, tokenCount: Int) async
     func reportUsage(input: Int, output: Int, cached: Int, reasoning: Int) async
     func reportMetadata(_ values: [String: String]) async
 }
@@ -45,6 +46,9 @@ struct ScriptPlayer: Sendable {
 
             case .revise(let text, let segmentID, let tokenCount):
                 await sink.revise(text, segmentID: segmentID, tokenCount: tokenCount)
+
+            case .callTool(let name, let id, let arguments, let tokenCount):
+                await sink.callTool(name, id: id, arguments: arguments, tokenCount: tokenCount)
 
             case .wait(let duration):
                 try await clock.sleep(for: duration)

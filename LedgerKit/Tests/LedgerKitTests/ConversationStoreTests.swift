@@ -513,11 +513,6 @@ struct StoreTreeVerbTests {
 
 // MARK: - Phase 3: generation verbs
 
-/// `ScriptedIdentifiers` mints message IDs in one stream, so a `send` takes two
-/// of them: the user message first, then the assistant node.
-private let firstUser = Fix.userA                  // 0x10
-private let firstAssistant = MessageID(uuid(0x11)) // 0x11
-
 @Suite("Store — generation verbs")
 struct StoreGenerationTests {
 

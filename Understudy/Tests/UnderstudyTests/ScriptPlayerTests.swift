@@ -11,6 +11,7 @@ private final class RecordingSink: ScriptSink, @unchecked Sendable {
     enum Event: Equatable {
         case text(String, tokenCount: Int)
         case revised(String, segmentID: String, tokenCount: Int)
+        case toolCall(name: String, id: String, arguments: String)
         case usage(input: Int, output: Int, cached: Int, reasoning: Int)
         case metadata([String: String])
     }
@@ -63,6 +64,13 @@ private final class RecordingSink: ScriptSink, @unchecked Sendable {
             if segments[segmentID] == nil { order.append(segmentID) }
             segments[segmentID] = text
         }
+    }
+
+    /// A tool call contributes no *text* — the framework runs the tool and the
+    /// output becomes a transcript entry, not part of the response the model is
+    /// building. So it is recorded and left out of `text`.
+    func callTool(_ name: String, id: String, arguments: String, tokenCount: Int) async {
+        append(.toolCall(name: name, id: id, arguments: arguments))
     }
 
     func reportUsage(input: Int, output: Int, cached: Int, reasoning: Int) async {
@@ -141,6 +149,10 @@ private final class ParkingSink: ScriptSink, @unchecked Sendable {
 
     func revise(_ text: String, segmentID: String, tokenCount: Int) async {
         await inner.revise(text, segmentID: segmentID, tokenCount: tokenCount)
+    }
+
+    func callTool(_ name: String, id: String, arguments: String, tokenCount: Int) async {
+        await inner.callTool(name, id: id, arguments: arguments, tokenCount: tokenCount)
     }
 
     func reportUsage(input: Int, output: Int, cached: Int, reasoning: Int) async {

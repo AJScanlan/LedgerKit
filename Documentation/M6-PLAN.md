@@ -857,37 +857,135 @@ end-to-end work.
 
 ### Phase 3 — End-to-end: Understudy through a real session
 
-**Status:** ☐ not started
+**Status:** ☑ **landed 2026-08-01** — 406 green (383 + 23) on both substrates,
+warning-free. Seven pipeline tests, all executed on the iOS 27 simulator. One
+item is **not** done and is written up at the gate: §7.6's tool records remain
+unexercised, because no script can yet cause a tool call.
 
 **Goal:** the whole pipeline — scripted provider → framework accumulation →
 driver → store → reducer — asserted as one property, plus the driver-side
 chaos suite.
 
-- [ ] **The first `Understudy` import** (D37): path dependency, test target
-      only.
-- [ ] **The §7.3 round-trip property** (M5 handoff 3): scripted fragments →
+- [x] **The first `Understudy` import** (D37): path dependency, test target
+      only. Landed at Phase 2 — a driver cannot be tested without a model.
+- [x] **The §7.3 round-trip property** (M5 handoff 3): scripted fragments →
       `ScriptedLanguageModel` → real session accumulation → snapshots → differ
       → `deltaAppended` rows equal the script's fragments exactly. Under
       injection (`ScriptedIdentifiers` + `SteppingClock`) the whole run is
       byte-stable — the corpus gains this fixture **now** (`Log.isStoreReplayable`
       qualifying, or its exclusion stated), and it inherits truncation/gap/P3
       coverage for free.
-- [ ] **Driver chaos via `Cue`** (the inversion): the *player* parks at scripted
+- [x] **Driver chaos via `Cue`** (the inversion): the *player* parks at scripted
       cues; the test drives `reached()`/`signal()`; cancellation at every
       parked point × both stop mechanisms, partial retention asserted at each —
       §10.4's suite, now with the real session between the script and the
       store.
-- [ ] **The §11 sketch against the real driver**: a 27-gated sibling of
+- [x] **The §11 sketch against the real driver**: a 27-gated sibling of
       `APISketchTests` running the sketch end-to-end with `GenerationDriver` +
       `ScriptedLanguageModel` — the store-double sketch stays as the any-Mac
       version. This is DoD-2's groundwork: the driver-init line is the one
       line a provider swap changes.
-- [ ] **The healthy-log property spans driver-produced logs**: every log the
+- [x] **The healthy-log property spans driver-produced logs**: every log the
       real pipeline writes reduces with empty diagnostics.
 
 **Review gate:** tier-2 suite green on the substrate (or the dormant record,
 honestly); the round-trip property *is* the "real stream captured & reduced"
 exit criterion; corpus addition reviewed per `Corpus/README.md`.
+
+**Gate state (for review, 2026-08-01):** ✅ 406 green on both substrates. ✅ The
+round-trip property holds end-to-end — **M6's "real stream captured & reduced"
+exit criterion is met** — at both flush extremes, which is what makes it a
+property rather than a coincidence of one policy. ✅ Chaos runs through a real
+session at a parked point × both stop mechanisms, with `Cue` finally used as
+designed (the *player* parks; the test drives `reached()`/`signal()`). ✅ The
+healthy-log property holds over logs the real pipeline wrote.
+
+**Three things to sign off:**
+
+1. **How the round trip is stated.** Phase 2 measured the framework coalescing,
+   so "the deltas equal the script's fragments" is not true and cannot be. The
+   suite asserts the **text**, at two opposite flush cadences. Where the seams
+   fall is a durability decision (§7.4), not a property of the stream — rev 9
+   item 10.
+2. **Byte-stability, and how it was recovered.** A stream whose delta count
+   varies per run cannot be asserted byte-for-byte — except that §7.4's flush
+   policy means the *store* decides row count, so a never-due policy writes
+   exactly one delta and erases the framework's cadence before it reaches disk.
+   The log then matches a hand-written `Log` record-for-record. Worth naming
+   because it is the same property that makes ledger granularity a durability
+   decision rather than a provider artifact.
+3. **No corpus file was added, deliberately** (the plan left this open). The
+   corpus exists to sweep logs through truncation, interior-gap and P3 coverage,
+   and no sweep can tell where a log came from — this shape is
+   `withCompletedTurn`'s, already swept. What is new here is *provenance*, which
+   is exactly what a corpus fixture discards. The pipeline is asserted against
+   `Log` instead, which keeps the provenance in the assertion.
+
+**Closed at Phase 3.5** — see below. The gap as it stood:
+
+⚠️ **Not done: §7.6's tool records are implemented but never exercised.**
+`ToolObservation` pairs `toolCalls` with `toolOutput` and emits one `ToolRecord`
+per completed invocation, and nothing has ever run it, because **no script can
+cause a tool call**: `ScriptedLanguageModel` writes text actions only, and the
+channel's tool-call family (`toolCall(id:name:action:)`, its nested
+`ArgumentsFragment`, `removeToolCall`) has no `Script.Step`. This is the same
+gap `.revise` filled for §7.3, one family over — and it is a bigger piece of
+work, because a call must be followed by the *framework* executing the tool and
+producing an output entry, which is a round trip no existing step drives.
+Recorded rather than skipped; it belongs with Phase 4's provider work or a
+Phase 3.5 of its own.
+
+---
+
+### Phase 3.5 — Closing the tool-record gap
+
+**Status:** ☑ **landed 2026-08-01** — 409 green (386 + 23) on both substrates.
+Unplanned; opened because Phase 3's gate found §7's last obligation implemented
+and never run.
+
+- [x] **`Script.Step.callTool(_:arguments:id:tokenCount:)`** in `Understudy`,
+      emitting the channel's `toolCalls` family — `.revise`'s move, one family
+      over. A tool exchange costs **two scripts**, because a tool call ends the
+      model's turn: the framework runs the tool, appends its output, and asks the
+      model again. `id` defaults to the tool's name, which is deterministic and
+      unique for the ordinary one-call script.
+- [x] **The framework really does run it**, confirmed by probe: `toolCalls` →
+      `toolOutput` → a second request → the answer, with all three visible in
+      `snapshot.transcriptEntries`. ⚠️ **It refuses unless the model declares
+      `.toolCalling`** ("the selected model does not support tool calling"), and
+      `ScriptedLanguageModel` declares nothing by default — deliberately, per its
+      own doc, and this is the first place that default has bitten.
+- [x] **§7.6 exercised end to end**: one record per invocation (not per
+      snapshot), `.metadataOnly` keeping payloads out, `.full` adding them,
+      `.off` recording nothing while the tool still *runs* — and the record
+      reaching `Message.toolRecords` through store and reducer.
+
+⚠️ **And it found a real bug, in a rule that had exempted itself.**
+
+The pipeline test failed on the healthy-log property's second clause — *"cached
+state disagrees with a re-read of the log"* — which is the store's fold-forward
+cache diverging from disk, the shape P1 exists to catch and the worst available
+one because both halves look right alone.
+
+The cause: **`ToolRecord.duration` was minted from a `ContinuousClock`** at
+nanosecond precision, while the wire form is integer milliseconds (ADR-001 R-4).
+So the cached record and the decoded record differed — an event meaning one thing
+in memory and another once it had been to disk, which is **exactly** the
+two-identities bug ADR-001 **R-5** exists to prevent.
+
+R-5's scope note had *explicitly exempted* durations, on the grounds that they
+"arrive from §8's normalization already coarse — a tool duration is measured in
+ms". That was true for as long as nothing minted one. The driver is the first
+thing that does, and the exemption expired the moment it did. Fixed by
+canonicalizing at birth in the driver, exactly as the store does for timestamps;
+ADR-001's scope note is corrected with the generalizable lesson: **an exemption
+that reasons from where a value comes from expires when a new site starts
+producing it** — and both remaining exemptions are of that shape.
+
+**Review gate:** ✅ 409 green on both substrates. ✅ §7's obligations are now all
+exercised. ✅ ADR-001 corrected. **Sign-off wanted on:** the ADR-001 R-5 scope
+correction, since it widens a ratified rule's reach (the rule is unchanged; what
+changed is which fields it governs).
 
 ---
 
@@ -1085,18 +1183,18 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 | D32: policy knobs publicly constructible | `APISketchTests.policiesAreConfigurable` for shape; `StoreFlushTests` / `StoreSnapshotRefreshTests` now construct through the public factories, so behaviour is covered by the suites that already assert it | ☑ |
 | Differ: prefix property + non-prefix verdicts | `SnapshotDiffTests` — 19 tests; exactness swept over well-behaved *and* hostile pairs; 126-shape exhaustive property; mutations Ⓓ Ⓔ | ☑ |
 | Normalization: §10.5 fixtures, both families, lift rules, busy-session exclusion | `NormalizationTests` (tier 1: rules, `URLError`, the deprecated 26 family) + `AppleErrorNormalizationTests` (tier 2: all four 27 families, **executed** on the simulator). Both layers asserted per fixture; mutation Ⓖ | ☑ |
-| §7.3 round-trip: script ≡ recovered deltas | tier-2 property, corpus fixture | ☐ |
+| §7.3 round-trip: script ≡ recovered **text** | `DriverPipelineTests` at both flush extremes; byte-stable log asserted against `Log` (no corpus file — reasoning at the Phase 3 gate) | ☑ |
 | §7.1 rehydration: instructions exact, partials included, one prompt entry | `GenerationDriverTests` — asserted on the spy's recorded transcript, which is what the *model* saw | ☑ |
 | §7.2 outcome boundary: provider errors and zero-token failures are `Outcome`s | `GenerationDriverTests` | ☑ |
 | §7.5 cancellation returns `.cancelled` | `GenerationDriverTests` — **found the silent-stream bug**; partial retention asserted as a prefix property, since the framework may have vended nothing yet | ☑ |
 | §7.3 fail-loud on non-prefix | tier 1 exhaustively (`SnapshotDiffTests`); **end-to-end unreachable** — no scripted pacing makes a revision observable (Phase 2 finding 3) | ⚠️ partial |
-| §7.6 tool records | implemented; **not yet exercised** — needs a tool-invoking script (Phase 3) | ☐ |
-| §11 sketch runs against the real driver | 27-gated sketch test | ☐ |
-| Cancellation chaos through the real session | `Cue`-parked suite × both stop mechanisms | ☐ |
+| §7.6 tool records | `GenerationDriverTests` (one record per invocation; all three policies) + `DriverPipelineTests` (through store and reducer to `Message.toolRecords`) — unblocked by `Script.Step.callTool` at Phase 3.5 | ☑ |
+| §11 sketch runs against the real driver | `DriverPipelineTests.sketchRunsAgainstTheRealDriver` | ☑ |
+| Cancellation chaos through the real session | `DriverPipelineTests` — parked point × both stop mechanisms, plus the before-any-text case; partial asserted as a prefix property | ☑ |
 | `isResponding` gate; "driver:" prefix convention | tier-1/2 per surface | ☐ |
 | Four §14 residues answered or deferred-with-reason | Phase 4 record + §6 items | ☐ |
 | FM import boundary (guardrail 2) | `ImportBoundaryTests` — imports *and* type names, both with vacuity guards; mutation Ⓕ | ☑ |
-| Healthy-log property over driver-produced logs | Phase 3 suites | ☐ |
+| Healthy-log property over driver-produced logs | `DriverPipelineTests` — every pipeline test that writes a log | ☑ |
 
 ---
 
@@ -1117,6 +1215,8 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-01 | **Phase 3.5 landed** (unplanned) | 409 (386 + 23) | `Understudy` gained `Script.Step.callTool`, so §7.6 is exercised end to end at last — one record per invocation, all three recording policies, and the record reaching `Message.toolRecords`. ⚠️ **Found a real bug in a rule that had exempted itself**: `ToolRecord.duration` minted from a `ContinuousClock` did not survive its own encoding, so the store's cache disagreed with disk — ADR-001 **R-5's** two-identities bug, in the field R-5's scope note explicitly excused. Fixed at the minting site; the ADR is corrected with the lesson that *an exemption reasoning from provenance expires when a new site starts producing the value*. Also: the framework refuses tool calling unless the model declares the capability |
+| 2026-08-01 | **Phase 3 landed** | 406 (383 + 23) | The whole pipeline as one assertion — script → framework → driver → store → SQLite → reducer — plus chaos through a real session at a parked point × both stop mechanisms, and §11's sketch against the real driver. **M6's "real stream captured & reduced" exit criterion is met.** Round trip stated as *text* (Phase 2's coalescing finding), and byte-stability recovered by pinning row count with §7.4's flush policy — the store decides how many delta rows exist, so the framework's cadence never reaches disk. No corpus file added, with the reasoning recorded. ⚠️ §7.6's tool records are still unexercised: no `Script.Step` can cause a tool call |
 | 2026-08-01 | **Phase 2 landed** | 399 (376 + 23) | `Session/GenerationDriver.swift` — the one production conformance — plus ten tier-2 tests **executed** on the iOS 27 simulator. **Five of the first ten failed**, which is the phase's real output: ⚠️⚠️ `ResponseStream` ends *silently* on cancellation, so the driver returned **`.completed` for a stopped generation** until a `Task.isCancelled` check landed; the framework **coalesces** fragments, so §7.3's round trip recovers text and not fragment boundaries; **a provider revision was never observable** across three pacings, leaving §7.3's fail-loud path as untestable insurance (OQ4's residue, answered); usage is **augmented** rather than passed through; and the executor's transcript carries the framework-appended prompt. Three are rev 9 items (9–11). D37's path dependency pulled forward from Phase 3 — a driver cannot be tested without a model |
 | 2026-08-01 | **Phase 1.5 landed** (unplanned) | 389 (366 + 23) | The SDK error-surface sweep, its tripwires, **CI to run them**, and `Understudy.Script.Step.revise` so §7.3's fail-loud path is reachable end-to-end at Phase 3. Opened because Phase 1 found two error families by accident. **Nine `Error` types exist where §8 names one**; the sweep found a sixth *reachable* family in minutes — `ToolCallError`, thrown when an app-supplied tool fails mid-generation. Now mechanised: an error-surface manifest with per-type dispositions, three pinned declarations (`Transcript.Entry`/`Segment`, the channel's actions), and the **SDK build string pinned** so a toolchain bump *fails* rather than relying on someone remembering the ROADMAP's verification evening. Mutations Ⓗ Ⓘ caught. Two findings: `GenerationID` collides with Apple's inside `@Generable` expansions (**a consumer-facing hazard**, M9 naming review), and the simulator tier caught `Process` — host-only API — in test code |
 | 2026-08-01 | **Phase 1 landed** | 380 (359 + 21) | The differ, both normalization files, `ToolRecordingPolicy`, and the import-boundary test. Four mutations (Ⓓ Ⓔ Ⓕ Ⓖ), all caught. **Tier 2 stopped being theoretical:** six 27-gated tests skip on the host and *execute* on the simulator, constructing real `LanguageModelError` / `SystemLanguageModel.Error` / PCC values. Three findings: a fifth non-prefix shape (`interiorGrowth` — a per-segment append that an append-only ledger cannot express), grapheme-vs-UTF-8 prefix comparison (a combining mark would have failed a well-behaved generation), and **two further Apple error families §8 does not mention**. One recorded deviation: this phase imports Foundation Models, which the phase title said it would not — see the Phase 1 gate |

@@ -186,6 +186,17 @@ private struct ChannelSink: ScriptSink {
         await channel.send(.response(action: .replaceTextSegment(text, segmentID: segmentID, tokenCount: tokenCount)))
     }
 
+    /// Hands the framework a tool call. It runs the tool and asks the model
+    /// again, which is why a scripted tool exchange costs two scripts — see
+    /// ``Script/Step/callTool(_:arguments:id:tokenCount:)``.
+    func callTool(_ name: String, id: String, arguments: String, tokenCount: Int) async {
+        await channel.send(.toolCalls(action: .toolCall(
+            id: id,
+            name: name,
+            action: .appendArguments(arguments, tokenCount: tokenCount)
+        )))
+    }
+
     func reportUsage(input: Int, output: Int, cached: Int, reasoning: Int) async {
         await channel.send(
             .response(

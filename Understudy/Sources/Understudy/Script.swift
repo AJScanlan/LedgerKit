@@ -32,6 +32,7 @@ public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLi
         enum Kind: Sendable {
             case emit(String, segmentID: String?, tokenCount: Int)
             case revise(String, segmentID: String, tokenCount: Int)
+            case callTool(name: String, id: String, arguments: String, tokenCount: Int)
             case wait(Duration)
             case waitFor(Cue)
             case reportUsage(input: Int, output: Int, cached: Int, reasoning: Int)
@@ -96,6 +97,41 @@ public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLi
         /// does.
         public static func revise(_ text: String, segmentID: String, tokenCount: Int = 1) -> Step {
             Step(.revise(text, segmentID: segmentID, tokenCount: tokenCount))
+        }
+
+        /// Ask the framework to run one of the session's registered tools.
+        ///
+        /// ```swift
+        /// let model = ScriptedLanguageModel(scripts: [
+        ///     [.callTool("Weather", arguments: #"{"city":"Dublin"}"#)],
+        ///     ["It is raining."],          // the model's answer, after the tool ran
+        /// ])
+        /// ```
+        ///
+        /// **Two scripts, and that is the shape of the thing rather than an
+        /// accident.** A tool call ends the model's turn: the framework executes
+        /// the tool, appends its output to the transcript, and asks the model
+        /// again. So a scripted tool exchange consumes *two* requests, which is
+        /// exactly what ``ScriptedLanguageModel/init(scripts:whenExhausted:capabilities:clock:)``
+        /// is for.
+        ///
+        /// The tool must be registered on the session — `LanguageModelSession(model:
+        /// tools:transcript:)` — and `name` must match its `name`, which by
+        /// default is the conforming type's name. `arguments` is JSON for the
+        /// tool's `Arguments` type; the framework decodes it, so a mismatch
+        /// surfaces as the framework's own error rather than as silence.
+        ///
+        /// - Parameter id: Correlates the call with its output. Defaults to the
+        ///   tool's name, which is deterministic and unique for the ordinary
+        ///   one-call-per-tool script — **give distinct ids when one script calls
+        ///   the same tool twice**, or the two exchanges cannot be told apart.
+        public static func callTool(
+            _ name: String,
+            arguments: String,
+            id: String? = nil,
+            tokenCount: Int = 1
+        ) -> Step {
+            Step(.callTool(name: name, id: id ?? name, arguments: arguments, tokenCount: tokenCount))
         }
 
         /// Sleep before the next step — the paced streaming that makes previews

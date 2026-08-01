@@ -239,6 +239,22 @@ struct StoreUnderTest {
     }
 }
 
+// MARK: - What a store *mints*
+
+/// The identifiers a `send` produces under ``ScriptedIdentifiers``.
+///
+/// Distinct from `Fix.*`, and the distinction is the point: `Fix` names the
+/// identifiers a *hand-written* `Log` uses, while these are what the store mints
+/// when it writes the same shape itself. `ScriptedIdentifiers` draws message IDs
+/// from one stream, so a `send` takes two — the user message, then the assistant
+/// node — which lands the assistant on `0x11` rather than on `Fix.assistantA`.
+///
+/// Shared here rather than defined per suite: three suites now assert against a
+/// store-written turn, and three copies of "the assistant is 0x11" is three
+/// chances for one to drift.
+let firstUser = Fix.userA                  // 0x10
+let firstAssistant = MessageID(uuid(0x11)) // 0x11
+
 // MARK: - The healthy-log property
 
 /// **The M5 standing property** (M5-PLAN §1): a log produced by store verbs
