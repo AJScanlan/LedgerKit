@@ -76,6 +76,24 @@ func normalize(_ error: any Error, since now: Date) -> GenerationError {
     return .unrecognized(description: String(describing: error))
 }
 
+/// The floor for a case Apple added after these mappings were written.
+///
+/// **Deliberately distinguishable from an unknown *provider* error**, which
+/// takes the plain floor above. Reading a user's log, "Apple grew a case we do
+/// not map" and "some third-party error nobody has seen" want different
+/// responses — the first has an obvious fix and a known owner, the second may
+/// have neither — and by the time a log reaches triage the type is long gone.
+///
+/// No `"driver:"` prefix: §8 reserves that for LedgerKit's own *invariants*
+/// (the session gate, the non-prefix path), and this is a mapping gap rather
+/// than a defect in how the driver behaves.
+///
+/// `AppleErrorSurfaceTests` is what should catch this first, at build time and
+/// with a far better message. This is what the ledger says when nobody ran it.
+private func unmapped(_ error: some Error) -> GenerationError {
+    .unrecognized(description: "unmapped \(type(of: error)) case: \(error)")
+}
+
 // MARK: - LanguageModelError (27) — §8's coverage table, row for row
 
 /// The built-in taxonomy §8 is defined as a total normalization *of*.
@@ -114,7 +132,7 @@ func normalize(_ error: LanguageModelError, since now: Date) -> GenerationError 
     case .timeout:
         .transport(.timeout)
     @unknown default:
-        .unrecognized(description: String(describing: error))
+        unmapped(error)
     }
 }
 
@@ -140,7 +158,7 @@ func normalize(_ error: LanguageModelSession.Error) -> GenerationError {
         // LedgerKit itself is wrong (§8).
         DriverDiagnostic.transcriptMutatedWhileResponding.error
     @unknown default:
-        .unrecognized(description: String(describing: error))
+        unmapped(error)
     }
 }
 
@@ -160,7 +178,7 @@ func normalize(_ error: SystemLanguageModel.Error) -> GenerationError {
     case .assetsUnavailable:
         .modelUnavailable(.modelNotReady)
     @unknown default:
-        .unrecognized(description: String(describing: error))
+        unmapped(error)
     }
 }
 
@@ -192,7 +210,7 @@ func normalize(_ error: PrivateCloudComputeLanguageModel.Error, since now: Date)
         // manual retry rather than inventing a 503 the provider never sent.
         .providerFailure(status: nil, code: "serviceUnavailable", message: nil)
     @unknown default:
-        .unrecognized(description: String(describing: error))
+        unmapped(error)
     }
 }
 
@@ -250,6 +268,6 @@ func normalize(_ error: LanguageModelSession.GenerationError) -> GenerationError
     case .refusal:
         .refusal
     @unknown default:
-        .unrecognized(description: String(describing: error))
+        unmapped(error)
     }
 }

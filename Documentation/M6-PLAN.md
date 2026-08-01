@@ -657,6 +657,43 @@ care.
       **after** re-running the checks — trivial edit, non-trivial re-verification,
       deliberately bundled so the second cannot be skipped while the first is done.
 
+**Landed with the sweep, from the review that followed it:**
+
+- [x] **CI exists** (`.github/workflows/ci.yml`) — **the battery for the smoke
+      alarm.** Every tripwire above is useless unless something runs it when
+      *nothing in this repo changed*, which is precisely the shape of a beta
+      drop. Two jobs (host suites; the whole suite on the iOS 27 simulator), a
+      **weekly `schedule:` trigger**, and capability checks that **fail rather
+      than skip** — a green run has to mean the suite ran, which is the same
+      honesty rule `.enabled(if:)` buys the gated tests. ⚠️ Hosted runners ship
+      released Xcodes and may not carry a beta; `vars.CI_RUNNER` switches to a
+      self-hosted label, and the dev machine has the toolchain by definition.
+      **A bug the first draft had, caught by running the script rather than
+      reading it:** selecting Xcode by "does FoundationModels' interface exist"
+      matches **Xcode 26 too** — the framework shipped in the 26 SDK; what M6
+      needs is the 27 API inside it. Selection is by SDK *version* now.
+- [x] **`Understudy` can revise a segment** — `Script.Step.revise(_:segmentID:
+      tokenCount:)`, and `emit` gained an optional `segmentID` so a script can
+      address one twice. Apple's channel has offered `replaceTextSegment` since
+      27 and the double could only ever `appendText`, so **§7.3's fail-loud path
+      had no way to be exercised end-to-end** — Phase 3 could not have driven a
+      revising stream through a real session. Understudy's own `Step` doc already
+      argued the principle for usage ordering ("a double that cannot express a
+      misbehaving provider cannot test a driver's response to one"); this applies
+      it where the spec actually needs it. `RecordingSink` now models per-segment
+      accumulation, because a sink that only appended would report the
+      *provider's* history rather than the consumer's view — and a revision is
+      exactly the case where those two stop agreeing.
+- [x] **Unmapped Apple cases are self-identifying.** The `@unknown default` arms
+      mint `unrecognized("unmapped <Type> case: …")` rather than a bare
+      description, so a log reaching triage distinguishes "Apple grew a case"
+      from "some third-party error nobody has seen" — different owners, different
+      fixes, and by then the type is long gone. No `"driver:"` prefix: §8 reserves
+      that for LedgerKit's own invariants, and this is a mapping gap rather than a
+      defect in how the driver behaves.
+- [x] Removed the stale `LedgerKitTestSupport/` directory at the repo root —
+      untracked build detritus under the pre-M4 package name.
+
 **Two findings worth carrying:**
 
 1. ⚠️ **`GenerationID` collides with `FoundationModels.GenerationID`, and it
@@ -775,6 +812,17 @@ exit criterion; corpus addition reviewed per `Corpus/README.md`.
 provider family. Requires hardware/eligibility; every deferral is recorded, not
 implied.
 
+- [ ] **Land the residues as an env-flagged *suite*, not as notes** (§10.7's
+      "device integration behind an env flag"; added at Phase 1.5's review).
+      Each of the four below becomes a test gated on
+      `.enabled(if: ProcessInfo.processInfo.environment["LEDGERKIT_DEVICE"] != nil)`
+      — skipped everywhere else, honestly, exactly as the 27-gated tier is.
+      **The reason is beta churn, not tidiness.** An answer written into a
+      document is true on the day it is written and decays silently; an answer
+      written as a test re-asks its question every time the suite runs, which is
+      what the rest of Phase 1.5 bought for *shape* and this buys for
+      *behaviour*. A residue that flips at Beta 6 — `concurrentRequests` becoming
+      a trap, say — would otherwise be found by a user.
 - [ ] **`concurrentRequests`: thrown or trapped?** (OQ6 residue). Thrown ⇒ the
       gate + normalization exclusion stand as designed. Trapped ⇒ the
       `isResponding` gate is promoted from defence to *the only* protection,
@@ -961,7 +1009,7 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
-| 2026-08-01 | **Phase 1.5 landed** (unplanned) | 387 (366 + 21) | The SDK error-surface sweep and its tripwires, opened because Phase 1 found two error families by accident. **Nine `Error` types exist where §8 names one**; the sweep found a sixth *reachable* family in minutes — `ToolCallError`, thrown when an app-supplied tool fails mid-generation. Now mechanised: an error-surface manifest with per-type dispositions, three pinned declarations (`Transcript.Entry`/`Segment`, the channel's actions), and the **SDK build string pinned** so a toolchain bump *fails* rather than relying on someone remembering the ROADMAP's verification evening. Mutations Ⓗ Ⓘ caught. Two findings: `GenerationID` collides with Apple's inside `@Generable` expansions (**a consumer-facing hazard**, M9 naming review), and the simulator tier caught `Process` — host-only API — in test code |
+| 2026-08-01 | **Phase 1.5 landed** (unplanned) | 389 (366 + 23) | The SDK error-surface sweep, its tripwires, **CI to run them**, and `Understudy.Script.Step.revise` so §7.3's fail-loud path is reachable end-to-end at Phase 3. Opened because Phase 1 found two error families by accident. **Nine `Error` types exist where §8 names one**; the sweep found a sixth *reachable* family in minutes — `ToolCallError`, thrown when an app-supplied tool fails mid-generation. Now mechanised: an error-surface manifest with per-type dispositions, three pinned declarations (`Transcript.Entry`/`Segment`, the channel's actions), and the **SDK build string pinned** so a toolchain bump *fails* rather than relying on someone remembering the ROADMAP's verification evening. Mutations Ⓗ Ⓘ caught. Two findings: `GenerationID` collides with Apple's inside `@Generable` expansions (**a consumer-facing hazard**, M9 naming review), and the simulator tier caught `Process` — host-only API — in test code |
 | 2026-08-01 | **Phase 1 landed** | 380 (359 + 21) | The differ, both normalization files, `ToolRecordingPolicy`, and the import-boundary test. Four mutations (Ⓓ Ⓔ Ⓕ Ⓖ), all caught. **Tier 2 stopped being theoretical:** six 27-gated tests skip on the host and *execute* on the simulator, constructing real `LanguageModelError` / `SystemLanguageModel.Error` / PCC values. Three findings: a fifth non-prefix shape (`interiorGrowth` — a per-segment append that an append-only ledger cannot express), grapheme-vs-UTF-8 prefix comparison (a combining mark would have failed a well-behaved generation), and **two further Apple error families §8 does not mention**. One recorded deviation: this phase imports Foundation Models, which the phase title said it would not — see the Phase 1 gate |
 | 2026-07-29 | **Phase 0 landed** | 335 (314 + 21) | Audit fixes A1/A2/B1 + D32/D31 + the whole staleness batch. Three mutations (Ⓐ Ⓑ Ⓒ), all caught, all reverted. **Both questions answered: tier 2 is LIVE** (iOS 27 simulator — 314 tests also green there), and all nine Apple error payloads are constructible, though the *tiering* flips from D35's assumption. Two unplanned findings: the deprecated error family has two cases §8 does not account for (rev 9 item 8), and a `Task.yield()` spin defeats `.timeLimit`, so the harness's `spin(until:)` checks cancellation. Warning-free |
 | 2026-07-28 | Plan drafted | 331 (310 + 21) | Drafted at the M5 boundary from the boundary audit + M5-PLAN §7 handoffs + M4-PLAN §2 fact table. D30–D32 accepted (audit-approved); D33–D37 proposed for the Phase 0 gate. Rev 9 opens on its first amendment and ratifies at this milestone's close |

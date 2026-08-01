@@ -10,31 +10,59 @@ import Testing
 private final class RecordingSink: ScriptSink, @unchecked Sendable {
     enum Event: Equatable {
         case text(String, tokenCount: Int)
+        case revised(String, segmentID: String, tokenCount: Int)
         case usage(input: Int, output: Int, cached: Int, reasoning: Int)
         case metadata([String: String])
     }
 
+    /// Fragments that named no segment. A control character so it can never
+    /// collide with an ID a script chose.
+    private static let anonymousSegment = "\u{0}anonymous"
+
     private let lock = NSLock()
     private var storage: [Event] = []
+    /// Segment order and contents, kept beside the event log because the log
+    /// answers "what happened, in what order" and this answers "what would a
+    /// consumer be looking at".
+    private var order: [String] = []
+    private var segments: [String: String] = [:]
 
     var events: [Event] {
         lock.withLock { storage }
     }
 
-    /// The response as a *consumer* would see it — fragments accumulated, which
-    /// is what the framework does between a provider and a `ResponseStream`.
+    /// The response as a *consumer* would see it — which is **not** simply the
+    /// fragments concatenated, once a script can revise.
+    ///
+    /// The framework accumulates per segment between a provider and a
+    /// `ResponseStream`: an `emit` extends its segment, a `revise` replaces one.
+    /// Modelling that here is what makes `.revise` testable at all — a sink that
+    /// only appended would report the *provider's* history rather than the
+    /// consumer's view, and the whole point of a revision is that those two stop
+    /// agreeing.
     var text: String {
-        events.reduce(into: "") { accumulated, event in
-            if case .text(let fragment, _) = event { accumulated += fragment }
-        }
+        lock.withLock { order.compactMap { segments[$0] }.joined() }
     }
 
     private func append(_ event: Event) {
         lock.withLock { storage.append(event) }
     }
 
-    func emit(_ text: String, tokenCount: Int) async {
+    func emit(_ text: String, segmentID: String?, tokenCount: Int) async {
         append(.text(text, tokenCount: tokenCount))
+        lock.withLock {
+            let key = segmentID ?? Self.anonymousSegment
+            if segments[key] == nil { order.append(key) }
+            segments[key, default: ""] += text
+        }
+    }
+
+    func revise(_ text: String, segmentID: String, tokenCount: Int) async {
+        append(.revised(text, segmentID: segmentID, tokenCount: tokenCount))
+        lock.withLock {
+            if segments[segmentID] == nil { order.append(segmentID) }
+            segments[segmentID] = text
+        }
     }
 
     func reportUsage(input: Int, output: Int, cached: Int, reasoning: Int) async {
@@ -105,10 +133,14 @@ private final class ParkingSink: ScriptSink, @unchecked Sendable {
 
     var text: String { inner.text }
 
-    func emit(_ text: String, tokenCount: Int) async {
-        await inner.emit(text, tokenCount: tokenCount)
+    func emit(_ text: String, segmentID: String?, tokenCount: Int) async {
+        await inner.emit(text, segmentID: segmentID, tokenCount: tokenCount)
         let isFirst = lock.withLock { emitted += 1; return emitted == 1 }
         if isFirst { await latch.arrive() }
+    }
+
+    func revise(_ text: String, segmentID: String, tokenCount: Int) async {
+        await inner.revise(text, segmentID: segmentID, tokenCount: tokenCount)
     }
 
     func reportUsage(input: Int, output: Int, cached: Int, reasoning: Int) async {
@@ -178,6 +210,49 @@ struct ScriptPlayerTests {
                 .metadata(["modelID": "scripted-1"]),
             ]
         )
+    }
+
+    /// **The misbehaviour half of the double.** Apple's channel offers
+    /// `replaceTextSegment` beside `appendText`, so a provider may legally revise
+    /// a segment it already sent — and a consumer that diffs cumulative snapshots
+    /// into append-only storage has to do *something* about that. Until this step
+    /// existed, no script could make it happen, so no consumer could test it.
+    @Test("a revision replaces its segment rather than extending it")
+    func revisionReplacesASegment() async throws {
+        let sink = RecordingSink()
+        let script: Script = [
+            .emit("The answer is 41", segmentID: "answer"),
+            .revise("The answer is 42", segmentID: "answer"),
+        ]
+
+        try await ScriptPlayer(clock: ImmediateClock()).play(script, into: sink)
+
+        #expect(
+            sink.events == [
+                .text("The answer is 41", tokenCount: 1),
+                .revised("The answer is 42", segmentID: "answer", tokenCount: 1),
+            ]
+        )
+        // **The property that makes this hostile**: what a consumer ends up
+        // looking at is not an extension of what it saw a moment ago.
+        #expect(sink.text == "The answer is 42")
+    }
+
+    /// Revision is per *segment*, so the segments beside it are untouched — which
+    /// is what makes the accumulated whole stop being a prefix extension rather
+    /// than simply becoming a different string.
+    @Test("a revision leaves neighbouring segments alone")
+    func revisionIsScopedToItsSegment() async throws {
+        let sink = RecordingSink()
+        let script: Script = [
+            .emit("one ", segmentID: "a"),
+            .emit("two", segmentID: "b"),
+            .revise("ONE ", segmentID: "a"),
+        ]
+
+        try await ScriptPlayer(clock: ImmediateClock()).play(script, into: sink)
+
+        #expect(sink.text == "ONE two")
     }
 
     @Test("the same script plays identically every time")

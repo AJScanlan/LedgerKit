@@ -7,7 +7,8 @@ import Foundation
 /// cancellation and timing behaviour — is testable without a platform that has
 /// the framework, and so ``Script`` never has to know what a channel is.
 protocol ScriptSink: Sendable {
-    func emit(_ text: String, tokenCount: Int) async
+    func emit(_ text: String, segmentID: String?, tokenCount: Int) async
+    func revise(_ text: String, segmentID: String, tokenCount: Int) async
     func reportUsage(input: Int, output: Int, cached: Int, reasoning: Int) async
     func reportMetadata(_ values: [String: String]) async
 }
@@ -39,8 +40,11 @@ struct ScriptPlayer: Sendable {
             try Task.checkCancellation()
 
             switch step.kind {
-            case .emit(let text, let tokenCount):
-                await sink.emit(text, tokenCount: tokenCount)
+            case .emit(let text, let segmentID, let tokenCount):
+                await sink.emit(text, segmentID: segmentID, tokenCount: tokenCount)
+
+            case .revise(let text, let segmentID, let tokenCount):
+                await sink.revise(text, segmentID: segmentID, tokenCount: tokenCount)
 
             case .wait(let duration):
                 try await clock.sleep(for: duration)

@@ -30,7 +30,8 @@ public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLi
     public struct Step: Sendable, ExpressibleByStringLiteral {
 
         enum Kind: Sendable {
-            case emit(String, tokenCount: Int)
+            case emit(String, segmentID: String?, tokenCount: Int)
+            case revise(String, segmentID: String, tokenCount: Int)
             case wait(Duration)
             case waitFor(Cue)
             case reportUsage(input: Int, output: Int, cached: Int, reasoning: Int)
@@ -46,7 +47,7 @@ public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLi
 
         /// A string literal is a text fragment.
         public init(stringLiteral value: String) {
-            self.init(.emit(value, tokenCount: 1))
+            self.init(.emit(value, segmentID: nil, tokenCount: 1))
         }
 
         /// Produce a fragment of the response.
@@ -60,8 +61,41 @@ public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLi
         /// a test double's job is to be predictable, and a plausible-looking
         /// token count that nothing can verify is worse than an obvious one.
         /// Set it when a test asserts on token accounting.
-        public static func emit(_ text: String, tokenCount: Int = 1) -> Step {
-            Step(.emit(text, tokenCount: tokenCount))
+        ///
+        /// `segmentID` names the run of text this fragment extends. Leave it nil
+        /// — the ordinary case — and the framework decides; name it when a script
+        /// needs to come back and address the same segment later, which is what
+        /// ``revise(_:segmentID:tokenCount:)`` does.
+        public static func emit(_ text: String, segmentID: String? = nil, tokenCount: Int = 1) -> Step {
+            Step(.emit(text, segmentID: segmentID, tokenCount: tokenCount))
+        }
+
+        /// **Replace** a segment's text instead of extending it.
+        ///
+        /// ```swift
+        /// let model = ScriptedLanguageModel(script: [
+        ///     .emit("The answer is 41", segmentID: "answer"),
+        ///     .revise("The answer is 42", segmentID: "answer"),
+        /// ])
+        /// ```
+        ///
+        /// This is the misbehaviour half of the double, and it exists for the
+        /// reason ``reportUsage(input:output:cached:reasoning:)`` can be ordered
+        /// wrongly: **a double that cannot express a legal-but-awkward provider
+        /// cannot test a consumer's response to one.**
+        ///
+        /// And this one is legal. Apple's channel offers `replaceTextSegment`
+        /// beside `appendText`, both carrying a `segmentID`, so a provider may
+        /// revise a segment it already sent — at which point the accumulated
+        /// snapshot a consumer reads is **not** a prefix extension of its
+        /// predecessor. Consumers that diff snapshots into append-only storage
+        /// have to do *something* about that, and until this step existed they
+        /// had no way to find out what.
+        ///
+        /// Rarely what a demo wants; exactly what a consumer's hostile-path test
+        /// does.
+        public static func revise(_ text: String, segmentID: String, tokenCount: Int = 1) -> Step {
+            Step(.revise(text, segmentID: segmentID, tokenCount: tokenCount))
         }
 
         /// Sleep before the next step — the paced streaming that makes previews

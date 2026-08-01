@@ -1,0 +1,144 @@
+name: CI
+
+# **The battery for the smoke alarm.**
+#
+# M6 Phase 1.5 added tripwires that fail when Apple's SDK surface moves — the
+# error-surface manifest, the pinned declarations, the SDK build pin. Every one
+# of them is useless unless something *runs* them when nothing in this repo
+# changed, because that is exactly the shape of a beta drop: the toolchain moves
+# underneath a repo nobody touched. Hence the `schedule:` trigger below; it is
+# as much the point of this file as the push trigger is.
+#
+# ⚠️ **Toolchain constraint, stated because it decides where this can run.**
+# LedgerKit deploys to 26 but *compiles* against the **27 SDK** — `Session/`
+# references iOS/macOS 27 API behind `#available`, so an older Xcode cannot build
+# the package at all, let alone run the gated tier. A hard requirement, not a
+# preference.
+#
+# GitHub-hosted macOS runners ship released Xcodes and may not carry a beta.
+# Rather than pretend otherwise, every job begins with a capability check that
+# **fails loudly** with the reason — never skips. A green run must mean the suite
+# ran, which is the same honesty rule `.enabled(if:)` buys the gated tests.
+#
+# If hosted runners cannot supply the toolchain, set the repository variable
+# `CI_RUNNER` to a self-hosted label. The dev machine has the toolchain by
+# definition, and a weekly scheduled run there is worth more than a permanently
+# red hosted job nobody reads.
+
+on:
+  push:
+    branches: [main, "M*"]
+  pull_request:
+  schedule:
+    # Mondays, 09:00 UTC. Beta drops land on Apple's calendar, not ours.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Tier 1: both packages on the host. Fast, and where everything but the
+  # 27-gated suites lives.
+  # ──────────────────────────────────────────────────────────────────────────
+  host:
+    name: Host suites (macOS)
+    runs-on: ${{ vars.CI_RUNNER || 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select an Xcode with the 27 SDK
+        run: |
+          set -euo pipefail
+          # **Selected by SDK version, not by the framework's presence.** An
+          # earlier draft looked for FoundationModels' interface and matched
+          # Xcode 26 as well — the framework shipped in the 26 SDK; what M6 needs
+          # is the 27 *API* inside it. Caught by running the loop before
+          # committing it, which is the only reason this comment is not a bug.
+          best=""; best_version=0
+          for candidate in /Applications/Xcode*.app; do
+            developer="$candidate/Contents/Developer"
+            [ -d "$developer" ] || continue
+            version=$(DEVELOPER_DIR="$developer" xcrun --show-sdk-version --sdk macosx 2>/dev/null || echo 0)
+            major=${version%%.*}
+            echo "  $candidate → macOS SDK ${version:-none}"
+            if [ "${major:-0}" -gt "$best_version" ]; then best_version=$major; best=$developer; fi
+          done
+          if [ "$best_version" -lt 27 ]; then
+            echo "::error::No installed Xcode ships the macOS 27 SDK (best found: $best_version)."
+            echo "LedgerKit compiles against it — Session/ references 27 API behind"
+            echo "#available. Install Xcode 27, or point the CI_RUNNER repository"
+            echo "variable at a self-hosted runner that has it."
+            exit 1
+          fi
+          echo "Using $best"
+          sudo xcode-select -s "$best"
+
+      - name: Record the toolchain
+        # Printed, not asserted: `AppleErrorSurfaceTests` owns the assertion and
+        # fails with a far more actionable message than a shell comparison could.
+        run: |
+          xcodebuild -version
+          echo "macOS SDK $(xcrun --show-sdk-version --sdk macosx) build $(xcrun --show-sdk-build-version --sdk macosx)"
+
+      - name: LedgerKit
+        run: swift test --package-path LedgerKit
+
+      - name: Understudy
+        run: swift test --package-path Understudy
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Tier 2: the same suite on an iOS 27 runtime, where the `.enabled(if:)` tests
+  # execute instead of skipping. A separate job because its failure mode is
+  # different and worth naming — and because it is the only place host-only API
+  # in *test* code (`Process` does not exist on iOS) fails to build at all.
+  # ──────────────────────────────────────────────────────────────────────────
+  simulator:
+    name: Gated suites (iOS 27 simulator)
+    runs-on: ${{ vars.CI_RUNNER || 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select an Xcode with the 27 SDK
+        run: |
+          set -euo pipefail
+          best=""; best_version=0
+          for candidate in /Applications/Xcode*.app; do
+            developer="$candidate/Contents/Developer"
+            [ -d "$developer" ] || continue
+            version=$(DEVELOPER_DIR="$developer" xcrun --show-sdk-version --sdk macosx 2>/dev/null || echo 0)
+            major=${version%%.*}
+            if [ "${major:-0}" -gt "$best_version" ]; then best_version=$major; best=$developer; fi
+          done
+          if [ "$best_version" -lt 27 ]; then
+            echo "::error::No installed Xcode ships the macOS 27 SDK (best found: $best_version)."
+            exit 1
+          fi
+          sudo xcode-select -s "$best"
+
+      - name: Run the whole suite on iOS 27
+        # **Fails rather than skips when the runtime is missing**, deliberately.
+        # "Tier 2 was unavailable so we passed" is the dormancy D36 exists to
+        # prevent, and on a dashboard it is indistinguishable from a green run.
+        #
+        # The deployment target stays 26 here, so one test target serves both
+        # tiers; what changes is that `#available(iOS 27)` now succeeds.
+        run: |
+          set -euo pipefail
+          if ! xcrun simctl list runtimes | grep -q "iOS 27"; then
+            echo "::error::No iOS 27 simulator runtime installed."
+            echo "The 27-gated suites cannot execute without it, and skipping them"
+            echo "would report green for tests that never ran (M6-PLAN D36)."
+            xcrun simctl list runtimes
+            exit 1
+          fi
+          device=$(xcrun simctl list devices available "iOS 27" \
+            | grep -oE "^ +[A-Za-z0-9 ]+\(" | head -1 | sed 's/($//' | xargs)
+          device=${device:-iPhone 17 Pro}
+          echo "Using simulator: $device"
+          xcodebuild test \
+            -workspace LedgerKit.xcworkspace \
+            -scheme LedgerKit \
+            -destination "platform=iOS Simulator,name=$device,OS=27.0"

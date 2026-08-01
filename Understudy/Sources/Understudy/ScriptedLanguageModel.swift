@@ -176,8 +176,14 @@ private struct ChannelSink: ScriptSink {
 
     let channel: LanguageModelExecutorGenerationChannel
 
-    func emit(_ text: String, tokenCount: Int) async {
-        await channel.send(.response(action: .appendText(text, tokenCount: tokenCount)))
+    func emit(_ text: String, segmentID: String?, tokenCount: Int) async {
+        await channel.send(.response(action: .appendText(text, segmentID: segmentID, tokenCount: tokenCount)))
+    }
+
+    /// The provider action that makes prefix-stability a *behaviour* rather than
+    /// a guarantee — see ``Script/Step/revise(_:segmentID:tokenCount:)``.
+    func revise(_ text: String, segmentID: String, tokenCount: Int) async {
+        await channel.send(.response(action: .replaceTextSegment(text, segmentID: segmentID, tokenCount: tokenCount)))
     }
 
     func reportUsage(input: Int, output: Int, cached: Int, reasoning: Int) async {
