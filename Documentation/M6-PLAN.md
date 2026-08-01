@@ -495,12 +495,15 @@ expectation; and the two rev 9 inventory additions (items 8–9).
 
 ### Phase 1 — Pure components (tier 1: any Mac, no FM import)
 
-**Status:** ☐ not started
+**Status:** ☑ **landed 2026-08-01** — 380 green (359 `LedgerKit` + 21
+`Understudy`), warning-free. Four mutations run and caught. **One deviation from
+the phase title, recorded below: this phase does import Foundation Models**, and
+the reason is a Phase 0 finding rather than a slip.
 
 **Goal:** the two riskiest driver obligations — diffing and normalization —
 exist as pure, exhaustively-tested components before a session ever runs.
 
-- [ ] **The differ (D34).** Input: consecutive snapshots as ordered
+- [x] **The differ (D34).** Input: consecutive snapshots as ordered
       `(segmentID, text)` pairs (flat-content mode = one anonymous segment).
       Output: the delta suffix per snapshot, or a typed non-prefix verdict.
       Covered shapes: growth within a segment; a new segment opening; **segment
@@ -510,7 +513,32 @@ exist as pure, exhaustively-tested components before a session ever runs.
       sequence, the concatenated deltas equal the final text — which is
       exactly the store-side half of §7.3's round trip, proved before the
       framework is in the loop.
-- [ ] **Normalization cores (D35)** as pure functions with §10.5 fixture
+      **Landed as `Session/SnapshotDiff.swift`** — `StreamSnapshot` (named away
+      from `Store`'s `Snapshot`, which is a persisted checkpoint), `SnapshotDelta`
+      with a typed `Reason`, and a free `delta(from:to:)`. Nineteen tests; the
+      property sweeps all 126 append-only shapes of length ≤ 6 exhaustively.
+      **Two findings the plan's shape list did not name:**
+      ① ⚠️ **`interiorGrowth` — a fifth non-prefix shape.** A segment growing
+      while a *later* segment already holds text is a legal per-segment append
+      and an illegal *ledger* one: message content is the concatenation of
+      `deltaAppended` rows in order, so that text would have to be **inserted**
+      mid-string. The plan listed "interleaved multi-segment growth" among the
+      shapes to *support*, and it is supportable only in the tail; the general
+      case has to be refused. The flat view reaches the same verdict by a shorter
+      route, which is the cross-check that the rule is right rather than
+      invented.
+      ② ⚠️ **The prefix test must compare UTF-8, not `Character`s.** `hasPrefix`
+      compares grapheme clusters under canonical equivalence, so a provider
+      emitting `"e"` and then a combining acute reads as having *revised* its
+      segment — `"e"` is not a grapheme prefix of `"é"` — and the driver would
+      fail a perfectly well-behaved generation. Bytes see the append that
+      happened, and they also make `previous + delta == current` an exact
+      equality, which is what §7.3's round-trip property needs. Mutation Ⓔ
+      (revert to `hasPrefix`) is caught by the combining-mark test.
+      Mutation Ⓓ (drop the interior-growth check) is caught **twice** — by its
+      unit test and, independently, by the exactness property, which is the
+      result worth having: the property catches violations nobody enumerated.
+- [x] **Normalization cores (D35)** as pure functions with §10.5 fixture
       suites for everything constructible on this machine today: `URLError` →
       `.transport(…)`; HTTP-shaped provider failures → `providerFailure` with
       the lift rules (429 → `.rateLimited` parsing both RFC 9110 `Retry-After`
@@ -518,14 +546,63 @@ exist as pure, exhaustively-tested components before a session ever runs.
       the busy-session exclusion. Apple-family fixtures per Phase 0's
       constructibility answer — landed here if constructible, tiered honestly
       if not.
-- [ ] **`ToolRecordingPolicy`** (`Session/ToolRecording.swift`, ungated —
+      **Landed as two files, split by what needs Foundation Models.**
+      `Session/Normalization.swift` is FM-free (the `ProviderFault` lift rules,
+      all three `Retry-After` forms including both obsolete RFC 9110 date
+      formats, `URLError` bucketing, and `DriverDiagnostic` — one type so §8's
+      `"driver:"` prefix has a single enforcement point instead of a literal per
+      site). `Session/NormalizeAppleErrors.swift` imports FM and is **un-gated
+      with `#available` inside**, which is what puts half of it in tier 1.
+      **Every fixture asserts both layers** (§10.5): the normalized
+      `GenerationError` *and* the `Recoverability` it classifies to, because a
+      plausible-looking normalization can still hand the user the wrong
+      affordance — a 429 landing as `providerFailure(status: 429)` classifies
+      `retryable(nil)` and silently discards the wait the provider reported.
+      ⚠️ **Two more Apple error families, neither mentioned in §8** — found by
+      following the deprecated family's own deprecation notes:
+      **`SystemLanguageModel.Error`** (`assetsUnavailable`) and
+      **`PrivateCloudComputeLanguageModel.Error`** (`networkFailure`,
+      `quotaLimitReached` — which carries a `resetDate`, Apple's third
+      `Retry-After` form again — and `serviceUnavailable`). With the deprecated
+      family's two unaccounted cases that is **four** families and seven mappings
+      §8's coverage table does not state, all now mapped by §8's *existing* rules
+      and flagged for rev 9 (inventory item 8). Mutation Ⓖ (map
+      `concurrentRequests` to `.rateLimited` — the exact historical mistake §8's
+      exclusion exists to prevent) caught by all three of its assertions.
+- [x] **`ToolRecordingPolicy`** (`Session/ToolRecording.swift`, ungated —
       no FM types): `.metadataOnly` default / `.full` / `.off`, struct with
       factories per D12, doc comments carrying §7.6's privacy rationale.
-- [ ] **The import-boundary test** (guardrail 2) — accept or drop here.
+      Landed with `recordsInvocations` / `recordsPayloads` as the internal
+      readers Phase 2 switches on, so the driver never re-derives the policy's
+      meaning from its cases.
+- [x] **The import-boundary test** (guardrail 2) — accept or drop here.
+      **Accepted**, and it grew a second half: one test greps `Sources/` for
+      `import FoundationModels` outside `Session/`, the other for *uses* of
+      Apple's inference type names in code (comments excluded — §7's design is
+      documented in prose that names them constantly). Both carry vacuity guards,
+      because a walk that found nothing would satisfy "no offenders" perfectly
+      while checking nothing — the `InvariantCheckTests` discipline applied to a
+      source sweep. Mutation Ⓕ (add the import to `Core/ToolRecord.swift`)
+      caught.
 
 **Review gate:** tier-1 suites green on macOS 26; the differ's property test
 swept; fixture inventory reviewed against §10.5's list; no `Session/` file yet
 imports FoundationModels except none (nothing 27-gated has landed).
+
+**Gate state (for review, 2026-08-01):** ✅ 359 + 21 green, warning-free, on both
+substrates — and on the simulator the six 27-gated tests **execute** rather than
+skip, which is D36's tier 2 delivering on its first real use. ✅ Four mutations
+(Ⓓ Ⓔ Ⓕ Ⓖ), all caught, all reverted. ✅ §10.5's inventory covered for every
+family constructible today, both layers asserted.
+
+**Deviation to sign off:** the gate line above says no `Session/` file imports
+FoundationModels in this phase, and one now does. That line was written when tier
+2 might have been dormant; Phase 0 found the deprecated 26 family is available at
+26 and the simulator runs the rest, so deferring the Apple mappings to Phase 2
+would have split §8's "one mapping per family" across two phases and left the
+tier-1 half untested for no benefit. The *principle* the line protects —
+Foundation Models stays inside `Session/` — is now enforced mechanically by the
+import-boundary test rather than by a phase boundary, which is strictly stronger.
 
 ---
 
@@ -692,18 +769,39 @@ Extend as phases surface more; the M4/M5 pattern.
    section it changes (§7.2, §7.3, §7.7, N3).
 7. Anything Phases 2–4 surface that changes a §7 sentence — logged here as
    discovered.
-8. **§8 — the deprecated family's two unaccounted cases** (Phase 0's reading
-   session; §2a). `LanguageModelSession.GenerationError` carries
-   `assetsUnavailable` and `decodingFailure`, and §8's coverage table accounts
-   for neither. §8 claims *totality* over Apple's taxonomy and now states that
-   claim as a checkable table, so two silent fall-throughs to `unrecognized`
-   would repeat exactly the defect rev 6 fixed for the four `unsupported*`
-   cases. Proposed: `assetsUnavailable → modelUnavailable(.modelNotReady)`
-   (same condition `systemNotReady` already normalizes to), and
-   `decodingFailure → unrecognized`, **with the reason recorded** — it is
-   guided-generation-only, which N8 puts outside v0.1, so the loud floor is the
-   honest landing rather than an oversight. Phase 1 decides; the fixtures are
-   tier 1 either way, since that family is available at 26.
+8. **§8 — Apple ships four error families, and the coverage table names one.**
+   Opened by Phase 0's reading session and **widened at Phase 1**, where
+   following the deprecated family's own deprecation notes turned up two more
+   types. §8 claims *totality* over Apple's taxonomy and states it as a
+   checkable table, so every row below is either in that table or a silent
+   fall-through to `unrecognized` — which is exactly the defect rev 6 fixed for
+   the four `unsupported*` cases. All seven are implemented and fixture-tested as
+   of Phase 1, each by an **existing** §8 rule rather than a new one; what rev 9
+   owes is the table rows.
+   - `LanguageModelSession.GenerationError.assetsUnavailable` (26) and
+     `SystemLanguageModel.Error.assetsUnavailable` (27, its named replacement) →
+     **`modelUnavailable(.modelNotReady)`**, the landing §8 already gives PCC's
+     `systemNotReady`, classifying `recoverableUpstream(.awaitModelDownload)`.
+   - `LanguageModelSession.GenerationError.decodingFailure` (26) →
+     **`providerFailure(status: nil, code: "decodingFailure")`**, §8's rule-4
+     tail. Guided generation is outside v0.1 (N8), so there is no 1:1 home and
+     rule 1 does not apply; `terminal` is right because retrying the same
+     request cannot fix a decode failure. Apple's `debugDescription` is
+     deliberately not carried into `message` — §8 declines to project debug
+     detail, and the ledger outlives the session.
+   - `LanguageModelSession.Error.transcriptMutationWhileResponding` (27) → the
+     **`"driver:"` floor**, beside `concurrentRequests`. §8 already says this is
+     "a LedgerKit bug by construction" but gives it no landing.
+   - `PrivateCloudComputeLanguageModel.Error` (27) — a family §8 mentions only
+     for its *availability* reasons: `networkFailure` →
+     **`transport(.connectivity)`**; `quotaLimitReached` →
+     **`rateLimited(retryAfter:)`**, since it carries a `resetDate` — the same
+     instant-shaped `Retry-After` as `LanguageModelError.RateLimited`;
+     `serviceUnavailable` → **`providerFailure(status: nil, code:)`**. The last
+     is the one §8 anticipated in prose: "if a provider family turns out to emit
+     nil-status transients, that's a mapping override keyed on `code`" — so the
+     honest landing is `terminal` with a stable code rather than a 503 the
+     provider never sent.
 9. **§7.2 — the throw/return boundary covers store-side *reads*, not just
    appends** (audit A2's fix, generalized). The straddle is currently written in
    terms of the start append; Phase 0 made a cancellation during the *rehydration
@@ -751,14 +849,14 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 | A2: rehydration gap (wedge + post-append cancel) | `StoreRehydrationGapTests`, both throw paths + mutations Ⓑ and Ⓒ | ☑ |
 | B1: throw-channel docs match rev 8 | four sites rewritten; grep clean of stale hits (five unrelated, triaged in Phase 0) | ☑ |
 | D32: policy knobs publicly constructible | `APISketchTests.policiesAreConfigurable` for shape; `StoreFlushTests` / `StoreSnapshotRefreshTests` now construct through the public factories, so behaviour is covered by the suites that already assert it | ☑ |
-| Differ: prefix property + non-prefix verdicts | tier-1 exhaustive suite | ☐ |
-| Normalization: §10.5 fixtures, both families, lift rules, busy-session exclusion | tier-1 (+ tier-2/3 per constructibility) | ☐ |
+| Differ: prefix property + non-prefix verdicts | `SnapshotDiffTests` — 19 tests; exactness swept over well-behaved *and* hostile pairs; 126-shape exhaustive property; mutations Ⓓ Ⓔ | ☑ |
+| Normalization: §10.5 fixtures, both families, lift rules, busy-session exclusion | `NormalizationTests` (tier 1: rules, `URLError`, the deprecated 26 family) + `AppleErrorNormalizationTests` (tier 2: all four 27 families, **executed** on the simulator). Both layers asserted per fixture; mutation Ⓖ | ☑ |
 | §7.3 round-trip: script ≡ recovered deltas | tier-2 property, corpus fixture | ☐ |
 | §11 sketch runs against the real driver | 27-gated sketch test | ☐ |
 | Cancellation chaos through the real session | `Cue`-parked suite × both stop mechanisms | ☐ |
 | `isResponding` gate; "driver:" prefix convention | tier-1/2 per surface | ☐ |
 | Four §14 residues answered or deferred-with-reason | Phase 4 record + §6 items | ☐ |
-| FM import boundary (guardrail 2) | tier-1 source-walk test (if accepted) | ☐ |
+| FM import boundary (guardrail 2) | `ImportBoundaryTests` — imports *and* type names, both with vacuity guards; mutation Ⓕ | ☑ |
 | Healthy-log property over driver-produced logs | Phase 3 suites | ☐ |
 
 ---
@@ -780,5 +878,6 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-01 | **Phase 1 landed** | 380 (359 + 21) | The differ, both normalization files, `ToolRecordingPolicy`, and the import-boundary test. Four mutations (Ⓓ Ⓔ Ⓕ Ⓖ), all caught. **Tier 2 stopped being theoretical:** six 27-gated tests skip on the host and *execute* on the simulator, constructing real `LanguageModelError` / `SystemLanguageModel.Error` / PCC values. Three findings: a fifth non-prefix shape (`interiorGrowth` — a per-segment append that an append-only ledger cannot express), grapheme-vs-UTF-8 prefix comparison (a combining mark would have failed a well-behaved generation), and **two further Apple error families §8 does not mention**. One recorded deviation: this phase imports Foundation Models, which the phase title said it would not — see the Phase 1 gate |
 | 2026-07-29 | **Phase 0 landed** | 335 (314 + 21) | Audit fixes A1/A2/B1 + D32/D31 + the whole staleness batch. Three mutations (Ⓐ Ⓑ Ⓒ), all caught, all reverted. **Both questions answered: tier 2 is LIVE** (iOS 27 simulator — 314 tests also green there), and all nine Apple error payloads are constructible, though the *tiering* flips from D35's assumption. Two unplanned findings: the deprecated error family has two cases §8 does not account for (rev 9 item 8), and a `Task.yield()` spin defeats `.timeLimit`, so the harness's `spin(until:)` checks cancellation. Warning-free |
 | 2026-07-28 | Plan drafted | 331 (310 + 21) | Drafted at the M5 boundary from the boundary audit + M5-PLAN §7 handoffs + M4-PLAN §2 fact table. D30–D32 accepted (audit-approved); D33–D37 proposed for the Phase 0 gate. Rev 9 opens on its first amendment and ratifies at this milestone's close |

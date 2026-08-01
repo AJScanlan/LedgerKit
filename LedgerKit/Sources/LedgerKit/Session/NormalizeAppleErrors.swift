@@ -1,0 +1,233 @@
+import Foundation
+import FoundationModels
+
+// §8's normalization for the families Apple ships (M6-PLAN D35, Phase 1).
+//
+// **Un-gated, with `#available` inside — and that is what puts half of this file
+// in tier 1.** Phase 0's reading session found the tiering is not where D35
+// assumed: `LanguageModelError` is 27-only, but the *deprecated* iOS 26
+// `LanguageModelSession.GenerationError` is available at 26, so its mapping and
+// its fixtures run in every `swift test` on this macOS 26 host. Gating the whole
+// file would have pushed them onto the simulator for nothing.
+//
+// **How many families there are was itself a finding.** §8's coverage table
+// accounts for `LanguageModelError` and the availability reasons. The 27 SDK
+// also ships `LanguageModelSession.Error`, `SystemLanguageModel.Error`, and
+// `PrivateCloudComputeLanguageModel.Error`, and the deprecated family carries two
+// cases with no §8 analogue. All of it is mapped below, and every mapping §8 does
+// not already state is flagged `rev 9` — because §8 states its totality as a
+// *checkable* table, and a silent fall-through to `unrecognized` is exactly the
+// defect rev 6 fixed for the four `unsupported*` cases.
+//
+// A note on the `@unknown default` arms: FoundationModels is a resilient
+// framework, so its enums are non-frozen and an exhaustive switch cannot be made
+// a compile-time tripwire. A new Apple case therefore surfaces as a **loud
+// `unrecognized`** at runtime rather than a build break — which is precisely the
+// job §8's floor exists to do, and the reason it exists.
+
+/// Thrown error → `GenerationError` (§8), for every error family Apple ships.
+///
+/// The one entry point the driver calls. Cancellation never arrives here:
+/// §7.5 gives it its own terminal, and a driver that normalized a
+/// `CancellationError` would turn a user's stop into a failure.
+func normalize(_ error: any Error, since now: Date) -> GenerationError {
+    if #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) {
+        switch error {
+        case let error as LanguageModelError: return normalize(error, since: now)
+        case let error as LanguageModelSession.Error: return normalize(error)
+        case let error as SystemLanguageModel.Error: return normalize(error)
+        case let error as PrivateCloudComputeLanguageModel.Error: return normalize(error, since: now)
+        default: break
+        }
+    }
+    // Available at 26, so this arm is reachable — and testable — on a host that
+    // cannot run any of the above.
+    if let error = error as? LanguageModelSession.GenerationError {
+        return normalize(error)
+    }
+    if let error = error as? URLError {
+        return normalize(error)
+    }
+    // §8's floor, deliberately without the `"driver:"` prefix: this is a provider
+    // mystery, not a LedgerKit invariant, and the prefix is what tells the two
+    // apart during triage.
+    return .unrecognized(description: String(describing: error))
+}
+
+// MARK: - LanguageModelError (27) — §8's coverage table, row for row
+
+/// The built-in taxonomy §8 is defined as a total normalization *of*.
+///
+/// Every row here is §8's coverage table, which is why the table is worth
+/// keeping: a reader can diff the two. The one deliberate non-1:1 is `timeout`
+/// → `transport(.timeout)`, lift rule 2 — the request never reached a model, so
+/// it belongs in the "network, not model" bucket where it classifies retryable.
+@available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
+func normalize(_ error: LanguageModelError, since now: Date) -> GenerationError {
+    switch error {
+    case .contextSizeExceeded(let exceeded):
+        // Apple's two numbers ride along (D17). LedgerKit's are optional because
+        // a non-Apple provider reports neither; here both are present.
+        .contextSizeExceeded(contextSize: exceeded.contextSize, tokenCount: exceeded.tokenCount)
+    case .rateLimited(let limited):
+        // Apple's third `Retry-After` form: an instant, converted here so the
+        // ledger stores something clock-independent (§8, rev 7).
+        .rateLimited(retryAfter: limited.resetDate.map { retryAfter(resetAt: $0, since: now) })
+    case .guardrailViolation:
+        .guardrailViolation
+    case .refusal:
+        // Apple's `Refusal` carries a `debugDescription` and an on-demand
+        // `explanation`; §8 projects neither. The name says debug, human detail
+        // never classifies, and `explanation` is a *second inference call* whose
+        // output has no business being persisted into an append-only ledger.
+        .refusal
+    case .unsupportedCapability:
+        .unsupported(.capability)
+    case .unsupportedTranscriptContent:
+        .unsupported(.transcriptContent)
+    case .unsupportedGenerationGuide:
+        .unsupported(.generationGuide)
+    case .unsupportedLanguageOrLocale:
+        .unsupported(.languageOrLocale)
+    case .timeout:
+        .transport(.timeout)
+    @unknown default:
+        .unrecognized(description: String(describing: error))
+    }
+}
+
+// MARK: - LanguageModelSession.Error (27) — §8's one exclusion
+
+/// Session **misuse**, split out of the iOS 26 enum at 27 — and the reason §8
+/// has an exclusion at all.
+///
+/// Both cases are LedgerKit defects by construction, so both land on the loud
+/// floor with the `"driver:"` prefix and **never** on `.rateLimited`. At 26 a
+/// single enum carried `concurrentRequests` beside `rateLimited`, which is how
+/// "a busy session surfaces as rate limiting" became a plausible reading of the
+/// evidence — and classifying a programming error as `retryable` would have had
+/// apps politely backing off from their own bug.
+@available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
+func normalize(_ error: LanguageModelSession.Error) -> GenerationError {
+    switch error {
+    case .concurrentRequests:
+        DriverDiagnostic.sessionBusy.error
+    case .transcriptMutationWhileResponding:
+        // The driver owns the session for the generation's duration, so nothing
+        // else can be mutating its transcript: this is unreachable unless
+        // LedgerKit itself is wrong (§8).
+        DriverDiagnostic.transcriptMutatedWhileResponding.error
+    @unknown default:
+        .unrecognized(description: String(describing: error))
+    }
+}
+
+// MARK: - SystemLanguageModel.Error (27) — rev 9: §8 does not mention this family
+
+/// The on-device model's own error type, which §8's coverage table predates.
+///
+/// Found via the deprecated family's replacement note (`assetsUnavailable` at 26
+/// says "use `SystemLanguageModel/Error/assetsUnavailable` instead"), so it is
+/// the modern spelling of a condition §8 *does* already have a home for: model
+/// assets not on the device is `modelNotReady`, which classifies
+/// `recoverableUpstream(.awaitModelDownload)` — exactly the affordance a user
+/// waiting on a download needs. **Proposed for rev 9**, since §8 claims totality.
+@available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
+func normalize(_ error: SystemLanguageModel.Error) -> GenerationError {
+    switch error {
+    case .assetsUnavailable:
+        .modelUnavailable(.modelNotReady)
+    @unknown default:
+        .unrecognized(description: String(describing: error))
+    }
+}
+
+// MARK: - PrivateCloudComputeLanguageModel.Error (27) — rev 9: nor this one
+
+/// Private Cloud Compute's error family. §8 mentions PCC only for its smaller
+/// *availability* reason set and not for this enum at all — **proposed for
+/// rev 9**.
+///
+/// The mappings follow §8's existing rules rather than inventing new ones, and
+/// the third is the interesting one: §8 already anticipated it in prose.
+@available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
+func normalize(_ error: PrivateCloudComputeLanguageModel.Error, since now: Date) -> GenerationError {
+    switch error {
+    case .networkFailure:
+        // The request never reached a model — §8's "network, not model" bucket.
+        .transport(.connectivity)
+    case .quotaLimitReached(let quota):
+        // Carries a `resetDate`, which is the same instant-shaped `Retry-After`
+        // Apple's `RateLimited` uses, so it normalizes the same way and gets the
+        // same `retryable(after:)` affordance.
+        .rateLimited(retryAfter: quota.resetDate.map { retryAfter(resetAt: $0, since: now) })
+    case .serviceUnavailable:
+        // No status to lift and no duration to offer, so §8's rule-4 tail:
+        // `terminal`, loudly, with a stable code an app can override. §8
+        // describes this exact situation — "if a provider family turns out to
+        // emit nil-status transients, that's a mapping override keyed on code"
+        // — so the honest landing is the one that leaves Regenerate as the
+        // manual retry rather than inventing a 503 the provider never sent.
+        .providerFailure(status: nil, code: "serviceUnavailable", message: nil)
+    @unknown default:
+        .unrecognized(description: String(describing: error))
+    }
+}
+
+// MARK: - LanguageModelSession.GenerationError (26, deprecated) — the other family
+
+/// The iOS 26 family: **deprecated, not removed**, so a provider package built
+/// against 26 can still throw it and normalization must still recognize it
+/// (§8, rev 7).
+///
+/// Available at 26, which makes this the one Apple family whose fixtures run on
+/// a macOS 26 host — the opposite of what D35 expected, and the reason it is
+/// mapped in Phase 1 rather than deferred.
+///
+/// It carries **two cases §8's coverage table does not account for**, and both
+/// are decided here rather than left to fall through the floor by accident —
+/// which is the defect rev 6 fixed for the four `unsupported*` cases, arriving
+/// by a different door. Both are **proposed for rev 9**.
+func normalize(_ error: LanguageModelSession.GenerationError) -> GenerationError {
+    switch error {
+    case .exceededContextWindowSize:
+        // The 26 spelling of `contextSizeExceeded`, with no numbers to report —
+        // which is exactly what LedgerKit's optional fields are for: nil says
+        // "not reported" where 0 would claim a measurement.
+        .contextSizeExceeded(contextSize: nil, tokenCount: nil)
+    case .assetsUnavailable:
+        // **rev 9.** Its own deprecation note names the replacement
+        // (`SystemLanguageModel.Error.assetsUnavailable`), and model assets that
+        // are not present is `modelNotReady` — the same landing §8 already gives
+        // PCC's `systemNotReady`.
+        .modelUnavailable(.modelNotReady)
+    case .guardrailViolation:
+        .guardrailViolation
+    case .unsupportedGuide:
+        .unsupported(.generationGuide)
+    case .unsupportedLanguageOrLocale:
+        .unsupported(.languageOrLocale)
+    case .decodingFailure:
+        // **rev 9.** Guided generation's output failed to decode — a condition
+        // v0.1 never asks for (N8: LedgerKit requests plain text), so there is no
+        // 1:1 home for it and rule 1 does not apply. §8's rule-4 tail does:
+        // a provider-custom failure with a stable identifier, classifying
+        // `terminal`, which is right because a decode failure is not fixed by
+        // retrying the same request. Apple's `Context.debugDescription` is
+        // deliberately *not* carried into `message` — §8 declines to project
+        // debug detail, and the ledger outlives the session that produced it.
+        .providerFailure(status: nil, code: "decodingFailure", message: nil)
+    case .rateLimited:
+        // The 26 enum reports no duration at all; nil says "not reported".
+        .rateLimited(retryAfter: nil)
+    case .concurrentRequests:
+        // §8's exclusion, in the family where the confusion started: this sits
+        // in the *same enum* as `rateLimited`, and mapping it there would
+        // classify a LedgerKit bug as `retryable`.
+        DriverDiagnostic.sessionBusy.error
+    case .refusal:
+        .refusal
+    @unknown default:
+        .unrecognized(description: String(describing: error))
+    }
+}
