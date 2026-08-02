@@ -460,7 +460,8 @@ final class ParkingStore: PersistenceStore {
 ///
 /// **Store-level, not model-level, and that is the whole point of the seam.**
 /// `Understudy.ScriptedLanguageModel` sits on the far side of a `GenerationDriver`
-/// that does not exist until M6, and cannot execute on a macOS 26 machine at all.
+/// that did not exist until M6, and cannot execute below 27 at all — which is
+/// what the build machine ran at M5, when this double was written.
 /// This double conforms to the D21 protocol directly, so every store behaviour —
 /// single-flight, start atomicity, the flush loop, cancellation — is testable
 /// today with no Foundation Models anywhere.

@@ -1,7 +1,7 @@
 # LedgerKit v0.1 — Design Specification
 
-**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G is **complete — all six batches drafted**; what remains before ratification is the alignment pass, not more amendments. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
-**Date:** rev 9 in progress 2026-08-02 (rev 8: 2026-07-28, rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
+**Status:** **rev 9 — ratified 2026-08-02 at the M6 boundary**; subsequent amendments open rev 10. Rev 8 was ratified 2026-07-28 at the M5 boundary; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
+**Date:** 2026-08-02 (rev 8: 2026-07-28, rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
 **Targets:** iOS 27 / macOS 27 (Foundation Models `LanguageModel` protocol as inference substrate)
 **Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. All six batches landed. No invariant weakens, and **nothing touches the wire** — batch D resolved that question, not by thrift (pre-1.0 the wire is free) but because §8 spends cases on affordances rather than conditions.
 **Changes from rev 7:** Appendix F — two items from the M4 boundary audit, nine from M5. No invariant weakens, no event kind changes, nothing touches the wire.
@@ -951,15 +951,7 @@ Rev 8 was opened by the **M4 boundary audit** (2026-07-27) and closed by **M5** 
 
 ## Appendix G — Changes from rev 8
 
-> ### ⚠️ **REV 9 IS DRAFTED IN FULL AND NOT YET RATIFIED.**
->
-> All six batches have landed — A (cancellation & the straddle), B (the stream's
-> honest properties), C (usage), D (the error taxonomy's edges), E (the context
-> budget), F (the sketch & an empty §14). **Nothing is outstanding.**
->
-> Rev 9 ratifies at the **M6 boundary**, which is the remaining step: the
-> alignment pass (ROADMAP, CLAUDE.md, the `Sources/**` retired-phrase sweep per
-> amendment) and both suites green. Sign-off state is tracked in `M6-PLAN.md` §6.
+**Ratified at the M6 boundary (2026-08-02); subsequent amendments open rev 10.** Six batches — A (cancellation & the straddle), B (the stream's honest properties), C (usage), D (the error taxonomy's edges), E (the context budget), F (the sketch & an empty §14) — each signed off, landed, and swept through `Sources/**` before the next opened. Everything below is implemented and under test as of ratification: **415 tests** across both packages, green on the macOS 27 host and the iOS 27 simulator.
 
 Rev 9 is **M6's revision** — the milestone in which `Session/` first ran against
 the real framework — and its character is different from rev 8's. Rev 8 was

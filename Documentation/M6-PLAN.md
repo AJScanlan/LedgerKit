@@ -1,21 +1,44 @@
 # M6 Implementation Plan — `GenerationDriver`: the session seam
 
-**Status:** 🚧 **IN PROGRESS** — drafted 2026-07-28 at the M5 boundary; **Phase 0
-landed 2026-07-29** (335 green: 314 `LedgerKit` + 21 `Understudy`, warning-free,
-and the 314 also green on the iOS 27 simulator). **Next: Phase 1** — the pure
-components. Three items are still awaiting gate sign-off; they are listed under
-Phase 0's *Gate state*, and none of them blocks Phase 1.
-**Companion to:** [ROADMAP.md](./ROADMAP.md) (M6 section) · [SPEC.md](./SPEC.md) §7 (all of it), §8, §10.4–10.5, §14 (the four residues) · [M4-PLAN.md](./M4-PLAN.md) §2 (the SDK fact table + its correction) · [M5-PLAN.md](./M5-PLAN.md) §7 (the six inherited handoffs)
-**Baseline:** M0–M5 done and audited, **331 tests green** (310 `LedgerKit` + 21 `Understudy`), SPEC **rev 8 ratified 2026-07-28**. The M5 boundary audit (2026-07-28) found two store bugs and four contract-surface issues, **all folded into Phase 0 below** — the store must enter M6 clean, because M6 is the milestone where a store regression has to unambiguously point at M6 (M5 handoff 6).
-**Spec work:** rev 9 opens with its first amendment and **ratifies at the M6 boundary**. The inventory is §6; SPEC edits require approval first, drafted scratch-first per the standing pattern.
+**Status:** ✅ **DONE — M6 closed 2026-08-02.** All phases landed (0, 1, 1.5, 2,
+3, 3.5, 4, 5 — the three half-numbered ones were unplanned and are the more
+interesting half of the record). **415 green** (392 `LedgerKit` + 23
+`Understudy`, warning-free) on the macOS 27 host *and* the iOS 27 simulator.
+**Every exit criterion met**, one of them restated rather than satisfied as
+written (cut line 4 — see Phase 4). **SPEC rev 9 ratified at this boundary**
+(Appendix G, six batches); **nothing touches the wire**. All four §14
+behavioural residues are **answered**, so §14 carries no open questions for the
+first time since rev 1.
 
-> **How to use this document.** This plan persists across sessions, agents, and
-> compactions — it is the working memory for M6. Update the checkboxes and the
-> per-phase status lines as work lands; record anything that changes a decision
-> in the Decision log (D-numbers continue M5's global sequence at **D30** — a
-> bare "D8" means the same thing in every plan); do not silently deviate. Each
+**Read this next, if you are picking up after M6:** the milestone's output was
+not the driver — it was **the measurements that contradicted what this
+repository believed**. They are collected in §10's status log and in SPEC
+Appendix G; the four that changed a §7 sentence are silent cancellation,
+fragment coalescing, augmented usage, and a 4096-token context window exhausted
+in two turns. ⚠️ The substrate also moved mid-milestone (the build machine
+reached macOS 27 with Apple Intelligence live), which is why parts of the
+earlier phases below describe a host that no longer exists. Those passages are
+left intact on purpose: they were correct on their evidence, and what changed was
+the world rather than the argument.
+
+**Companion to:** [ROADMAP.md](./ROADMAP.md) (M6 section) · [SPEC.md](./SPEC.md) §7 (all of it), §8, §10.4–10.5, §14 (**the four residues, all now answered**) · [M4-PLAN.md](./M4-PLAN.md) §2 (the SDK fact table + its correction) · [M5-PLAN.md](./M5-PLAN.md) §7 (the six inherited handoffs)
+**Baseline:** M0–M5 done and audited, **331 tests green** (310 `LedgerKit` + 21 `Understudy`), SPEC **rev 8 ratified 2026-07-28**. The M5 boundary audit (2026-07-28) found two store bugs and four contract-surface issues, **all folded into Phase 0 below** — the store must enter M6 clean, because M6 is the milestone where a store regression has to unambiguously point at M6 (M5 handoff 6).
+**Spec work:** ✅ **rev 9 ratified 2026-08-02 at the M6 boundary** (SPEC Appendix G). The inventory is §6, which also records the batching and sign-off state. The standing pattern held and is worth repeating at M7: draft to a scratch file, sign off **item by item**, land in batches — and run the `Sources/**` retired-phrase sweep **after each batch rather than once at the end**, which is what kept it finding things (seven stale sites) instead of becoming a formality.
+
+> **How to use this document — now that M6 is closed.** This is a **record, not
+> a live plan**: every checkbox is resolved and the phases are history. Read it
+> for the *reasoning*, which is the part that survives — especially the phase
+> gates, where a decision was made and the evidence for it is written down beside
+> the decision. Do not update it further; M7 gets its own plan, and D-numbers
+> continue the global sequence at **D38**.
+>
+> While M6 was live it worked as follows, and the pattern is worth reusing: the
+> plan is working memory across sessions, agents and compactions; checkboxes and
+> per-phase status lines are updated as work lands; anything that changes a
+> decision goes in the Decision log (D-numbers are global — a bare "D8" means the
+> same thing in every plan); deviations are recorded rather than silent. Each
 > phase ends with a **review gate**: stop, run both packages' suites, and review
-> with Alexander before starting the next phase.
+> with Alexander before starting the next.
 
 > **TL;DR (kept from M5's experiment — it earned its keep).** M6 writes the one
 > production `GenerationDriving` conformance: `Session/GenerationDriver`, over a
@@ -1131,10 +1154,12 @@ item 13 below.
 
 ### Phase 5 — Wrap-up: rev 9 ratification + alignment
 
-**Status:** ☐ not started
+**Status:** ☑ **landed 2026-08-02 — 415 green (392 + 23), warning-free, M6 closed.**
 
-- [ ] Draft §6's rev 9 items to a scratch file; item-by-item sign-off; land in
-      SPEC as Appendix G; **ratify rev 9 at the boundary**.
+- [x] Draft §6's rev 9 items to a scratch file; item-by-item sign-off; land in
+      SPEC as Appendix G; **ratify rev 9 at the boundary**. Done in six batches,
+      each signed off, landed, and swept before the next opened — which is what
+      kept the sweep finding things rather than becoming a formality at the end.
 - [x] **Land the repo defects item 16 names**, first — they are code, not prose,
       and ratifying a revision against a suite with an unpassable residue test
       is how a boundary audit finds you. Done 2026-08-02: the residue tests now
@@ -1142,12 +1167,12 @@ item 13 below.
       case is handled rather than fatal. **One half remains blocked by design**
       — `appleErrorSurface`'s `ParsingError` disposition cannot be corrected
       until §8 decides item 15.
-- [ ] Alignment: ROADMAP M6 struck through against its exit criteria;
+- [x] Alignment: ROADMAP M6 struck through against its exit criteria;
       CLAUDE.md status rewritten with the M6 landmarks; the `Sources/**`
       sweep **including the retired-phrase grep for every rev 9 amendment**
       (the mechanism B1 proved necessary); this plan's §8 filled; §9/§10 logs
       closed.
-- [ ] ⚠️ **CLAUDE.md's substrate paragraph is now actively misleading** and is
+- [x] ⚠️ **CLAUDE.md's substrate paragraph was actively misleading** and is
       the highest-value line of the alignment pass, because it tells a future
       session something false about what it can run: it states the host is
       **macOS 26**, that 27 APIs "cannot execute on this macOS 26 host", and
@@ -1157,8 +1182,14 @@ item 13 below.
       other machines, and the iOS tier) rather than because this host cannot
       launch the binary, and the note should say so or the rule will look
       obsolete to whoever reads it next and get "fixed".
-- [ ] Handoffs to M7/M8/M9 (§7) verified against what actually landed.
-- [ ] Both suites green, warning-free; counts in §10.
+- [x] Handoffs to M7/M8/M9 (§7) verified against what actually landed. **Two
+      gained substance from rev 9:** M7's overlay inherits a `.streaming` state
+      whose partial is now known to be prefix-stable in practice (§7.3's
+      consequence 4), and M8's compaction question is **no longer abstract** —
+      the on-device window is 4096 tokens and two ~2k turns exhaust it, so
+      compaction is a shipping requirement for on-device apps rather than a
+      v0.3 nicety. M9's naming review still owns the `GenerationID` collision.
+- [x] Both suites green, warning-free; counts in §10.
 
 ---
 
@@ -1457,7 +1488,7 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 
 ---
 
-## 8. Coverage traceability (fill at Phase 5)
+## 8. Coverage traceability (filled at Phase 5, 2026-08-02)
 
 | Obligation | Suite / evidence | Status |
 |---|---|---|
@@ -1471,12 +1502,14 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 | §7.1 rehydration: instructions exact, partials included, one prompt entry | `GenerationDriverTests` — asserted on the spy's recorded transcript, which is what the *model* saw | ☑ |
 | §7.2 outcome boundary: provider errors and zero-token failures are `Outcome`s | `GenerationDriverTests` | ☑ |
 | §7.5 cancellation returns `.cancelled` | `GenerationDriverTests` — **found the silent-stream bug**; partial retention asserted as a prefix property, since the framework may have vended nothing yet | ☑ |
-| §7.3 fail-loud on non-prefix | tier 1 exhaustively (`SnapshotDiffTests`); **end-to-end unreachable** — no scripted pacing makes a revision observable (Phase 2 finding 3) | ⚠️ partial |
 | §7.6 tool records | `GenerationDriverTests` (one record per invocation; all three policies) + `DriverPipelineTests` (through store and reducer to `Message.toolRecords`) — unblocked by `Script.Step.callTool` at Phase 3.5 | ☑ |
 | §11 sketch runs against the real driver | `DriverPipelineTests.sketchRunsAgainstTheRealDriver` | ☑ |
 | Cancellation chaos through the real session | `DriverPipelineTests` — parked point × both stop mechanisms, plus the before-any-text case; partial asserted as a prefix property | ☑ |
-| `isResponding` gate; "driver:" prefix convention | tier-1/2 per surface | ☐ |
-| Four §14 residues answered or deferred-with-reason | **All four answered.** `SessionResidueTests` (OQ6: thrown) + `DeviceResidueTests` run under `LEDGERKIT_DEVICE=1` on the macOS 27 host, 2026-08-02 — usage **inclusive** (221/209), context **4096**, and **0 prefix violations in 412 real snapshots** (the last measured beside the suite, since the shipped test's prompt returns empty — item 16). Rev 9 items 14–16 | ☑ |
+| `isResponding` gate; "driver:" prefix convention | `DriverDiagnostic` is the single mint point for driver-side `unrecognized` values, asserted in `NormalizationTests`; the gate's behaviour is covered by `SessionResidueTests.concurrentRequestsIsThrown`, which proves the condition the gate defends against is *thrown* and normalizes to `driver: session busy` | ☑ |
+| §7.3 fail-loud on non-prefix | tier 1 exhaustively (`SnapshotDiffTests`); **end-to-end unreachable, and rev 9 says why it stays** — 412 real snapshots, zero revisions, and no scripted pacing makes one observable | ⚠️ by design |
+| §8 totality over four Apple families + the wrapper + the untyped tail | `AppleErrorNormalizationTests` (all four 27 families), `NormalizationTests` (deprecated 26 family, `URLError`, `ToolCallError` unwrapping incl. the cyclic bound, the `emptyResponse` landing); `AppleErrorSurfaceTests` pins the manifest and the SDK build string | ☑ |
+| Rev 9's amendments carried into code | per-batch `Sources/**` retired-phrase sweep — **seven stale sites found and fixed** across six batches, none of which any test could have caught | ☑ |
+| Four §14 residues **all answered** | **All four answered.** `SessionResidueTests` (OQ6: thrown) + `DeviceResidueTests` run under `LEDGERKIT_DEVICE=1` on the macOS 27 host, 2026-08-02 — usage **inclusive** (221/209), context **4096**, and **0 prefix violations in 412 real snapshots** (the last measured beside the suite, since the shipped test's prompt returns empty — item 16). Rev 9 items 14–16 | ☑ |
 | FM import boundary (guardrail 2) | `ImportBoundaryTests` — imports *and* type names, both with vacuity guards; mutation Ⓕ | ☑ |
 | Healthy-log property over driver-produced logs | `DriverPipelineTests` — every pipeline test that writes a log | ☑ |
 
@@ -1499,6 +1532,7 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-02 | **Phase 5 landed — M6 CLOSED** | 415 (392 + 23) | **SPEC rev 9 drafted in full (Appendix G, six batches) and ratified at this boundary; nothing touches the wire.** All four §14 residues answered, so §14 has no open questions for the first time since rev 1. The milestone's honest summary: rev 8 was *sentences the design assumed and never wrote down*; rev 9 is **measurements that contradicted what a reader would reasonably have believed** — silent cancellation, coalesced fragments, augmented usage, a 4096-token window exhausted in two turns, and a "guided-generation-only" error arriving on the plain-`String` path. Alignment done: ROADMAP M6 struck through (its Claude-package exit criterion restated against cut line 4), CLAUDE.md's substrate paragraph corrected — it described a macOS 26 host that could not run the gated tier, which stopped being true mid-milestone — §8 traceability filled, handoffs verified. ⚠️ The per-batch retired-phrase sweep found **seven stale sites in code**, none of which any test could have caught, including two of my own corrections that *quoted* the wording they retired |
 | 2026-08-02 | **Phase 5 opens: residue tests assert their answers** | 414 (391 + 23) | Item 16's code, landed ahead of the SPEC draft. `realProviderNeverRevises` swept onto a prompt *list* with two vacuity guards (its single prompt was one of the two the model refuses, so it could never have answered on any hardware); `contextBudget` and `usageInclusivity` converted from `Issue.record` reporters into assertions — **4096 pinned as a tripwire**, overflow merely bounded, since `tokenCount` varies run to run. ⚠️ **One assertion was wrong and the failure was the finding:** guarding vacuity with `cached > 0` failed the moment the test ran beside its siblings, because Swift Testing parallelises and the KV cache is shared machine state. The eviction is what *proved* inclusivity — `input.total=221` with `cached=209` **and** with `cached=0`, where exclusive accounting would have reported ~12. Cache warmth is environmental; nothing may assert on it. 391 green with the flag (residues executing) and without (skipped), stable over three runs |
 | 2026-08-02 | **Phase 4's deferrals collected** (no code change) | 414 (391 + 23) | **The build machine is now macOS 27.0 (26A5388g)**, Apple Intelligence is live on it, and the on-device model generates — so `LEDGERKIT_DEVICE=1` is honest here and **all three hardware-deferred residues answered themselves, unchanged**: usage **inclusive** (`input.total=221 cached=209`, stable over three runs), the context budget is **exactly 4096** (refused after *two* ~2k turns — §7.1 overflows sooner than assumed), and a real provider **never revised across 412 snapshots**. Two structural findings: `swift test` now **executes** the 27-gated tier natively (the simulator becomes a second substrate rather than the only one, vindicating D31 again), and ⚠️ **`GeneratedContent.ParsingError` is reachable on the plain-`String` path** — the manifest dispositions it unreachable on prose the observation falsifies, and a routine empty response normalizes to `.terminal`, denying a retry for something trivially retryable. Rev 9 items **14–16**; the surface tripwire could not have caught it (it pins shape, and the shape was right) |
 | 2026-08-01 | **Phase 4 landed** | 414 (391 + 23) | §14's residues become tests rather than notes. **OQ6 answered: `concurrentRequests` is *thrown*** — the gate and §8's exclusion stand as designed, no spec wording changes — and it is substrate-independent, so it runs in CI forever. The other three are device-gated (`LEDGERKIT_DEVICE=1`) and written to *answer* their questions, because the simulator reports the on-device model `.available` and then **fails to generate**. **Cut line 4 invoked** for the Claude package; breadth is served instead by four Apple families the Phase 1 sweep found. Two findings with no §14 row: availability is advisory, and a real Apple failure arrived as an untyped `NSError` outside the typed taxonomy (rev 9 item 13) |

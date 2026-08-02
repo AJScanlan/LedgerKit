@@ -7,8 +7,12 @@ import FoundationModels
 // in tier 1.** Phase 0's reading session found the tiering is not where D35
 // assumed: `LanguageModelError` is 27-only, but the *deprecated* iOS 26
 // `LanguageModelSession.GenerationError` is available at 26, so its mapping and
-// its fixtures run in every `swift test` on this macOS 26 host. Gating the whole
-// file would have pushed them onto the simulator for nothing.
+// its fixtures run in every `swift test` on **any** supported host, 26 included.
+// Gating the whole file would have pushed them onto a 27 runtime for nothing.
+//
+// The distinction still earns its keep now that the build machine is on macOS 27
+// and runs both tiers: the package floor is 26, so a 26 host — a CI runner, a
+// contributor's machine — must still be able to exercise this half.
 //
 // **How many families there are was itself a finding.** §8's coverage table
 // accounts for `LanguageModelError` and the availability reasons. The 27 SDK
@@ -245,8 +249,10 @@ func normalize(_ error: PrivateCloudComputeLanguageModel.Error, since now: Date)
 /// (§8, rev 7).
 ///
 /// Available at 26, which makes this the one Apple family whose fixtures run on
-/// a macOS 26 host — the opposite of what D35 expected, and the reason it is
-/// mapped in Phase 1 rather than deferred.
+/// a host below 27 — the opposite of what D35 expected, and the reason it is
+/// mapped in Phase 1 rather than deferred. (The build machine has since reached
+/// macOS 27 and runs every tier, but the package floor is 26 and this family is
+/// what a 26 host can still cover.)
 ///
 /// It carries **two cases §8's coverage table does not account for**, and both
 /// are decided here rather than left to fall through the floor by accident —

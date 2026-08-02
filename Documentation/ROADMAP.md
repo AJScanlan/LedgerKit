@@ -189,7 +189,7 @@ The concurrency boundary and the public write API (§6.5, §11). Still no FM —
 **Beta risk:** none; the milestone imports no Foundation Models anywhere. It *defines* the driver protocol that M6 implements.
 
 ### M6 — `GenerationDriver`: the session seam (⚠️ ALL beta risk)
-The one OS-coupled module (§7). Expect one verification evening per beta — but **a much shorter one than this roadmap was planned around**: OQ1–9 are all closed as of rev 7, every one by reading the SDK, and what is left here is four *behavioural* residues (table under Beta-verification, below). The API shapes this milestone consumes are known; what is unknown is how they act.
+The one OS-coupled module (§7). Expect one verification evening per beta — but **a much shorter one than this roadmap was planned around**: OQ1–9 all closed at rev 7 by reading the SDK, and the four *behavioural* residues that remained are **all answered as of rev 9** (2026-08-02). The API shapes this milestone consumes were known going in; how they *act* is what M6 measured, and four of those answers contradicted what this document had assumed. ⚠️ The per-beta evening is now scheduled by **CI rather than memory** — the surface tripwires and the residue suite both re-ask their questions on a weekly run, which is the point of writing answers as tests.
 
 **Build order, decision log (D30–D37) and phase gates: [M6-PLAN.md](./M6-PLAN.md)** (drafted 2026-07-28 at the M5 boundary; Phase 0 landed 2026-07-29).
 
@@ -215,8 +215,16 @@ The one OS-coupled module (§7). Expect one verification evening per beta — bu
 - **Error normalization** (§8): thrown error → `GenerationError`, one file per provider family; fixture-tested (§10.5); the lift rules — 429 / `Retry-After` in both RFC forms **and Apple's `RateLimited.resetDate`**, 408/timeout → transport. **Two error families, not one:** `LanguageModelError` and the deprecated-but-present iOS 26 `LanguageModelSession.GenerationError`. And D17's payload means `contextSizeExceeded` now carries `contextSize`/`tokenCount` — normalization should populate them where Apple's error provides them.
 
 **Satisfies:** G3, completes G4/G5, G8 (provider swap).
-**Exit:** on-device + Claude-package mappings pass §10.5 fixtures; a real stream captured & reduced end-to-end; the four behavioural residues answered and written back into the spec where they change anything.
+**Exit:** ~~on-device + Claude-package mappings pass §10.5 fixtures~~ → **on-device + three further Apple families + the deprecated 26 family + `URLError` pass §10.5 fixtures** (the Claude package is not in this beta ring; **cut line 4 invoked**, and Phase 1's sweep found more Apple families than §8 named, so breadth is *wider* than this criterion assumed — what is missing is a third-party family, and the generic `ProviderFault` path is what one would use); ~~a real stream captured & reduced end-to-end~~ **met at Phase 3**; ~~the four behavioural residues answered and written back into the spec~~ **all four answered and written back — SPEC rev 9, Appendix G.**
 **Beta risk:** **high and expected.** This milestone re-opens each beta. Cut-line fallbacks live here (see below).
+
+> ### ☑ **M6 DONE 2026-08-02 — 415 tests green** (392 `LedgerKit` + 23 `Understudy`, warning-free), on the macOS 27 host *and* the iOS 27 simulator.
+>
+> **Every exit criterion is met**, with one restated above rather than satisfied as written. The milestone's real output was not the driver — it was **four measurements that contradicted things this document asserted**: a `ResponseStream` that ends *silently* on cancellation (so the driver returned `.completed` for a stopped generation until a check landed), a framework that **coalesces** fragments (so §7.3's round trip recovers text, never boundaries), usage that is **augmented** rather than passed through, and an on-device context budget of **4096 tokens exhausted in two turns**.
+>
+> **The substrate moved mid-milestone**, which is worth recording because it validates D31: the build machine reached **macOS 27** with Apple Intelligence live, so the three hardware-deferred residues answered themselves **with no code change** — a runtime `#available` gate reclassified the same binary, where a bumped package floor could not have. `swift test` now executes the 27-gated tier natively; the simulator is a second substrate rather than the only one.
+>
+> **SPEC rev 9** (Appendix G, six batches) is drafted in full and ratifies at this boundary. **Nothing touches the wire.**
 
 ### M7 — Observable projection + `overlay_live`
 The `@MainActor @Observable` read side (§6.2, §7.4, §11).
