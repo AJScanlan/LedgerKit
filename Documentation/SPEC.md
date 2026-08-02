@@ -1,9 +1,9 @@
 # LedgerKit v0.1 — Design Specification
 
-**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G records what has landed so far — **batches A and B**. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
+**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G records what has landed so far — **batches A, B and C**. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
 **Date:** rev 9 in progress 2026-08-02 (rev 8: 2026-07-28, rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
 **Targets:** iOS 27 / macOS 27 (Foundation Models `LanguageModel` protocol as inference substrate)
-**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. Batches A–B landed; four outstanding. No invariant weakens; whether anything touches the wire is batch D's open question.
+**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. Batches A–C landed; three outstanding. No invariant weakens; whether anything touches the wire is batch D's open question.
 **Changes from rev 7:** Appendix F — two items from the M4 boundary audit, nine from M5. No invariant weakens, no event kind changes, nothing touches the wire.
 
 ---
@@ -149,7 +149,7 @@ public struct ToolRecord: Sendable, Codable {
 }
 ```
 
-`StopInfo` and `ModelDescriptor` remain illustrative. `StopInfo` carries usage from `Response.usage` — spanning input/output with cached and reasoning token counts (**field names verified at rev 7; the mapping table is in §7.7**) — plus `stopReason: String?` and `resolvedModelID: String?`. **Both of those are per-provider convention, not framework surface (rev 8, scoping rev 7's "verified" claim honestly):** the verification covered the four usage fields, and the M4 audit read the interface for the rest — no stop-reason key exists anywhere in the 27 SDK (§7.7), and `resolvedModelID` was already known to be convention (§7.8, OQ8). **Nil is the expected value for both on-device**, and a nil must never read as a failure. `ModelDescriptor` identifies the *requested* provider + model + version well enough for branch-compare across models, and rev 7 settles that it is **app-supplied**: nothing in the framework exposes a model-identity key to derive it from. Evolution note: structs with optional fields tolerate additive change; *enums* are the evolution cliffs. A new enum case inside a non-terminal payload (e.g. `ToolRecord.Status`) quarantines that event only — contained loss, accepted. Terminals get the tolerance exception above.
+`StopInfo` and `ModelDescriptor` remain illustrative. `StopInfo` carries usage from `Response.usage` as a **`TokenUsage`** — four optional counts spanning input and output, including cached and reasoning tokens (**field names verified at rev 7; the mapping table is in §7.7**, which cites this section for the type) — plus `stopReason: String?` and `resolvedModelID: String?`. **Both of those are per-provider convention, not framework surface (rev 8, scoping rev 7's "verified" claim honestly):** the verification covered the four usage fields, and the M4 audit read the interface for the rest — no stop-reason key exists anywhere in the 27 SDK (§7.7), and `resolvedModelID` was already known to be convention (§7.8, OQ8). **Nil is the expected value for both on-device**, and a nil must never read as a failure. `ModelDescriptor` identifies the *requested* provider + model + version well enough for branch-compare across models, and rev 7 settles that it is **app-supplied**: nothing in the framework exposes a model-identity key to derive it from. Evolution note: structs with optional fields tolerate additive change; *enums* are the evolution cliffs. A new enum case inside a non-terminal payload (e.g. `ToolRecord.Status`) quarantines that event only — contained loss, accepted. Terminals get the tolerance exception above.
 
 ### 6.2 Derived state
 
@@ -411,7 +411,7 @@ FM executes registered tools inside the session. The driver observes invocations
 
 ### 7.7 Usage
 
-`Response.usage` (new in iOS 27) → captured in `StopInfo` on completion. Token counts span input and output including cached and reasoning tokens (**field names verified against the 27 SDK, rev 7 — the ⚠️ is closed**), and `ResponseStream.Snapshot` carries `usage` too, so a long generation's cost is observable mid-stream and not only at the end. Projected on `Message.stopInfo` (§6.2, rev 4): per-message token/cost display is table stakes for BYO-key apps, and recorded-but-unprojectable data is a bug, not privacy.
+`Response.usage` (new in iOS 27) → captured in `StopInfo` on completion. Token counts span input and output including cached and reasoning tokens (**field names verified against the 27 SDK, rev 7 — the ⚠️ is closed**), and `ResponseStream.Snapshot` carries `usage` too, so a long generation's cost is observable mid-stream and not only at the end. **The number is the framework's, not the provider's (rev 9, measured at M6).** Foundation Models adds its own output-token accounting on top of whatever a provider reports, so a snapshot's `usage` is *augmented* rather than passed through — a scripted provider reporting a known output count surfaces a larger one. What the ledger records is therefore a faithful account of what the **framework** counted, and not a claim about what the provider counted; an app reconciling against a provider's own dashboard should expect the two to differ, and neither is wrong. Projected on `Message.stopInfo` (§6.2, rev 4): per-message token/cost display is table stakes for BYO-key apps, and recorded-but-unprojectable data is a bug, not privacy.
 
 The mapping onto `TokenUsage` (§6.1) is 1:1 and total:
 
@@ -422,7 +422,7 @@ The mapping onto `TokenUsage` (§6.1) is 1:1 and total:
 | `Usage.Output.totalTokenCount` | `outputTokens` |
 | `Usage.Output.reasoningTokenCount` | `reasoningTokens` |
 
-**One asymmetry, deliberate:** Apple's four fields are non-optional `Int`; LedgerKit's are `Int?`. The ledger records what a provider *reported*, and a provider outside Apple's path may report nothing — nil means "not reported," which zero cannot say. **One M6 empirical residue:** whether `Input.totalTokenCount` is inclusive of `cachedTokenCount` is not stated by the interface, and it decides whether an app may sum the two. Record the answer here when M6 measures it; until then apps should display, not arithmetise.
+**One asymmetry, deliberate:** Apple's four fields are non-optional `Int`; LedgerKit's are `Int?`. The ledger records what a provider *reported*, and a provider outside Apple's path may report nothing — nil means "not reported," which zero cannot say. **Measured at M6, and the answer is *inclusive* (rev 9).** `Input.totalTokenCount` counts the whole input, of which `cachedTokenCount` is a subset. The evidence is an invariance rather than an arithmetic coincidence: the same second turn reports `input.total = 221` whether `cached` is **209 or 0** — cache warmth is environmental, and a concurrent session evicts it — where accounting *exclusive* of the cache would have reported roughly a dozen tokens on the warm run and 221 on the cold one. Apple's own aggregate agrees: `Usage.totalTokenCount == input.total + output.total`, with the cache counted once. **So an app must never sum `input.total + cached`** — that double-counts. Add across the input/output boundary; never within it. The residue existed precisely because the interface does not say, and a reader guessing wrong would inflate every cost display on a warm conversation.
 
 **`stopReason` has no source in the framework (rev 8, from the M4 audit's interface read).** `Response` is `{content, rawContent, transcriptEntries, usage}`, and no stop-reason key exists anywhere in the 27 SDK — the only free-form reporting channels are the `metadata` dictionaries (on `Usage` and the executor channel's `Metadata`). `StopInfo.stopReason` therefore has exactly `resolvedModelID`'s standing (§7.8): a per-provider convention the driver may populate from metadata where a provider follows one, **nil expected on-device**, never an error. Recorded because rev 7's "field names verified" sentence read as covering it, and a claim of verification has to say what it verified.
 
@@ -900,9 +900,9 @@ Rev 8 was opened by the **M4 boundary audit** (2026-07-27) and closed by **M5** 
 > `M6-PLAN.md` §6.
 >
 > **Landed:** batch A (cancellation & the straddle), batch B (the stream's
-> honest properties).
-> **Outstanding:** C (usage), D (the error taxonomy's edges), E (context
-> budget), F (sketch & residues).
+> honest properties), batch C (usage).
+> **Outstanding:** D (the error taxonomy's edges), E (context budget),
+> F (sketch & residues).
 
 Rev 9 is **M6's revision** — the milestone in which `Session/` first ran against
 the real framework — and its character is different from rev 8's. Rev 8 was
@@ -979,3 +979,30 @@ settled up front, and pre-1.0 the wire is still free to change.
   provider has done this yet* is an observation, while *providers cannot do
   this* would be a property, and only the second would justify deleting the
   branch. Rev 7's framing is confirmed, not relaxed.
+
+### Batch C — usage (from M6 Phase 2/4)
+
+- **The §7.7 residue is answered: input totals are *inclusive* of cached
+  (§7.7).** `Input.totalTokenCount` counts the whole input; `cachedTokenCount`
+  is a subset of it. **So an app must never sum the two** — the residue existed
+  because the interface does not say, and a reader guessing wrong would inflate
+  every cost display on a warm conversation. Worth recording *how* it was
+  settled, because the method was better than the one designed for it: the
+  measurement intended to warm the cache and check `cached ≤ total`, but a
+  parallel test evicted the cache and produced the same `input.total = 221`
+  against `cached = 0` that a warm run produced against `cached = 209`. That
+  **invariance** is the proof — exclusive accounting would have moved the
+  total — and it is stronger than the inequality, which a cold run satisfies
+  trivially. The general form is worth keeping: *an invariant observed across a
+  condition you cannot control beats a threshold measured under one you
+  arranged.*
+- **Reported usage is framework-augmented, not passed through (§7.7).** Apple's
+  framework adds its own output-token accounting on top of a provider's, so the
+  recorded number faithfully describes what the **framework** counted and makes
+  no claim about what the provider counted. One clause, because it decides what
+  an app may honestly *say* a number means — a BYO-key app reconciling against a
+  provider's dashboard will find the two differ, and neither is wrong.
+- **`TokenUsage` is named where §7.7 says it lives (§6.1).** §7.7's mapping
+  table cited "(§6.1)" for a type §6.1 described only by its fields. Cosmetic,
+  and fixed at the target rather than by weakening the citation: a
+  cross-reference that does not resolve teaches a reader to stop following them.

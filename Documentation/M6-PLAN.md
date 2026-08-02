@@ -1175,7 +1175,7 @@ Extend as phases surface more; the M4/M5 pattern.
 > |---|---|---|---|
 > | A — cancellation & the straddle | 1, 2+12, 9 | §7.2, §7.5, §9 | ☑ **landed in SPEC 2026-08-02** (Appendix G) |
 > | B — the stream's honest properties | 10, 14-OQ4, **+ a stale "M6 should"** | §7.3 | ☑ **landed in SPEC 2026-08-02** (Appendix G) |
-> | C — usage | 5, 11, 14-§7.7 | §6.1, §7.7 | ☐ drafted |
+> | C — usage | 5, 11, 14-§7.7 | §6.1, §7.7 | ☑ **landed in SPEC 2026-08-02** (Appendix G) + `TokenUsage` doc |
 > | D — the error taxonomy's edges | 8, 13+15 | §8 | ☐ drafted; **item 15 needs a decision** |
 > | E — context budget | 14-N3 | §7.1, N3 | ☐ drafted |
 > | F — sketch & residues | 3, 4, 6 | §11, §14 | ☐ drafted |
@@ -1203,7 +1203,17 @@ Extend as phases surface more; the M4/M5 pattern.
    construction if the wording warrants it; otherwise no text change needed —
    the spec already promised it and the code now delivers.
 5. **§7.7 — `TokenUsage` cross-reference nit**: the mapping table cites
-   "(§6.1)" for a type §6.1 never shows.
+   "(§6.1)" for a type §6.1 never shows. ☑ **Landed 2026-08-02 (batch C)** —
+   fixed at the *target* (§6.1 now names the type) rather than by weakening the
+   citation, because a cross-reference that does not resolve teaches a reader to
+   stop following them.
+   **Batch C also carried the amendment into public API**, which the inventory
+   did not anticipate: §7.7 now states a consumer-facing *rule* ("never sum
+   `input.total + cached`"), and `TokenUsage` is the type a consumer actually
+   reads when asking whether they may. A rule that lives only in the spec is a
+   rule the API invites you to break, so the doc comment now carries it —
+   including that the safe arithmetic is `inputTokens + outputTokens`, and that
+   `cachedInputTokens` answers a *ratio* question rather than an additive one.
 6. **§14 — the four residue answers written back** (Phase 4 for OQ6; **items
    14–16 for the other three, answered 2026-08-02**), each into the section it
    changes (§7.2, §7.3, §7.7, N3). §14's head currently lists four bullets as

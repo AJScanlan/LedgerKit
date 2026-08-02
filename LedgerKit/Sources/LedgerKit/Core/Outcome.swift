@@ -57,6 +57,19 @@ public struct StopInfo: Sendable, Codable, Equatable {
 /// Token accounting from `Response.usage` (SPEC §7.7). Spans input/output
 /// including cached and reasoning tokens; per-message token/cost display is
 /// table stakes for BYO-key apps.
+///
+/// ⚠️ **`cachedInputTokens` is a *subset* of `inputTokens`, not a sibling of
+/// it — never add the two** (measured at M6; SPEC §7.7). Apple's input total
+/// counts the whole input, cached portion included, so summing them
+/// double-counts the cache and inflates every cost display on a warm
+/// conversation. The safe arithmetic is `inputTokens + outputTokens`, which is
+/// what Apple's own aggregate reports. `cachedInputTokens` answers "how much of
+/// the input was already warm", which is a *ratio* question, not an additive
+/// one.
+///
+/// Every field is optional because the ledger records what a provider
+/// **reported**: nil means "not reported", which zero cannot say. A provider
+/// outside Apple's path may report none of them.
 public struct TokenUsage: Sendable, Codable, Equatable {
     public var inputTokens: Int?
     public var outputTokens: Int?
