@@ -1,9 +1,9 @@
 # LedgerKit v0.1 — Design Specification
 
-**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G records what has landed so far — **batches A–E**. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
+**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G is **complete — all six batches drafted**; what remains before ratification is the alignment pass, not more amendments. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
 **Date:** rev 9 in progress 2026-08-02 (rev 8: 2026-07-28, rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
 **Targets:** iOS 27 / macOS 27 (Foundation Models `LanguageModel` protocol as inference substrate)
-**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. Batches A–E landed; one outstanding. No invariant weakens, and **nothing touches the wire** — batch D resolved that question, not by thrift (pre-1.0 the wire is free) but because §8 spends cases on affordances rather than conditions.
+**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. All six batches landed. No invariant weakens, and **nothing touches the wire** — batch D resolved that question, not by thrift (pre-1.0 the wire is free) but because §8 spends cases on affordances rather than conditions.
 **Changes from rev 7:** Appendix F — two items from the M4 boundary audit, nine from M5. No invariant weakens, no event kind changes, nothing touches the wire.
 
 ---
@@ -66,7 +66,7 @@ The single most important design input. Anything in the left column is a non-goa
 
 - **N1.** No networking, no providers, no API-key handling. (Apple + vendor packages.)
 - **N2.** No prompt templating, personas, or skills. (Utilities package.)
-- **N3.** No compaction awareness. In-session compaction is invisible to LedgerKit in v0.1; rehydration materializes the full active path. Accepted consequence, stated honestly (rev 4): a rebuilt session sees more context than the compacted live session it replaces — and may therefore *exceed the window that compaction was hiding*. **The on-device budget is 4096 tokens (rev 9 — measured at M6, replacing rev 4's "reported ~4k, verify against the beta").** Apple's own `contextSizeExceeded` reports `contextSize: 4096` with the overflowing `tokenCount` beside it, which is exactly what rev 7 widened that case to carry. So a long on-device conversation can be unregenerable after process death: rehydration fails with `contextSizeExceeded` (rev 6 name), which classifies to `recoverableUpstream(.reduceContext)` (§8), and the app-side escape is a utilities compaction pass before retry. The failure is graceful and typed, not silent — but it is a failure, and pretending the consequence is merely "sees more context" undersold it.
+- **N3.** No compaction awareness. In-session compaction is invisible to LedgerKit in v0.1; rehydration materializes the full active path. Accepted consequence, stated honestly (rev 4): a rebuilt session sees more context than the compacted live session it replaces — and may therefore *exceed the window that compaction was hiding*. **The on-device budget is 4096 tokens (rev 9 — measured at M6, replacing rev 4's approximate and explicitly unverified figure; Appendix G has the retired wording).** Apple's own `contextSizeExceeded` reports `contextSize: 4096` with the overflowing `tokenCount` beside it, which is exactly what rev 7 widened that case to carry. So a long on-device conversation can be unregenerable after process death: rehydration fails with `contextSizeExceeded` (rev 6 name), which classifies to `recoverableUpstream(.reduceContext)` (§8), and the app-side escape is a utilities compaction pass before retry. The failure is graceful and typed, not silent — but it is a failure, and pretending the consequence is merely "sees more context" undersold it.
 
 ⚠️ **And "long" undersells it too (rev 9).** The measurement exhausted the window in **two turns of roughly 2k tokens each**. That is not a pathological conversation; it is a short one with substantial messages. On-device, full-path rehydration is therefore not an edge case that bites eventually — it is the ordinary outcome for any conversation with real content in it, and the v0.3 deferral above is a deferral of something apps will meet in week one. Stated plainly because the honest reading changes what an app should do *now*: an on-device app should treat a compaction pass as part of its normal regenerate path (§8's `.reduceContext` affordance), not as error handling it hopes never to reach. Compaction bookkeeping arrives in v0.3, and the event carries the summary text (§12) so rehydration and audit can reproduce what the model saw.
 - **N4.** No RAG, embeddings, or search.
@@ -371,7 +371,7 @@ The throw channel (§11) is exactly the complement — failures *before* the app
 
 **Defensive session gate:** the driver checks `isResponding` before issuing, and treats a busy session as a driver defect — `generationEnded(.failed(.unrecognized("driver: session busy")))` — never as a provider signal. The hazard was concrete, and rev 7 can now explain it rather than merely warn about it. **At iOS 26 a single enum — `LanguageModelSession.GenerationError` — carried both `rateLimited` and `concurrentRequests`**, which is why "busy session surfaces as `rateLimited`" was a plausible reading of the evidence. **At 27 the concerns are split:** `LanguageModelSession.Error { concurrentRequests, transcriptMutationWhileResponding }` is session *misuse*, while `LanguageModelError` carries model and provider failures. The whole 26 enum is deprecated case-by-case, each case naming its replacement.
 
-**The gate stays, for three reasons that survive the closure.** The deprecated enum still *exists* at 27, so a provider built against 26 can still throw the overloaded shape; a typed error is only useful to a driver that checks for it, which is what the gate is; and §6.5's parallel-generation relaxation is exactly when store single-flight stops making this unreachable. What changes is the *disposition* of a leak: it is now a recognizable, named condition rather than a mystery, so §8's normalization exclusion can name it. **M6 residue: confirm the 27 error is thrown rather than trapped** — a precondition failure would be a different design problem, and only running it answers that.
+**The gate stays, for three reasons that survive the closure.** The deprecated enum still *exists* at 27, so a provider built against 26 can still throw the overloaded shape; a typed error is only useful to a driver that checks for it, which is what the gate is; and §6.5's parallel-generation relaxation is exactly when store single-flight stops making this unreachable. What changes is the *disposition* of a leak: it is now a recognizable, named condition rather than a mystery, so §8's normalization exclusion can name it. **Confirmed at M6 (rev 9): it is thrown, not trapped.** A second `streamResponse` on a responding session throws `LanguageModelSession.Error`, which normalization lands on `unrecognized("driver: session busy")` — §8's exclusion working end to end. A trap would have promoted this gate from defence in depth to the *only* protection and forced this paragraph to be rewritten; everything above therefore stands as designed. The check lives in the session rather than in any model, so it is substrate-independent and runs in CI permanently rather than waiting on hardware.
 
 ### 7.3 Streaming reduction
 
@@ -669,6 +669,12 @@ The test story *is* the differentiation — "how do you even test an FM app?" cu
 ```swift
 let store = try ConversationStore(persistence: .sqlite(at: dbURL))    // actor
 
+// Both cadences of §7.4 are configurable, and the factories carry the OR:
+let tuned = try ConversationStore(
+    persistence: .sqlite(at: dbURL),
+    deltaFlush: .flushing(every: .milliseconds(250), orAfterCharacters: 512),
+    snapshots:  .refreshing(afterEachGeneration: true, orAfterEvents: 500))
+
 // Lifecycle & metadata
 let convo = try await store.createConversation()                      // optional title:
 try await store.setInstructions("You are an origami tutor.", in: convo.id)
@@ -679,7 +685,19 @@ try await store.deleteConversation(convo.id)                          // cancels
 
 // Turn verbs — the three generation starters; all throw generationInFlight
 // under single-flight (§6.5), all suspend to a terminal Outcome:
-let driver = GenerationDriver(model: SystemLanguageModel.default,     // or ClaudeLanguageModel(...), etc.
+let driver = GenerationDriver(model: SystemLanguageModel.default,     // descriptor defaulted — see below
+                              toolRecording: .metadataOnly)
+
+// Any OTHER provider must supply identity, because nothing in the framework
+// exposes a model-identity key to derive it from (§7.8, OQ8). The on-device
+// line above is the single exception the type system can justify:
+// SystemLanguageModel is a concrete type whose provider and model are exactly
+// what its name says — version stays nil, because which *build* answered is
+// genuinely unknown and a guess would be a fabrication in an append-only log.
+let remote = GenerationDriver(model: someLanguageModel,
+                              descriptor: ModelDescriptor(provider: "acme",
+                                                          model: "acme-large",
+                                                          version: "2026-07"),
                               toolRecording: .metadataOnly)
 
 let outcome = try await store.send("Explain valley folds", in: convo.id, using: driver)
@@ -708,6 +726,11 @@ let outcome3 = try await store.regenerate(assistant.id, in: convo.id, using: dri
 
 // Branching
 try await store.switchBranch(to: endpoint, in: convo.id)              // bare activePathChanged
+
+// Reading — the store's ONE read verb. Reduction on demand (§6.3), from the
+// snapshot checkpoint forward; the store actor exposes no synchronous reads,
+// so continuous UI reads the projection below rather than calling this per frame.
+let conversation = try await store.conversation(convo.id)
 
 // Cancellation — canonical path; the store outlives any Task handle:
 await store.cancelGeneration(in: convo.id)                            // no-op if none live; racing a
@@ -788,21 +811,25 @@ The pitch in one exhaustive `switch`: the compiler forces the app to handle inte
 
 Resolved items from rev 1 have been folded into the spec body (rev 2's Appendix B has that map).
 
-**Seven of the nine closed by reading, not by running (rev 6 and rev 7).** The SDK was on the build machine the whole time; the questions that survived a careful read are exactly the ones about *behaviour* rather than *shape*. What remains is genuinely empirical and belongs to M6, when `Session/` first runs against a device:
+**Seven of the nine closed by reading, not by running (rev 6 and rev 7).** The SDK was on the build machine the whole time; the questions that survived a careful read are exactly the ones about *behaviour* rather than *shape*.
 
-- **OQ6 residue:** is `concurrentRequests` thrown or trapped?
-- **OQ4 residue:** do real providers revise segments in practice, and does segment-aware diffing beat prefix-diffing on them?
-- **§7.7 residue:** is `Usage.Input.totalTokenCount` inclusive of `cachedTokenCount`?
-- **N3's ⚠️:** the actual on-device context budget (~4k shared tokens, reported, unverified).
+**All four behavioural residues were answered at M6 (rev 9), and nothing here is open.** Each answer lives in the section it changes rather than here, because a residue that is merely *recorded* decays while one written into the contract is read:
 
-Re-verify the closed ones per beta; a *new* built-in error case, or a change to the `LanguageModel` protocol's two requirements, is the kind of change that reopens one.
+- **`concurrentRequests` is thrown, not trapped** (§7.2). The `isResponding` gate stays what rev 7 called it — defence in depth — and §8's normalization exclusion has something real to exclude. Substrate-independent, since the check lives in `LanguageModelSession` rather than in any model.
+- **Real providers were never observed revising a segment** (§7.3), across 412 snapshots of 12 generations. The fail-loud path is unreachable end-to-end and **stays**, because the API still permits what no provider has yet done.
+- **`Usage.Input.totalTokenCount` is inclusive of `cachedTokenCount`** (§7.7) — so an app must never sum them.
+- **The on-device context budget is 4096 tokens** (N3, §7.1), exhausted by two turns of ~2k.
+
+Two findings arrived with no question attached, and both are recorded because each contradicts something a reader would otherwise assume. **Availability is advisory:** `SystemLanguageModel.default.availability` reports `.available` on substrates that then fail to generate, so it cannot gate anything — the concrete instance of what §7.2 anticipates in the abstract. And **the framework delivers errors outside its typed taxonomy** (§8), which is why `unrecognized` is a working part of the design rather than a floor nobody reaches.
+
+Re-verify per beta. The closed-by-reading answers are pinned by the §10 surface tripwires; the four above are **behaviours**, which no shape test can see, so they are carried as an executable suite instead — device-gated, and written to re-ask their questions rather than to assert a remembered answer. ⚠️ Note the limit that cost something once: a tripwire pins the SDK's shape, and a *disposition* — "this error is unreachable, because…" — is a claim about the world that only running code can falsify.
 
 1. ~~**Transcript seeding:** initializer shape for materializing a transcript into a `LanguageModelSession` in iOS 27.~~ **Resolved at M4 (rev 7)**, from the SDK: `LanguageModelSession(model: some LanguageModel, tools: [any Tool] = [], transcript: Transcript)`, generic over the model, plus a `SystemLanguageModel`-defaulted convenience. `Transcript` is `Codable` + `RangeReplaceableCollection`. No residue.
 2. ~~**Tool-activity observation:** what iOS 27 exposes for observing tool invocations on the response/stream (feeds §7.6) — and whether transcript entries for tool exchanges can be constructed app-side.~~ **Resolved at M4 (rev 7)**: `ResponseStream.Snapshot.transcriptEntries` exposes `toolCalls` / `toolOutput` entries mid-stream, and both types are publicly constructible (`ToolOutput(id:toolName:segments:)`), so the v0.2 transcript-fidelity item (§12) is feasible. v0.1's stance is unchanged (§7.6). No residue for v0.1.
 3. ~~**`LanguageModel` conformance surface:** exact model + executor requirements, so `ScriptedLanguageModel` conforms to the real thing, not a guess.~~ **Resolved at M3 (rev 6)** by reading the installed macOS 27 SDK: `LanguageModel` requires `associatedtype Executor`, `capabilities`, `executorConfiguration`; `LanguageModelExecutor` requires `associatedtype Configuration: Hashable & Sendable`, `associatedtype Model`, `prewarm(model:transcript:)`, `init(configuration:) throws`, and `respond(to:model:streamingInto:) async throws`. `ScriptedLanguageModel` conforms for real, gated `@available(macOS 27)`. Re-verify per beta.
-4. ~~**Snapshot stream element types:** what the cumulative-snapshot stream vends (feeds §7.3 prefix-diffing).~~ **Resolved at M4 (rev 7)**: `ResponseStream<Content>.Snapshot { content, rawContent, transcriptEntries (27+), usage (27+) }`. **The interesting half is what it withdrew** — the channel's `replaceTextSegment` means prefix-stability is provider behaviour, not an API guarantee (§7.3). M6 residue: prefer segment-aware diffing, and measure how real providers behave.
+4. ~~**Snapshot stream element types:** what the cumulative-snapshot stream vends (feeds §7.3 prefix-diffing).~~ **Resolved at M4 (rev 7)**: `ResponseStream<Content>.Snapshot { content, rawContent, transcriptEntries (27+), usage (27+) }`. **The interesting half is what it withdrew** — the channel's `replaceTextSegment` means prefix-stability is provider behaviour, not an API guarantee (§7.3). **Both halves closed at M6 (rev 9):** segment-aware diffing is built, and real providers were never observed revising — 412 snapshots, zero non-prefix (§7.3).
 5. ~~**Built-in `LanguageModelError` inventory:** the case list `GenerationError` must totally cover (§8) — including exact case *names*.~~ **Resolved at M3 (rev 6)**, from the SDK interface: `contextSizeExceeded`, `rateLimited`, `guardrailViolation`, `refusal`, `unsupportedCapability`, `unsupportedTranscriptContent`, `unsupportedGenerationGuide`, `unsupportedLanguageOrLocale`, `timeout` — each carrying a payload struct. §8 is reconciled against this list and now states its coverage as a table. Re-verify per beta; a *new* built-in case is the one change that would reopen this.
-6. ~~**Session single-flight surface:** the exact error/behavior when a second request hits a responding session (feeds §6.5/§7.2). iOS 26 evidence: it surfaced *as* `GenerationError.rateLimited` — single-source, verify.~~ **Resolved at M4 (rev 7)**: `LanguageModelSession.Error.concurrentRequests` (typed, 27+), split out of the iOS 26 enum that also held `rateLimited` — which is how the 26 evidence arose. §7.2's gate is retained: the 26 enum is deprecated, not absent, so a provider built against it can still throw the overloaded shape. **M6 residue: confirm it is thrown, not trapped.**
+6. ~~**Session single-flight surface:** the exact error/behavior when a second request hits a responding session (feeds §6.5/§7.2). iOS 26 evidence: it surfaced *as* `GenerationError.rateLimited` — single-source, verify.~~ **Resolved at M4 (rev 7)**: `LanguageModelSession.Error.concurrentRequests` (typed, 27+), split out of the iOS 26 enum that also held `rateLimited` — which is how the 26 evidence arose. §7.2's gate is retained: the 26 enum is deprecated, not absent, so a provider built against it can still throw the overloaded shape. **Closed at M6 (rev 9): thrown, not trapped** (§7.2).
 7. ~~**Context-management & KV-cache APIs:** confirm the new iOS 27 context APIs stop at the session boundary — this is the sherlock check for §2.~~ **Resolved at M4 (rev 7): the sherlock check passes.** `ContextOptions` is per-request, `TranscriptErrorHandlingPolicy` per-session, `session.usage` per-session, `Transcript` mutable in place. All session-scoped, none persistent (§2). No residue.
 8. ~~**`ModelDescriptor` derivation, narrowed (rev 4):** whether the *requested* descriptor is derivable from `any LanguageModel`'s configuration surface or must be app-supplied at driver init.~~ **Resolved at M4 (rev 7): app-supplied, necessarily.** `LanguageModel` exposes only `capabilities` and an opaque `executorConfiguration`; there is no model-identity key in the framework. `StopInfo.resolvedModelID` is per-provider convention — **expect nil on-device** (§7.8).
 9. ~~**Reasoning & custom segments (rev 4):** what the iOS 27 stream and transcript expose — observable? recordable? re-constructible?~~ **Resolved at M4 (rev 7)**: observable (the channel's `Reasoning` action family) and constructible (`Transcript.Reasoning { segments, signature }`); `Transcript.Segment` also gained `attachment` and `custom`, while `Transcript.Entry`'s six kinds are unchanged. v0.1 records none of it **by choice** (N11, N8a). No blocking residue; v0.2 scope.
@@ -924,18 +951,15 @@ Rev 8 was opened by the **M4 boundary audit** (2026-07-27) and closed by **M5** 
 
 ## Appendix G — Changes from rev 8
 
-> ### ⚠️ **REV 9 IS OPEN AND UNRATIFIED.** Drafting in progress at M6 Phase 5.
+> ### ⚠️ **REV 9 IS DRAFTED IN FULL AND NOT YET RATIFIED.**
 >
-> Amendments land here batch by batch as they are signed off, and rev 9 ratifies
-> at the **M6 boundary** — not before. Until then this appendix is an accurate
-> record of what has changed *so far*, and §-body text carries `(rev 9)` markers
-> for the same reason. The batches and their sign-off state are tracked in
-> `M6-PLAN.md` §6.
+> All six batches have landed — A (cancellation & the straddle), B (the stream's
+> honest properties), C (usage), D (the error taxonomy's edges), E (the context
+> budget), F (the sketch & an empty §14). **Nothing is outstanding.**
 >
-> **Landed:** batch A (cancellation & the straddle), batch B (the stream's
-> honest properties), batch C (usage), batch D (the error taxonomy's edges),
-> batch E (the context budget).
-> **Outstanding:** F (sketch & residues).
+> Rev 9 ratifies at the **M6 boundary**, which is the remaining step: the
+> alignment pass (ROADMAP, CLAUDE.md, the `Sources/**` retired-phrase sweep per
+> amendment) and both suites green. Sign-off state is tracked in `M6-PLAN.md` §6.
 
 Rev 9 is **M6's revision** — the milestone in which `Session/` first ran against
 the real framework — and its character is different from rev 8's. Rev 8 was
@@ -1113,3 +1137,31 @@ Recorded because the *reason* is not thrift — pre-1.0 the wire is free to chan
   part of its normal regenerate path, not as error handling it hopes never to
   reach. Providers with larger windows are unaffected; this is a property of the
   substrate, not of the design.
+
+### Batch F — the sketch, and an empty §14 (from M5/M6)
+
+- **§14 has no open questions left.** All four behavioural residues are
+  answered, and each answer is written into the section it changes rather than
+  into §14 — a residue merely *recorded* decays, while one written into the
+  contract gets read. §14 keeps the answers only as a one-line index, plus the
+  two findings that arrived without a question attached (availability is
+  advisory; the framework delivers errors outside its typed taxonomy) and the
+  standing instruction to re-verify per beta. The residue clauses inside OQ4 and
+  OQ6 are closed in place, and §7.2's "M6 residue: confirm it is thrown"
+  becomes the confirmation.
+- **§11's sketch shows how to read, and what identity costs (§11).** The sketch
+  is the consumer's view and had no read verb in it at all — `conversation(_:)`
+  now appears, with the note that the store actor exposes no synchronous reads,
+  so continuous UI belongs on the projection rather than in a per-frame call.
+  The driver line gains its sibling: **any provider other than the on-device
+  model must supply a `ModelDescriptor`**, because nothing in the framework
+  exposes a model-identity key (OQ8). The on-device line stays as it was and is
+  now explained rather than merely true — `SystemLanguageModel` is a concrete
+  type whose provider and model are what its name says, and `version` stays nil
+  because which *build* answered is genuinely unknown and a guess would be a
+  fabrication in an append-only log.
+- **Configurability is shown, not just promised (§7.4, §9, §11).** Both cadences
+  were always specified as configurable and D32 made them publicly
+  constructible; the sketch now builds a store with both. Named factories rather
+  than initializers, because the phrasing is what carries the **or**:
+  `.flushing(every:orAfterCharacters:)`, `.refreshing(afterEachGeneration:orAfterEvents:)`.

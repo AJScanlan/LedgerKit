@@ -1178,13 +1178,21 @@ Extend as phases surface more; the M4/M5 pattern.
 > | C — usage | 5, 11, 14-§7.7 | §6.1, §7.7 | ☑ **landed in SPEC 2026-08-02** (Appendix G) + `TokenUsage` doc |
 > | D — the error taxonomy's edges | 8, 13+15 | §8 | ☑ **landed in SPEC 2026-08-02** (Appendix G) + normalization, fixture, manifest |
 > | E — context budget | 14-N3 | §7.1, N3, §8 | ☑ **landed in SPEC 2026-08-02** (Appendix G) + `contextSizeExceeded` doc |
-> | F — sketch & residues | 3, 4, 6 | §11, §14 | ☐ drafted |
+> | F — sketch & residues | 3, 4, 6 | §11, §14, §7.2 | ☑ **landed in SPEC 2026-08-02** (Appendix G) |
 >
 > ⚠️ **Wire changes are free pre-1.0** (owner's call, 2026-08-02). Rev 8's
 > "nothing touches the wire" was a *constraint* rev 9 does not inherit — so a
 > solution must not be rejected for being a wire change until there is a release
-> to break. Item 15 is the live instance: option (b) was recommended partly on
-> wire cost, which was the wrong axis.
+> to break. Item 15 was the live instance: option (b) was recommended partly on
+> wire cost, which was the wrong axis. **In the event rev 9 touches nothing on
+> the wire anyway**, for the right reason — §8 spends cases on *affordances*,
+> not conditions.
+>
+> ### ☑ **ALL SIX BATCHES LANDED 2026-08-02.** Appendix G is complete.
+> What stands between here and ratification is the **alignment pass**, not more
+> amendments: ROADMAP, CLAUDE.md, this plan's §8/§9/§10, and the `Sources/**`
+> retired-phrase sweep — which has run per batch as each landed, catching seven
+> stale sites so far.
 
 1. **§9/§7.5 — delete resolves reservations.** One mechanism sentence, the way
    rev 8 stated the cancellation-recording rule: a verb that erases or
