@@ -114,15 +114,52 @@ struct SessionResidueTests {
 
 /// The three residues that need a model that actually generates.
 ///
-/// Each is written to *answer* its question when run, not to stand in for one:
+/// Each was written to *answer* its question when run, not to stand in for one:
 /// a deferral that cannot execute the moment hardware appears is a note wearing
-/// a test's clothes.
+/// a test's clothes. **All three answered on 2026-08-02**, when the build
+/// machine reached macOS 27 with Apple Intelligence live — unchanged, which was
+/// the whole bet. They now *assert* those answers rather than report them, so a
+/// beta that changes one fails here (M6-PLAN rev 9 items 14–16).
 @Suite(
     "§14 residues — on device",
     .enabled(if: foundationModelsAvailable && deviceTestsEnabled),
     .timeLimit(.minutes(5))
 )
 struct DeviceResidueTests {
+
+    /// Prompts the on-device model actually answers.
+    ///
+    /// ⚠️ **Prompt choice is load-bearing, which is the opposite of obvious.**
+    /// The model returns *zero tokens* for some entirely ordinary requests, and
+    /// it does so **deterministically rather than flakily** — measured
+    /// 2026-08-02, two of six prompts failed 3/3 while the other four never did.
+    /// One of the two was `"Describe origami in two paragraphs."`, which is what
+    /// this suite originally asked, so the revision test could not answer its
+    /// question on any hardware: it died on the empty response before reaching a
+    /// single comparison.
+    ///
+    /// Hence a *list*. A residue test whose answer depends on one prompt staying
+    /// in the model's good graces across betas is measuring the prompt.
+    private static let generatingPrompts = [
+        "What is 2+2?",
+        "List three colors.",
+        "Write a short paragraph about the sea.",
+        "Explain gravity simply.",
+    ]
+
+    /// Whether a thrown error is "the model produced nothing".
+    ///
+    /// ⚠️ Note what this type is: **`GeneratedContent.ParsingError`, which
+    /// `appleErrorSurface` dispositions `.unreachable`** on the grounds that
+    /// v0.1 never asks for guided generation (N8). It arrives here anyway, on a
+    /// plain-`String` stream, because an empty response fails the same parse.
+    /// That contradiction is rev 9 item 15 and a §8 decision; this helper only
+    /// needs to tell the case apart so a refusal does not masquerade as a
+    /// finding.
+    @available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
+    private static func isEmptyResponse(_ error: any Error) -> Bool {
+        error is GeneratedContent.ParsingError
+    }
 
     @available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
     private func session() -> LanguageModelSession {
@@ -136,9 +173,30 @@ struct DeviceResidueTests {
     /// Checkable rather than merely observable: if the total were *exclusive* of
     /// the cache, a warm second turn could report `cached > total`. Holding
     /// `cached <= total` across a run with a non-zero cache is therefore real
-    /// evidence for inclusivity — and the numbers are surfaced either way, since
-    /// this test exists to produce an answer for §7.7 to record.
-    @Test("usage: is the input total inclusive of the cached count?")
+    /// evidence for inclusivity.
+    ///
+    /// ### ✅ **ANSWERED: inclusive** (2026-08-02, macOS 27 host).
+    ///
+    /// The decisive evidence arrived as an accident rather than a design, and it
+    /// is better than what was designed. This turn reports the **same
+    /// `input.total=221` whether `cached` is 209 or 0** — the cache warms when
+    /// the test runs alone and is evicted when the sibling device tests run
+    /// beside it, since Swift Testing parallelises and the KV cache is shared
+    /// machine state. Under *exclusive* accounting a warm turn would have
+    /// reported roughly a dozen input tokens, not 221. It reported 221 both
+    /// times, so the total is the whole input and the cache is a subset of it.
+    ///
+    /// Full readings: `input.total=221 cached=209|0 output.total=7 reasoning=0
+    /// usage.total=228`, so `usage.total == input.total + output.total` — the
+    /// aggregate does not double-count either. **The consumer-facing consequence
+    /// is that an app must not sum `input.total + cached`**, which is the thing
+    /// §7.7's residue existed to stop a reader guessing at.
+    ///
+    /// ⚠️ **Nothing here may assert on `cached` being non-zero.** Cache warmth
+    /// is environmental — another test, or another process, decides it — and an
+    /// assertion on state the test does not control is a flake wearing a
+    /// guard's clothes. That mistake was made and caught here on 2026-08-02.
+    @Test("usage: the input total is inclusive of the cached count")
     func usageInclusivity() async throws {
         guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
         let session = session()
@@ -149,10 +207,24 @@ struct DeviceResidueTests {
         }
 
         let usage = try #require(last)
-        Issue.record("§7.7 residue — input.total=\(usage.input.totalTokenCount) cached=\(usage.input.cachedTokenCount) output.total=\(usage.output.totalTokenCount) reasoning=\(usage.output.reasoningTokenCount) usage.total=\(usage.totalTokenCount)")
+        print("§7.7 — input.total=\(usage.input.totalTokenCount) cached=\(usage.input.cachedTokenCount) output.total=\(usage.output.totalTokenCount) reasoning=\(usage.output.reasoningTokenCount) usage.total=\(usage.totalTokenCount)")
+
+        // The inclusivity signature, and the one assertion that survives either
+        // cache state: this is the *second* turn, whose new content is four
+        // words. A total that still counts the hundreds of tokens behind it is
+        // counting the whole input. An exclusive total would read ~12 here, so
+        // the floor separates the two answers with room for tokenizer drift.
+        #expect(
+            usage.input.totalTokenCount > 100,
+            "an input total this small would mean it counts only the new turn — i.e. exclusive of the cache"
+        )
         #expect(
             usage.input.cachedTokenCount <= usage.input.totalTokenCount,
             "cached exceeding the total would mean the total is exclusive of it"
+        )
+        #expect(
+            usage.totalTokenCount == usage.input.totalTokenCount + usage.output.totalTokenCount,
+            "the aggregate must not double-count the cache"
         )
     }
 
@@ -162,19 +234,48 @@ struct DeviceResidueTests {
     /// consumer at any pacing, so §7.3's fail-loud path stayed insurance. This
     /// asks the only question that could change that: whether Apple's own model
     /// produces a snapshot sequence the differ refuses.
+    ///
+    /// ### ✅ **ANSWERED: never observed** (2026-08-02) — **0 prefix violations
+    /// across 412 snapshots** of 12 real generations. §7.3's fail-loud path
+    /// stays insurance, now on real-provider evidence rather than scripted-only,
+    /// and §7.3's framing survives intact: prefix stability is *provider
+    /// behaviour*, not an API guarantee. It held; nothing promised it would.
+    ///
+    /// Sweeps prompts rather than asking one, and tolerates the empty-response
+    /// case — see ``generatingPrompts`` for why that is not defensive padding.
     @Test("real streams stay prefix-stable")
     func realProviderNeverRevises() async throws {
         guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
-        let session = session()
-        var previous = StreamSnapshot()
         var verdicts: [SnapshotDelta.Reason] = []
+        var generations = 0
+        var snapshots = 0
 
-        for try await snapshot in session.streamResponse(to: "Describe origami in two paragraphs.") {
-            let current = StreamSnapshot.flat(snapshot.content)
-            if case .nonPrefix(let reason) = delta(from: previous, to: current) { verdicts.append(reason) }
-            previous = current
+        for prompt in Self.generatingPrompts {
+            let session = session()
+            var previous = StreamSnapshot()
+            do {
+                for try await snapshot in session.streamResponse(to: prompt) {
+                    let current = StreamSnapshot.flat(snapshot.content)
+                    if case .nonPrefix(let reason) = delta(from: previous, to: current) {
+                        verdicts.append(reason)
+                    }
+                    previous = current
+                    snapshots += 1
+                }
+                generations += 1
+            } catch where Self.isEmptyResponse(error) {
+                continue    // The model declined this prompt; it says nothing about revision.
+            }
         }
 
+        print("§7.3 — \(generations) generations, \(snapshots) snapshots, \(verdicts.count) revisions")
+
+        // Vacuity guards, and they are the point rather than ceremony: a run in
+        // which every prompt came back empty would otherwise report a clean
+        // `verdicts.isEmpty` having compared nothing at all — the precise shape
+        // of the silent green tick `foundationModelsAvailable` exists to avoid.
+        #expect(generations > 0, "every prompt returned empty; the question was never asked")
+        #expect(snapshots > 0, "no snapshots observed; nothing was compared")
         #expect(verdicts.isEmpty, "a real provider revised a segment: \(verdicts)")
     }
 
@@ -185,7 +286,19 @@ struct DeviceResidueTests {
     /// Pushes until the model refuses, then reads the numbers off Apple's own
     /// error — which is exactly why D17 widened `contextSizeExceeded` to carry
     /// them.
-    @Test("context: what is the real budget?")
+    ///
+    /// ### ✅ **ANSWERED: 4096 tokens** (2026-08-02) — `contextSize=4096
+    /// tokenCount=4223`, refused after **two** ~2k-token turns. N3's "~4k
+    /// shared, reported, unverified" hedge becomes a measured number.
+    ///
+    /// ⚠️ **Two turns is the part worth carrying into §7.1.** Full-path
+    /// rehydration overflows far sooner than the design discussion assumed, so
+    /// the compaction question M7/M8 inherit is concrete rather than abstract.
+    ///
+    /// Asserted rather than reported, deliberately as a **tripwire**: a beta
+    /// that moves the budget fails here, which is the same bet as pinning the
+    /// SDK build string. The fix is one line — *after* re-verifying.
+    @Test("context: the real budget is 4096 tokens")
     func contextBudget() async throws {
         guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
         let filler = String(repeating: "origami paper folding technique. ", count: 400)   // ~2k tokens
@@ -197,18 +310,26 @@ struct DeviceResidueTests {
             let session = LanguageModelSession(model: SystemLanguageModel.default, tools: [], transcript: transcript)
             do {
                 for try await _ in session.streamResponse(to: filler) {}
+            } catch where Self.isEmptyResponse(error) {
+                // The model declined to answer, which is not a budget verdict.
+                // The prompt still consumed context, so keep pushing.
+                transcript = session.transcript
+                continue
             } catch {
                 let normalized = normalize(error, since: Date())
-                Issue.record("N3 residue — refused after \(turns) turns of ~2k tokens: \(normalized)")
+                print("N3 — refused after \(turns) turns of ~2k tokens: \(normalized)")
                 guard case .contextSizeExceeded(let size, let count) = normalized else {
                     Issue.record("expected contextSizeExceeded, got \(normalized)")
                     return
                 }
-                Issue.record("N3 residue — contextSize=\(size as Any) tokenCount=\(count as Any)")
+                print("N3 — contextSize=\(size as Any) tokenCount=\(count as Any)")
+                #expect(size == 4096, "the on-device budget moved; re-verify N3 before changing this")
+                let overflow = try #require(count, "the refusal must report the count that caused it")
+                #expect(overflow > 4096, "the reported count must exceed the budget it broke")
                 return
             }
             transcript = session.transcript
         }
-        Issue.record("N3 residue — survived \(turns) turns without refusing")
+        Issue.record("N3 — survived \(turns) turns of ~2k tokens without refusing")
     }
 }

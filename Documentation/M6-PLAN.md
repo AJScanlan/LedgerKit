@@ -996,6 +996,25 @@ changed is which fields it governs).
 one cut line invoked.** The substrate turned out to reach further than expected
 in one direction and less far in another; both are recorded below.
 
+> ### ⚠️ Superseded in part, 2026-08-02 — **all three deferrals are now answered.**
+>
+> Phase 4's substrate paragraph below is accurate for the day it was written and
+> **wrong now**, for a reason no amount of care would have caught: the build
+> machine was upgraded to **macOS 27.0 (26A5388g)**, Apple Intelligence is live
+> on it, and the on-device model generates. The three tests written to "answer
+> their questions the moment hardware appears" did exactly that, unchanged, under
+> `LEDGERKIT_DEVICE=1`. Answers and their consequences are **rev 9 items 14–16**;
+> they are not restated here, because the point of Phase 4's structure was that
+> the *tests* carry the answers.
+>
+> The reasoning below is left intact deliberately. It is the record of a decision
+> that was correct on its evidence, and the thing that changed was the world
+> rather than the argument — which is precisely the failure mode the
+> "answer-as-test, not answer-as-note" discipline was adopted to survive. **It
+> survived it:** nothing needed rewriting to collect the answers, only running.
+> ⚠️ One test does *not* survive contact and is Phase 5's to fix
+> (`realProviderNeverRevises`' prompt — item 16).
+
 **Goal:** the four questions only running code answers, plus the second
 provider family. Requires hardware/eligibility; every deferral is recorded, not
 implied.
@@ -1116,11 +1135,28 @@ item 13 below.
 
 - [ ] Draft §6's rev 9 items to a scratch file; item-by-item sign-off; land in
       SPEC as Appendix G; **ratify rev 9 at the boundary**.
+- [x] **Land the repo defects item 16 names**, first — they are code, not prose,
+      and ratifying a revision against a suite with an unpassable residue test
+      is how a boundary audit finds you. Done 2026-08-02: the residue tests now
+      assert their answers instead of reporting them, and the empty-response
+      case is handled rather than fatal. **One half remains blocked by design**
+      — `appleErrorSurface`'s `ParsingError` disposition cannot be corrected
+      until §8 decides item 15.
 - [ ] Alignment: ROADMAP M6 struck through against its exit criteria;
       CLAUDE.md status rewritten with the M6 landmarks; the `Sources/**`
       sweep **including the retired-phrase grep for every rev 9 amendment**
       (the mechanism B1 proved necessary); this plan's §8 filled; §9/§10 logs
       closed.
+- [ ] ⚠️ **CLAUDE.md's substrate paragraph is now actively misleading** and is
+      the highest-value line of the alignment pass, because it tells a future
+      session something false about what it can run: it states the host is
+      **macOS 26**, that 27 APIs "cannot execute on this macOS 26 host", and
+      that the simulator is the only way to run the gated tier. All three are
+      wrong as of 2026-08-02. The ⚠️ **"never bump a package floor to 27"** rule
+      it justifies is still correct — but now for the *portability* reason (CI,
+      other machines, and the iOS tier) rather than because this host cannot
+      launch the binary, and the note should say so or the rule will look
+      obsolete to whoever reads it next and get "fixed".
 - [ ] Handoffs to M7/M8/M9 (§7) verified against what actually landed.
 - [ ] Both suites green, warning-free; counts in §10.
 
@@ -1130,6 +1166,25 @@ item 13 below.
 
 Collected from the M5 boundary audit (items 1–5) and M6's expected findings.
 Extend as phases surface more; the M4/M5 pattern.
+
+> **Drafting status (Phase 5).** Full proposed edits — current wording quoted,
+> replacement, rationale — are drafted for item-by-item sign-off, batched so that
+> items touching one sentence get decided together:
+>
+> | Batch | Items | Sections | State |
+> |---|---|---|---|
+> | A — cancellation & the straddle | 1, 2+12, 9 | §7.2, §7.5, §9 | ☑ **landed in SPEC 2026-08-02** (Appendix G) |
+> | B — the stream's honest properties | 10, 14-OQ4 | §7.3 | ☐ drafted |
+> | C — usage | 5, 11, 14-§7.7 | §6.1, §7.7 | ☐ drafted |
+> | D — the error taxonomy's edges | 8, 13+15 | §8 | ☐ drafted; **item 15 needs a decision** |
+> | E — context budget | 14-N3 | §7.1, N3 | ☐ drafted |
+> | F — sketch & residues | 3, 4, 6 | §11, §14 | ☐ drafted |
+>
+> ⚠️ **Wire changes are free pre-1.0** (owner's call, 2026-08-02). Rev 8's
+> "nothing touches the wire" was a *constraint* rev 9 does not inherit — so a
+> solution must not be rejected for being a wire change until there is a release
+> to break. Item 15 is the live instance: option (b) was recommended partly on
+> wire cost, which was the wrong axis.
 
 1. **§9/§7.5 — delete resolves reservations.** One mechanism sentence, the way
    rev 8 stated the cancellation-recording rule: a verb that erases or
@@ -1149,8 +1204,13 @@ Extend as phases surface more; the M4/M5 pattern.
    the spec already promised it and the code now delivers.
 5. **§7.7 — `TokenUsage` cross-reference nit**: the mapping table cites
    "(§6.1)" for a type §6.1 never shows.
-6. **§14 — the four residue answers written back** (Phase 4), each into the
-   section it changes (§7.2, §7.3, §7.7, N3).
+6. **§14 — the four residue answers written back** (Phase 4 for OQ6; **items
+   14–16 for the other three, answered 2026-08-02**), each into the section it
+   changes (§7.2, §7.3, §7.7, N3). §14's head currently lists four bullets as
+   open and says they "belong to M6, when `Session/` first runs against a
+   device"; all four now have measured answers, so the head is rewritten rather
+   than edited bullet-by-bullet. OQ4's and OQ6's residue clauses inside items 4
+   and 6 of the numbered list need the same treatment.
 7. Anything Phases 2–4 surface that changes a §7 sentence — logged here as
    discovered.
 8. **§8 — Apple ships four error families, and the coverage table names one.**
@@ -1209,17 +1269,113 @@ Extend as phases surface more; the M4/M5 pattern.
 11. **§7.7 — reported usage is augmented, not passed through** (Phase 2). The
    framework adds its own output-token accounting on top of a provider's. Worth
    one clause, because it decides what an app may claim a number *means*.
+12. **§7.2 — the throw/return boundary covers store-side *reads*, not just
+   appends** (audit A2's fix, generalized). The straddle is currently written in
+   terms of the start append; Phase 0 made a cancellation during the *rehydration
+   read* return `.cancelled` with a recorded terminal. Overlaps item 2 and should
+   probably land as one sentence with it.
 13. **§8/§14 — totality is over the *typed* taxonomy** (Phase 4). A real
    on-device failure arrived as an untyped `NSError` in Foundation Models' own
    error domain rather than as a `LanguageModelError` case, so `unrecognized` is
    a working part of the design rather than a rarely-taken floor. §14 also gains
    OQ6's answer (**thrown**, not trapped) and the note that availability is
    advisory — it reports `.available` on a substrate that cannot generate.
-12. **§7.2 — the throw/return boundary covers store-side *reads*, not just
-   appends** (audit A2's fix, generalized). The straddle is currently written in
-   terms of the start append; Phase 0 made a cancellation during the *rehydration
-   read* return `.cancelled` with a recorded terminal. Overlaps item 2 and should
-   probably land as one sentence with it.
+   **Extended by item 15**, which adds a second, differently-shaped instance:
+   a *typed* error outside the mapped set. Draft the two together.
+14. **§14/§7.7/§7.3 — the three hardware-deferred residues are answered, with
+   numbers** (2026-08-02). **The substrate assumption changed underneath the
+   milestone:** the build machine is now **macOS 27.0 (26A5388g)**, not 26.
+   Apple Intelligence is live on it (`generativeexperiencesd`, `modelmanagerd`,
+   `TGOnDeviceInferenceProviderService`; `com.apple.fm.language.instruct_3b`
+   loads on the ANE) and **real generation works**, so `LEDGERKIT_DEVICE=1` is
+   honest here and `DeviceResidueTests` answered itself. Two consequences beyond
+   the answers: `swift test` now **executes** the 27-gated tier natively — the
+   only skips in a bare run are the three device residues and the two
+   `LEDGERKIT_RECORD` tests — and D31 is vindicated a second time, since a
+   runtime `#available` gate reclassified the same binary the moment the OS
+   moved, which a bumped package floor could not have done.
+   - **§7.7 residue — `input.totalTokenCount` *is* inclusive of
+     `cachedTokenCount`.** `input.total=221 cached=209|0 output.total=7
+     reasoning=0 usage.total=228`. **The decisive evidence was an accident and
+     is better than the argument it replaced:** the same second turn reports
+     `input.total=221` whether `cached` is **209 or 0** — the cache warms when
+     the test runs alone and is evicted when its sibling device tests run beside
+     it, because Swift Testing parallelises and the KV cache is shared machine
+     state. Under *exclusive* accounting a warm turn would report roughly a dozen
+     input tokens; it reported 221 in both states, so the total is the whole
+     input and the cache is a subset of it. Separately
+     `usage.totalTokenCount == input.total + output.total`, so the aggregate does
+     not double-count either. **§7.7 should say plainly that an app must not sum
+     `input.total + cached`** — the residue existed precisely because a reader
+     might. ⚠️ A methodological note worth one line in §10: cache warmth is
+     *environmental*, so nothing may assert on it. The first version of this
+     test guarded vacuity with `cached > 0` and failed the moment it ran beside
+     its siblings — an assertion on state the test does not control is a flake
+     wearing a guard's clothes.
+   - **N3's ⚠️ — the on-device budget is exactly 4096 tokens.** The "~4k
+     reported, unverified" hedge becomes measured:
+     `contextSize=4096 tokenCount=4223`, refused after **two** ~2k-token turns.
+     D17's widening of `contextSizeExceeded` to carry both numbers is what made
+     the measurement a test rather than an investigation. ⚠️ **Two turns** is
+     the part worth writing into §7.1: full-path rehydration overflows far
+     sooner than the design discussion assumed, which sizes M7/M8's compaction
+     question rather than leaving it abstract.
+   - **OQ4's residue — a real provider never revised, over 412 snapshots.** 12
+     successful generations across 6 prompts × 3 rounds, UTF-8-compared on
+     `SnapshotDiff`'s own rule: **0 prefix violations**. §7.3's fail-loud path
+     stays insurance, now on real-provider evidence rather than scripted-only,
+     and §7.3's "prefix stability is provider behaviour, not an API guarantee"
+     framing is confirmed rather than weakened — it held, but nothing promised
+     it would.
+15. **§8 — `GeneratedContent.ParsingError` is reachable on the plain-`String`
+   path, and the manifest states the opposite** (2026-08-02). `appleErrorSurface`
+   dispositions it `.unreachable` because "v0.1 requests plain `String` (N8), so
+   nothing asks for the parse that could fail." **Observed thrown from
+   `streamResponse(to:)` with no `Generable` anywhere**, when the model returns
+   zero tokens — and it is *deterministic per prompt*, not flaky: two of six
+   prompts produced it 3/3 while the other four never did. Measured end to end:
+   ```
+   type=ParsingError  domain=FoundationModels.GeneratedContent.ParsingError
+   desc=Session ended without producing a response.
+   normalized=unrecognized: Session ended without producing a response.
+   recoverability=.terminal
+   ```
+   The normalization is *structurally* right — it is a provider mystery, so it
+   takes the plain floor without the `"driver:"` prefix — but the **affordance is
+   wrong**: an empty response is routine and trivially retryable, and the user is
+   handed `.terminal`. This is a §8 decision, not a manifest edit (the manifest
+   says so itself). It also sharpens item 13 from a single anecdote into a
+   pattern with two distinct shapes: an **untyped** `NSError` in Apple's domain
+   (Phase 4) *and* a **typed** error whose recorded disposition is false (here).
+   ⚠️ Note what did **not** catch this: the surface tripwire pins *shape*, and
+   the shape was correct — `ParsingError` exists and is spelled as manifested.
+   What was wrong was the prose justifying its disposition, which no test can
+   check. Worth one line in §10 about the limit of the mechanism.
+16. **Not a spec item — the repo defects the above exposes.** ☑ **Landed
+   2026-08-02**, except the one half that is blocked on a spec decision.
+   - ☑ `DeviceResidueTests.realProviderNeverRevises` could **not pass as
+     written**: its prompt was `"Describe origami in two paragraphs."` — one of
+     the two that returns empty 3/3 — so it died on the empty-response error
+     before reaching a single comparison. It now sweeps a list of prompts,
+     tolerates the empty case explicitly, and carries **two vacuity guards**,
+     because a run where every prompt came back empty would otherwise report a
+     clean `verdicts.isEmpty` having compared nothing.
+   - ☑ `usageInclusivity` and `contextBudget` reported through `Issue.record`
+     (which *fails* the test) — right while they were questions, wrong once they
+     had answers. Both now assert: `contextSize == 4096` as a deliberate
+     **tripwire** (the same bet as pinning the SDK build string; note
+     `tokenCount` varies run to run — 4223/4224/4286 — so only the budget is
+     pinned and the overflow is merely bounded), and the inclusivity signature
+     as described in item 14.
+   - ☐ **Blocked on §8 deciding item 15:** `appleErrorSurface`'s
+     `GeneratedContent.ParsingError` disposition. The suite meanwhile *depends*
+     on the behaviour the manifest denies — `isEmptyResponse` matches on that
+     very type — so the contradiction is now load-bearing in code and cannot be
+     forgotten.
+
+   Verified: 391 green with `LEDGERKIT_DEVICE=1` (residues **executing**) and
+   391 green without (residues correctly **skipped**), device suite stable over
+   three consecutive runs, warning-free.
 
 ---
 
@@ -1273,7 +1429,7 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 | §11 sketch runs against the real driver | `DriverPipelineTests.sketchRunsAgainstTheRealDriver` | ☑ |
 | Cancellation chaos through the real session | `DriverPipelineTests` — parked point × both stop mechanisms, plus the before-any-text case; partial asserted as a prefix property | ☑ |
 | `isResponding` gate; "driver:" prefix convention | tier-1/2 per surface | ☐ |
-| Four §14 residues answered or deferred-with-reason | `SessionResidueTests` (OQ6 **answered**: thrown) + `DeviceResidueTests` (three, `LEDGERKIT_DEVICE`-gated, written to answer rather than to stand in) | ☑ |
+| Four §14 residues answered or deferred-with-reason | **All four answered.** `SessionResidueTests` (OQ6: thrown) + `DeviceResidueTests` run under `LEDGERKIT_DEVICE=1` on the macOS 27 host, 2026-08-02 — usage **inclusive** (221/209), context **4096**, and **0 prefix violations in 412 real snapshots** (the last measured beside the suite, since the shipped test's prompt returns empty — item 16). Rev 9 items 14–16 | ☑ |
 | FM import boundary (guardrail 2) | `ImportBoundaryTests` — imports *and* type names, both with vacuity guards; mutation Ⓕ | ☑ |
 | Healthy-log property over driver-produced logs | `DriverPipelineTests` — every pipeline test that writes a log | ☑ |
 
@@ -1296,6 +1452,8 @@ shape. Kill-mid-stream (DoD-1) needs only what M6+M7 ship.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-02 | **Phase 5 opens: residue tests assert their answers** | 414 (391 + 23) | Item 16's code, landed ahead of the SPEC draft. `realProviderNeverRevises` swept onto a prompt *list* with two vacuity guards (its single prompt was one of the two the model refuses, so it could never have answered on any hardware); `contextBudget` and `usageInclusivity` converted from `Issue.record` reporters into assertions — **4096 pinned as a tripwire**, overflow merely bounded, since `tokenCount` varies run to run. ⚠️ **One assertion was wrong and the failure was the finding:** guarding vacuity with `cached > 0` failed the moment the test ran beside its siblings, because Swift Testing parallelises and the KV cache is shared machine state. The eviction is what *proved* inclusivity — `input.total=221` with `cached=209` **and** with `cached=0`, where exclusive accounting would have reported ~12. Cache warmth is environmental; nothing may assert on it. 391 green with the flag (residues executing) and without (skipped), stable over three runs |
+| 2026-08-02 | **Phase 4's deferrals collected** (no code change) | 414 (391 + 23) | **The build machine is now macOS 27.0 (26A5388g)**, Apple Intelligence is live on it, and the on-device model generates — so `LEDGERKIT_DEVICE=1` is honest here and **all three hardware-deferred residues answered themselves, unchanged**: usage **inclusive** (`input.total=221 cached=209`, stable over three runs), the context budget is **exactly 4096** (refused after *two* ~2k turns — §7.1 overflows sooner than assumed), and a real provider **never revised across 412 snapshots**. Two structural findings: `swift test` now **executes** the 27-gated tier natively (the simulator becomes a second substrate rather than the only one, vindicating D31 again), and ⚠️ **`GeneratedContent.ParsingError` is reachable on the plain-`String` path** — the manifest dispositions it unreachable on prose the observation falsifies, and a routine empty response normalizes to `.terminal`, denying a retry for something trivially retryable. Rev 9 items **14–16**; the surface tripwire could not have caught it (it pins shape, and the shape was right) |
 | 2026-08-01 | **Phase 4 landed** | 414 (391 + 23) | §14's residues become tests rather than notes. **OQ6 answered: `concurrentRequests` is *thrown*** — the gate and §8's exclusion stand as designed, no spec wording changes — and it is substrate-independent, so it runs in CI forever. The other three are device-gated (`LEDGERKIT_DEVICE=1`) and written to *answer* their questions, because the simulator reports the on-device model `.available` and then **fails to generate**. **Cut line 4 invoked** for the Claude package; breadth is served instead by four Apple families the Phase 1 sweep found. Two findings with no §14 row: availability is advisory, and a real Apple failure arrived as an untyped `NSError` outside the typed taxonomy (rev 9 item 13) |
 | 2026-08-01 | **Phase 3.5 landed** (unplanned) | 409 (386 + 23) | `Understudy` gained `Script.Step.callTool`, so §7.6 is exercised end to end at last — one record per invocation, all three recording policies, and the record reaching `Message.toolRecords`. ⚠️ **Found a real bug in a rule that had exempted itself**: `ToolRecord.duration` minted from a `ContinuousClock` did not survive its own encoding, so the store's cache disagreed with disk — ADR-001 **R-5's** two-identities bug, in the field R-5's scope note explicitly excused. Fixed at the minting site; the ADR is corrected with the lesson that *an exemption reasoning from provenance expires when a new site starts producing the value*. Also: the framework refuses tool calling unless the model declares the capability |
 | 2026-08-01 | **Phase 3 landed** | 406 (383 + 23) | The whole pipeline as one assertion — script → framework → driver → store → SQLite → reducer — plus chaos through a real session at a parked point × both stop mechanisms, and §11's sketch against the real driver. **M6's "real stream captured & reduced" exit criterion is met.** Round trip stated as *text* (Phase 2's coalescing finding), and byte-stability recovered by pinning row count with §7.4's flush policy — the store decides how many delta rows exist, so the framework's cadence never reaches disk. No corpus file added, with the reasoning recorded. ⚠️ §7.6's tool records are still unexercised: no `Script.Step` can cause a tool call |
