@@ -304,9 +304,13 @@ struct NormalizationTests {
 
 // MARK: - Tier 2: the 27-only families
 
-/// The families that need a 27 runtime. Gated with `.enabled(if:)` so they
-/// report **skipped** on this macOS 26 host rather than passing silently, and
-/// executed on the iOS 27 simulator (see ``foundationModelsAvailable``).
+/// The families that need a 27 runtime. Gated with `.enabled(if:)` so a host
+/// that cannot run them reports **skipped** rather than passing silently (see
+/// ``foundationModelsAvailable``).
+///
+/// The gate is a *runtime* check, which is why it survived the substrate moving
+/// underneath it: these executed only on the iOS 27 simulator until the build
+/// machine reached macOS 27, and now run on the host too — same binary, no edit.
 @Suite("Session — normalization of the 27 error families", .enabled(if: foundationModelsAvailable))
 struct AppleErrorNormalizationTests {
 
@@ -336,6 +340,40 @@ struct AppleErrorNormalizationTests {
         for (thrown, expected) in rows {
             #expect(normalize(thrown, since: normalizationNow) == expected)
         }
+    }
+
+    /// **An empty model response is a *named* condition, not a mystery**
+    /// (rev 9, batch D).
+    ///
+    /// `GeneratedContent.ParsingError` arrives on the **plain-`String`** path
+    /// when the model produces zero tokens — not only from guided generation,
+    /// which is what its name and placement suggest and what
+    /// `appleErrorSurface` originally assumed. Measured on real hardware at M6:
+    /// deterministic per prompt, and reproducible.
+    ///
+    /// It lands on §8's rule-4 tail rather than the `unrecognized` floor. The
+    /// *affordance* is unchanged — both classify `terminal`, and `terminal` is
+    /// correct here, because retrying an identical request does not fix it
+    /// (measured: **0/10** on a prompt that reliably returns empty, against
+    /// **5/5** on a reworded one — "Regenerate-with-changes is the only path"
+    /// is the literal remedy). What changes is *provenance*: a known,
+    /// reproducible condition stops sitting on the floor reserved for genuine
+    /// unknowns, which is the same distinction the `"driver:"` prefix exists to
+    /// draw. The ledger outlives the session that wrote it.
+    @available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
+    @Test("an empty model response lands on rule 4, not on the floor")
+    func emptyResponseIsNamed() {
+        let error = GeneratedContent.ParsingError(
+            rawContent: "",
+            debugDescription: "Session ended without producing a response."
+        )
+
+        let normalized = normalize(error, since: normalizationNow)
+        #expect(normalized == .providerFailure(status: nil, code: "emptyResponse", message: nil))
+
+        // Both layers, per §10.5: a plausible normalization can still hand the
+        // user the wrong affordance.
+        #expect(mapping.recoverability(for: normalized) == .terminal)
     }
 
     /// Apple's payload numbers survive, because they change what the app can

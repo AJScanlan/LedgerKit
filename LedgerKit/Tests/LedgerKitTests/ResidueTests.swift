@@ -149,13 +149,17 @@ struct DeviceResidueTests {
 
     /// Whether a thrown error is "the model produced nothing".
     ///
-    /// ⚠️ Note what this type is: **`GeneratedContent.ParsingError`, which
-    /// `appleErrorSurface` dispositions `.unreachable`** on the grounds that
-    /// v0.1 never asks for guided generation (N8). It arrives here anyway, on a
-    /// plain-`String` stream, because an empty response fails the same parse.
-    /// That contradiction is rev 9 item 15 and a §8 decision; this helper only
-    /// needs to tell the case apart so a refusal does not masquerade as a
-    /// finding.
+    /// The type is `GeneratedContent.ParsingError`, which reaches the
+    /// plain-`String` path because an empty response fails the same parse that
+    /// guided generation's output would. Rev 9 (batch D) gave it a §8 landing —
+    /// `providerFailure(code: "emptyResponse")` — and moved it out of
+    /// `appleErrorSurface`'s unreachable group, where it had been dispositioned
+    /// on reasoning this suite's own behaviour falsified.
+    ///
+    /// Matched by *type* rather than by its normalized form, deliberately: this
+    /// helper's job is to tell "the model said nothing" apart from "the model
+    /// failed", and a normalization that later widens `emptyResponse` to cover
+    /// more conditions should not silently widen what these residue tests skip.
     @available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
     private static func isEmptyResponse(_ error: any Error) -> Bool {
         error is GeneratedContent.ParsingError

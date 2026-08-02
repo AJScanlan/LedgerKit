@@ -1176,7 +1176,7 @@ Extend as phases surface more; the M4/M5 pattern.
 > | A — cancellation & the straddle | 1, 2+12, 9 | §7.2, §7.5, §9 | ☑ **landed in SPEC 2026-08-02** (Appendix G) |
 > | B — the stream's honest properties | 10, 14-OQ4, **+ a stale "M6 should"** | §7.3 | ☑ **landed in SPEC 2026-08-02** (Appendix G) |
 > | C — usage | 5, 11, 14-§7.7 | §6.1, §7.7 | ☑ **landed in SPEC 2026-08-02** (Appendix G) + `TokenUsage` doc |
-> | D — the error taxonomy's edges | 8, 13+15 | §8 | ☐ drafted; **item 15 needs a decision** |
+> | D — the error taxonomy's edges | 8, 13+15 | §8 | ☑ **landed in SPEC 2026-08-02** (Appendix G) + normalization, fixture, manifest |
 > | E — context budget | 14-N3 | §7.1, N3 | ☐ drafted |
 > | F — sketch & residues | 3, 4, 6 | §11, §14 | ☐ drafted |
 >
@@ -1372,6 +1372,24 @@ Extend as phases surface more; the M4/M5 pattern.
    the shape was correct — `ParsingError` exists and is spelled as manifested.
    What was wrong was the prose justifying its disposition, which no test can
    check. Worth one line in §10 about the limit of the mechanism.
+   ### ☑ **DECIDED (owner, 2026-08-02): option (b)**, landed with batch D.
+   ⚠️ **The recommendation's *reasoning* was wrong and the conclusion survived
+   anyway** — worth recording, because the error was of a kind this project
+   keeps catching. (b) was recommended to fix an affordance claimed broken:
+   "an empty response is routine and trivially retryable, and the user is handed
+   `.terminal`." **Never measured, and false.** A prompt that returns empty does
+   so on **0/10** retries, while rewording succeeds **5/5** — so `terminal`
+   ("Regenerate-with-changes is the only path") was correct all along, and the
+   thing flagged as (b)'s weakness (it still classifies `terminal`) is the
+   behaviour working. Had (c) been chosen for the stated reason, v0.1 would have
+   shipped a permanent wire case whose default affordance was an auto-backoff
+   loop that never terminates.
+   So (b) lands for **provenance, not affordance**: a known, reproducible
+   condition moves off the floor reserved for genuine unknowns. And (c) fails on
+   §8's *own* argument independent of the beta — cases are spent on affordances,
+   not conditions, exactly as the four `unsupported*` built-ins are grouped.
+   **The generalizable lesson:** an affordance claim is an empirical claim.
+   "Trivially retryable" is a testable sentence, and it took one ten-line probe.
 16. **Not a spec item — the repo defects the above exposes.** ☑ **Landed
    2026-08-02**, except the one half that is blocked on a spec decision.
    - ☑ `DeviceResidueTests.realProviderNeverRevises` could **not pass as
@@ -1388,11 +1406,11 @@ Extend as phases surface more; the M4/M5 pattern.
      `tokenCount` varies run to run — 4223/4224/4286 — so only the budget is
      pinned and the overflow is merely bounded), and the inclusivity signature
      as described in item 14.
-   - ☐ **Blocked on §8 deciding item 15:** `appleErrorSurface`'s
-     `GeneratedContent.ParsingError` disposition. The suite meanwhile *depends*
-     on the behaviour the manifest denies — `isEmptyResponse` matches on that
-     very type — so the contradiction is now load-bearing in code and cannot be
-     forgotten.
+   - ☑ **Unblocked and landed 2026-08-02 with batch D.** §8 chose option (b);
+     `appleErrorSurface` now dispositions `GeneratedContent.ParsingError` as
+     `.normalized` and it has moved out of the unreachable group, with the
+     retired reasoning recorded beside it as a caution about what the tripwire
+     can check.
 
    Verified: 391 green with `LEDGERKIT_DEVICE=1` (residues **executing**) and
    391 green without (residues correctly **skipped**), device suite stable over

@@ -59,6 +59,29 @@ func normalize(_ error: any Error, since now: Date) -> GenerationError {
         case let error as LanguageModelSession.Error: return normalize(error)
         case let error as SystemLanguageModel.Error: return normalize(error)
         case let error as PrivateCloudComputeLanguageModel.Error: return normalize(error, since: now)
+        // **An empty model response (rev 9, batch D).** `GeneratedContent`'s
+        // parse failure is not confined to guided generation, which is what its
+        // name suggests and what `appleErrorSurface` originally assumed: a model
+        // producing **zero tokens** fails the same parse on the plain-`String`
+        // path, and M6 measured it happening deterministically for particular
+        // prompts on Apple's own on-device model.
+        //
+        // Rule 4, not the floor. The affordance is identical either way — both
+        // classify `terminal`, which is *correct*, since retrying an identical
+        // request does not fix it (0/10 measured, against 5/5 after rewording;
+        // "Regenerate-with-changes is the only path" is literally the remedy).
+        // What rule 4 buys is **provenance**: a reproducible, named condition
+        // does not belong on the floor reserved for genuine unknowns, and the
+        // ledger outlives the session that could have explained it.
+        //
+        // ⚠️ Deliberately *not* a new `GenerationError` case. §8 spends cases on
+        // **affordances**, not conditions — the same argument that groups the
+        // four `unsupported*` built-ins — and this one buys no affordance that
+        // `terminal` does not already give. It is also the mapping that does not
+        // bet on the beta: if a later release routes an empty response to
+        // `refusal`, this is one line, where a wire case would be permanent.
+        case is GeneratedContent.ParsingError:
+            return .providerFailure(status: nil, code: "emptyResponse", message: nil)
         default: break
         }
     }
@@ -162,7 +185,7 @@ func normalize(_ error: LanguageModelSession.Error) -> GenerationError {
     }
 }
 
-// MARK: - SystemLanguageModel.Error (27) — rev 9: §8 does not mention this family
+// MARK: - SystemLanguageModel.Error (27) — §8's second table (landed rev 9)
 
 /// The on-device model's own error type, which §8's coverage table predates.
 ///
@@ -182,7 +205,8 @@ func normalize(_ error: SystemLanguageModel.Error) -> GenerationError {
     }
 }
 
-// MARK: - PrivateCloudComputeLanguageModel.Error (27) — rev 9: nor this one
+// MARK: - PrivateCloudComputeLanguageModel.Error (27) — §8's second table, and
+// the one genuinely non-on-device Apple provider
 
 /// Private Cloud Compute's error family. §8 mentions PCC only for its smaller
 /// *availability* reason set and not for this enum at all — **proposed for

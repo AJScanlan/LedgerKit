@@ -101,6 +101,24 @@ let appleErrorSurface: [AppleErrorType] = [
         cases: ["networkFailure", "quotaLimitReached", "serviceUnavailable"],
         disposition: .normalized
     ),
+    // ⚠️ **Moved out of the unreachable group at rev 9, by observation.** This
+    // was dispositioned `.unreachable` on the reasoning that the parse belongs
+    // to guided generation, which v0.1 never requests (N8). That reasoning is
+    // *false*: a model returning zero tokens fails the same parse on the plain-
+    // `String` path, measured on real hardware at M6. Normalizes by §8 rule 4 to
+    // `providerFailure(code: "emptyResponse")`.
+    //
+    // Worth keeping as a caution about what this manifest can and cannot catch:
+    // the surface tripwire pins the SDK's **shape**, and the shape was right all
+    // along — `ParsingError` exists, spelled exactly as recorded. What was wrong
+    // was the *prose* justifying a disposition, and no test can check prose. A
+    // disposition of `.unreachable` is a claim about the world, not about the
+    // SDK, and only running code can falsify one.
+    .init(
+        type: "GeneratedContent.ParsingError",
+        cases: [],
+        disposition: .normalized
+    ),
 
     // ── Out of the driver's path, each for a stated reason ────────────────────
     .init(
@@ -111,17 +129,6 @@ let appleErrorSurface: [AppleErrorType] = [
             Thrown while an app loads an adapter, which happens when it constructs \
             the model it hands to a driver — before any generation exists. §8's \
             floor catches it loudly if that assumption is ever wrong.
-            """
-        )
-    ),
-    .init(
-        type: "GeneratedContent.ParsingError",
-        cases: [],
-        disposition: .unreachable(
-            why: """
-            Guided generation only: it is raised parsing model output into a \
-            `Generable`. v0.1 requests plain `String` (N8), so nothing asks for \
-            the parse that could fail.
             """
         )
     ),

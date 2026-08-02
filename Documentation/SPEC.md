@@ -1,9 +1,9 @@
 # LedgerKit v0.1 — Design Specification
 
-**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G records what has landed so far — **batches A, B and C**. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
+**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G records what has landed so far — **batches A–D**. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
 **Date:** rev 9 in progress 2026-08-02 (rev 8: 2026-07-28, rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
 **Targets:** iOS 27 / macOS 27 (Foundation Models `LanguageModel` protocol as inference substrate)
-**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. Batches A–C landed; three outstanding. No invariant weakens; whether anything touches the wire is batch D's open question.
+**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. Batches A–D landed; two outstanding. No invariant weakens, and **nothing touches the wire** — batch D resolved that question, not by thrift (pre-1.0 the wire is free) but because §8 spends cases on affordances rather than conditions.
 **Changes from rev 7:** Appendix F — two items from the M4 boundary audit, nine from M5. No invariant weakens, no event kind changes, nothing touches the wire.
 
 ---
@@ -519,6 +519,24 @@ public enum UnsupportedFeature: Sendable, Codable {
 | `unsupportedLanguageOrLocale` | `unsupported(.languageOrLocale)` | grouped |
 | `timeout` | `transport(.timeout)` | **the one deliberate non-1:1** — lift rule 2 below |
 
+**The other families Apple ships, and where they land (rev 9).** §8 anchors on `LanguageModelError` because that is where Apple steers providers — but the SDK ships four further `Error` types a driver can actually receive, plus one wrapper, and M6 mapped all of them. The table above stays as it is: it states totality over the *built-in taxonomy*, and merging these in would blur what is being promised. Every row below lands by an **existing** rule; none needed a new one.
+
+| Apple type & case | `GenerationError` | Rule |
+|---|---|---|
+| `SystemLanguageModel.Error.assetsUnavailable` | `modelUnavailable(.modelNotReady)` | the landing PCC's `systemNotReady` already has |
+| `LanguageModelSession.GenerationError.assetsUnavailable` (26) | `modelUnavailable(.modelNotReady)` | its own deprecation names the 27 replacement above |
+| `LanguageModelSession.GenerationError.decodingFailure` (26) | `providerFailure(status: nil, code: "decodingFailure")` | rule 4 |
+| `LanguageModelSession.Error.transcriptMutationWhileResponding` | `unrecognized("driver: …")` | the exclusion below — a LedgerKit bug by construction |
+| `PrivateCloudComputeLanguageModel.Error.networkFailure` | `transport(.connectivity)` | rule 2 |
+| `PrivateCloudComputeLanguageModel.Error.quotaLimitReached` | `rateLimited(retryAfter:)` | rule 2 — carries `resetDate`, the instant form |
+| `PrivateCloudComputeLanguageModel.Error.serviceUnavailable` | `providerFailure(status: nil, code:)` | rule 4 — the nil-status transient this section anticipated in prose |
+| `GeneratedContent.ParsingError` | `providerFailure(status: nil, code: "emptyResponse")` | rule 4 — see below |
+| `LanguageModelSession.ToolCallError` | *unwrapped to its `underlyingError`* | see below |
+
+`decodingFailure` classifies `terminal` because retrying an identical request cannot fix a decode failure, and guided generation is outside v0.1 (N8) so no 1:1 home exists. Apple's `debugDescription` is deliberately **not** carried into `message` on any of these: §8 declines to project debug detail, and the ledger outlives the session.
+
+**A wrapper is transparent to normalization (rev 9).** `ToolCallError` is the one family member that says *where* a failure happened rather than *what* it was, so it is unwrapped and the error underneath classified on its merits: a tool whose network call timed out must give the user `transport(.timeout)` and a Retry, not an opaque tool-shaped mystery. Nothing is lost, because "a tool failed" already has its own channel — §7.6's `toolInvocationRecorded`, carrying the tool's name and a `.failed` status. Two facts, two events, neither standing in for the other. Unwrapping is **bounded**: the payload is `any Error` and the type is publicly constructible, so a nested — even cyclic — chain is representable, and past the bound the floor catches it. That is I2's never-trap-never-hang posture applied on this side of the seam.
+
 **Why `contextSizeExceeded` carries a payload and the other cases do not (rev 7).** Apple's `ContextSizeExceeded` carries `contextSize` and `tokenCount`, and this is the one built-in where the numbers change what the app can *do*: N3 makes window overflow a headline on-device failure, and `recoverableUpstream(.reduceContext)` is a far better affordance when the app can say how far over it was. The fields are **optional** because the ledger records what was reported, and non-Apple providers report neither. **Classification ignores the payload** — §8 maps the case, and a number cannot change what the user can do about it — exactly as `rateLimited`'s slot reads its own duration for display and nothing else.
 
 **This was additive on the wire, which is the only reason it happened after ratification.** The `contextSizeExceeded` discriminator is unchanged; nil fields encode as absent keys (ADR-001 R-4), so this build writes byte-identical bytes to the pre-widening build for a payload-less value; and keyed containers skip unknown keys, so a rev-6 reader ignores fields a rev-7 writer adds. The two new field keys join ADR-001 R-2's permanent registry. `wire/contextSizeExceededLegacy` pins all three shapes from bytes — pre-widening, post-widening, and a *future* version's extra field — so the claim is a test rather than an argument. **Not free in Swift, though, and worth recording for the next one:** enum cases cannot have default parameter values, so widening a case is source-breaking at every construction site even when it is wire-additive.
@@ -560,6 +578,17 @@ public enum RequiredAction: Sendable {
 3. Remaining failures that crossed an HTTP boundary → `providerFailure(status:code:message:)`.
 4. Non-HTTP provider-custom errors → `providerFailure(status: nil, code: <identifier>, message:)`.
 5. Anything else → `.unrecognized` (loud).
+
+**What "total" claims, precisely (rev 9).** Totality is over Apple's **typed** taxonomy — the cases enumerated in the tables above. The framework can and does deliver failures outside it, and M6 observed two distinct shapes on real hardware:
+
+1. An **untyped `NSError`** in Foundation Models' own error domain, rather than any `LanguageModelError` case.
+2. A **typed error outside the mapped set**: `GeneratedContent.ParsingError`, which arrives on the **plain-`String`** path when the model returns zero tokens — not only from guided generation, as its name and placement suggest.
+
+So `unrecognized` is a **working part of the design rather than a rarely-taken floor**, and rule 5 is load-bearing. Two things follow. The `"driver:"` prefix convention earns its keep, because it is what separates "LedgerKit did something wrong" from "the provider did something we have no name for" once both land in the same case. And a condition that becomes *recognizable* should be **moved off the floor** — which is what rev 9 does for the second shape.
+
+**Empty responses are named, not mysteries (rev 9).** A model that produces zero tokens normalizes to `providerFailure(status: nil, code: "emptyResponse")` by rule 4. The affordance does not change — it classified `terminal` on the floor and classifies `terminal` here — and `terminal` is **correct**, which is worth stating because the opposite is the intuitive guess: an empty response looks transient, and it is not. Retrying an identical request does not fix it (measured: 0/10 on a prompt that reliably returns empty, against 5/5 on a reworded one), so §8's own gloss on `terminal` — *"Regenerate-with-changes is the only path"* — is the literal remedy. What rule 4 buys is **provenance**: a known, reproducible condition should not occupy the floor reserved for genuine unknowns, because the ledger outlives the session that could have explained it.
+
+Deliberately **not** a new `GenerationError` case, for the reason that grouped the four `unsupported*` built-ins: this taxonomy spends cases on **affordances**, not on conditions, and `emptyResponse` buys no affordance `terminal` does not already give. It is also the mapping that does not bet on a beta — if a later release routes empty responses to `refusal`, this is one line of normalization, where a wire case would be a permanent commitment to describing a framework gap.
 
 **One exclusion, now with a name (rev 4, sharpened rev 7):** a busy-*session* condition is a driver defect, not a provider signal. At 27 it is the typed `LanguageModelSession.Error.concurrentRequests`; at 26 it was `LanguageModelSession.GenerationError.concurrentRequests`, in the same enum as `rateLimited`, which is how it came to be mistaken for one. **Normalization must map neither to `.rateLimited`.** §7.2's `isResponding` gate keeps both out of normalization entirely; if one ever reaches it, it lands as `unrecognized("driver: session busy")`, never as `retryable`. The same applies to `.transcriptMutationWhileResponding`, its sibling: mutating a transcript mid-response is a LedgerKit bug by construction, since the driver owns the session for the generation's duration.
 
@@ -900,9 +929,8 @@ Rev 8 was opened by the **M4 boundary audit** (2026-07-27) and closed by **M5** 
 > `M6-PLAN.md` §6.
 >
 > **Landed:** batch A (cancellation & the straddle), batch B (the stream's
-> honest properties), batch C (usage).
-> **Outstanding:** D (the error taxonomy's edges), E (context budget),
-> F (sketch & residues).
+> honest properties), batch C (usage), batch D (the error taxonomy's edges).
+> **Outstanding:** E (context budget), F (sketch & residues).
 
 Rev 9 is **M6's revision** — the milestone in which `Session/` first ran against
 the real framework — and its character is different from rev 8's. Rev 8 was
@@ -910,9 +938,11 @@ mostly *sentences this document assumed and never wrote down*; rev 9 is mostly
 **measurements that contradicted something a reader would reasonably have
 believed.** Almost nothing here was reasoned out in advance. It was run.
 
-No invariant weakens and the reducer's semantics are untouched. Whether anything
-touches the wire is **batch D's open question** — unlike rev 8, that is not
-settled up front, and pre-1.0 the wire is still free to change.
+No invariant weakens and the reducer's semantics are untouched. **Nothing touches the wire.** That was batch D's open question and it resolved
+the cheap way: the one new landing reuses `providerFailure`'s existing case and
+its free-form `code`, so no discriminator, field key or enum case is added.
+Recorded because the *reason* is not thrift — pre-1.0 the wire is free to change
+— but §8's rule that cases are spent on **affordances, not conditions**.
 
 ### Batch A — cancellation & the straddle (from the M5 boundary audit + M6 Phase 0/2)
 
@@ -1006,3 +1036,50 @@ settled up front, and pre-1.0 the wire is still free to change.
   table cited "(§6.1)" for a type §6.1 described only by its fields. Cosmetic,
   and fixed at the target rather than by weakening the citation: a
   cross-reference that does not resolve teaches a reader to stop following them.
+
+### Batch D — the error taxonomy's edges (from M6 Phases 0–4)
+
+- **Apple ships four error families where the coverage table named one (§8).**
+  §8 states totality as a *checkable table*, and seven landings existed in code
+  with no row to check them against — `SystemLanguageModel.Error`,
+  `PrivateCloudComputeLanguageModel.Error` (a genuinely second, non-on-device
+  Apple provider), two cases of the deprecated 26 family, and
+  `transcriptMutationWhileResponding`. A second table now carries them, kept
+  separate from the built-in one because that table's promise is specifically
+  about *the built-in taxonomy*, and merging would blur what is claimed. **Every
+  row lands by an existing rule; none needed a new one** — which is the useful
+  result, since a family requiring a new rule would have meant the taxonomy was
+  shaped wrong.
+- **A wrapper is transparent to normalization (§8).** `ToolCallError` says
+  *where* a failure happened, not *what* it was, so it is unwrapped and the
+  error underneath classified on its merits. §8 had no rule for wrappers.
+  Nothing is lost, because "a tool failed" already has §7.6's own channel — two
+  facts, two events, neither standing in for the other. Bounded unwrapping,
+  because the payload is `any Error` and the type is publicly constructible, so
+  a cyclic chain is representable.
+- **Totality is over the *typed* taxonomy (§8, §14).** Two shapes arrived from
+  real hardware that the typed cases do not cover: an **untyped `NSError`** in
+  Foundation Models' own domain, and a **typed error outside the mapped set**.
+  So `unrecognized` is a working part of the design rather than a rarely-taken
+  floor, and the `"driver:"` prefix convention earns its keep by separating
+  LedgerKit's defects from provider mysteries once both land in one case.
+- **Empty responses are named (§8).** `GeneratedContent.ParsingError` reaches
+  the **plain-`String`** path when a model returns zero tokens — it is not
+  guided-generation-only, which its name and placement both suggest and which
+  LedgerKit's own error-surface manifest had asserted. It now normalizes to
+  `providerFailure(code: "emptyResponse")` by rule 4.
+  **The affordance was already right and stays `terminal`**, which is the part
+  worth recording, because the intuitive guess is the opposite: an empty
+  response *looks* transient. It is not — retrying an identical request fails
+  indefinitely (0/10 measured) while rewording succeeds (5/5), so
+  "Regenerate-with-changes is the only path" is the literal remedy. What changes
+  is **provenance**, moving a reproducible condition off the floor reserved for
+  unknowns. Deliberately not a new case: §8 spends cases on *affordances*, not
+  conditions — the argument that grouped the four `unsupported*` built-ins —
+  and this is also the mapping that does not bet on a beta.
+  ⚠️ **A note on the limits of the mechanism that missed it.** The error-surface
+  tripwire (§10) pins the SDK's **shape**, and the shape was correct throughout:
+  `ParsingError` exists, spelled exactly as manifested. What was wrong was the
+  *prose* justifying its disposition — and a disposition of "unreachable" is a
+  claim about the world, not about the SDK, so no shape test can falsify one.
+  Only running code did.
