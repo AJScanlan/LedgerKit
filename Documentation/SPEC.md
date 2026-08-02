@@ -1,9 +1,9 @@
 # LedgerKit v0.1 — Design Specification
 
-**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G records what has landed so far — **batches A–D**. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
+**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G records what has landed so far — **batches A–E**. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
 **Date:** rev 9 in progress 2026-08-02 (rev 8: 2026-07-28, rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
 **Targets:** iOS 27 / macOS 27 (Foundation Models `LanguageModel` protocol as inference substrate)
-**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. Batches A–D landed; two outstanding. No invariant weakens, and **nothing touches the wire** — batch D resolved that question, not by thrift (pre-1.0 the wire is free) but because §8 spends cases on affordances rather than conditions.
+**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. Batches A–E landed; one outstanding. No invariant weakens, and **nothing touches the wire** — batch D resolved that question, not by thrift (pre-1.0 the wire is free) but because §8 spends cases on affordances rather than conditions.
 **Changes from rev 7:** Appendix F — two items from the M4 boundary audit, nine from M5. No invariant weakens, no event kind changes, nothing touches the wire.
 
 ---
@@ -66,7 +66,9 @@ The single most important design input. Anything in the left column is a non-goa
 
 - **N1.** No networking, no providers, no API-key handling. (Apple + vendor packages.)
 - **N2.** No prompt templating, personas, or skills. (Utilities package.)
-- **N3.** No compaction awareness. In-session compaction is invisible to LedgerKit in v0.1; rehydration materializes the full active path. Accepted consequence, stated honestly (rev 4): a rebuilt session sees more context than the compacted live session it replaces — and may therefore *exceed the window that compaction was hiding*. On-device budgets are small (reported ~4k shared tokens — ⚠️ verify against the beta), so a long on-device conversation can be unregenerable after process death: rehydration fails with `contextSizeExceeded` (rev 6 name), which classifies to `recoverableUpstream(.reduceContext)` (§8), and the app-side escape is a utilities compaction pass before retry. The failure is graceful and typed, not silent — but it is a failure, and pretending the consequence is merely "sees more context" undersold it. Compaction bookkeeping arrives in v0.3, and the event carries the summary text (§12) so rehydration and audit can reproduce what the model saw.
+- **N3.** No compaction awareness. In-session compaction is invisible to LedgerKit in v0.1; rehydration materializes the full active path. Accepted consequence, stated honestly (rev 4): a rebuilt session sees more context than the compacted live session it replaces — and may therefore *exceed the window that compaction was hiding*. **The on-device budget is 4096 tokens (rev 9 — measured at M6, replacing rev 4's "reported ~4k, verify against the beta").** Apple's own `contextSizeExceeded` reports `contextSize: 4096` with the overflowing `tokenCount` beside it, which is exactly what rev 7 widened that case to carry. So a long on-device conversation can be unregenerable after process death: rehydration fails with `contextSizeExceeded` (rev 6 name), which classifies to `recoverableUpstream(.reduceContext)` (§8), and the app-side escape is a utilities compaction pass before retry. The failure is graceful and typed, not silent — but it is a failure, and pretending the consequence is merely "sees more context" undersold it.
+
+⚠️ **And "long" undersells it too (rev 9).** The measurement exhausted the window in **two turns of roughly 2k tokens each**. That is not a pathological conversation; it is a short one with substantial messages. On-device, full-path rehydration is therefore not an edge case that bites eventually — it is the ordinary outcome for any conversation with real content in it, and the v0.3 deferral above is a deferral of something apps will meet in week one. Stated plainly because the honest reading changes what an app should do *now*: an on-device app should treat a compaction pass as part of its normal regenerate path (§8's `.reduceContext` affordance), not as error handling it hopes never to reach. Compaction bookkeeping arrives in v0.3, and the event carries the summary text (§12) so rehydration and audit can reproduce what the model saw.
 - **N4.** No RAG, embeddings, or search.
 - **N5.** No sync. The event log is designed to permit log-shipping later; nothing is built.
 - **N6.** No UI components. State machine + observation only.
@@ -353,6 +355,8 @@ To generate from leaf *m*: materialize the active path — from its root-level n
 - **Tool calls / tool outputs — not reconstructed.** Under *any* recording policy in v0.1: with `.metadataOnly` (the default) the outputs were never retained, so reconstruction is impossible by design; with `.full` it is representable but deliberately deferred (v0.2, §12) pending the transcript-entry construction surface (OQ2-adjacent). Consequence, owned: **a rebuilt session's model no longer sees prior tool results** — post-crash regeneration can differ from what the live session would have produced. The audit trail outlives the session's memory of it.
 - **Reasoning — absent, by choice (rev 7).** Recordable in principle at 27 — observable on the channel, constructible as a `Transcript.Reasoning` — and deliberately not recorded in v0.1 (N11). Rebuilt sessions never contain reasoning entries.
 
+⚠️ **What full-path rehydration costs on-device, now measured (rev 9).** Materializing the whole active path is the design, and it is what makes the ledger the truth — but the on-device window is **4096 tokens** and M6 exhausted it in **two turns** of ~2k. Rehydration is therefore the operation most likely to fail on-device, and it fails at exactly the worst moment: after process death, when the user returns to a conversation they expect to continue. The failure is typed and graceful (`contextSizeExceeded` → `recoverableUpstream(.reduceContext)`, §8) and the ledger is undamaged — nothing is lost, because the log is intact and only the *session* could not be rebuilt. But an app shipping on-device should read N3's compaction escape as part of its normal path rather than as a remote error case. Providers with larger windows are unaffected; this is a property of the substrate, not of the design.
+
 *Scope caveat:* apps mutating instructions/tools mid-session via Dynamic Profiles are outside v0.1 audit fidelity — LedgerKit records conversation-level instructions only. If your app swaps profiles per-turn, the ledger records which model ran (`ModelDescriptor`), not which profile.
 
 ### 7.2 Generation start & the outcome boundary (rev 4)
@@ -537,7 +541,7 @@ public enum UnsupportedFeature: Sendable, Codable {
 
 **A wrapper is transparent to normalization (rev 9).** `ToolCallError` is the one family member that says *where* a failure happened rather than *what* it was, so it is unwrapped and the error underneath classified on its merits: a tool whose network call timed out must give the user `transport(.timeout)` and a Retry, not an opaque tool-shaped mystery. Nothing is lost, because "a tool failed" already has its own channel — §7.6's `toolInvocationRecorded`, carrying the tool's name and a `.failed` status. Two facts, two events, neither standing in for the other. Unwrapping is **bounded**: the payload is `any Error` and the type is publicly constructible, so a nested — even cyclic — chain is representable, and past the bound the floor catches it. That is I2's never-trap-never-hang posture applied on this side of the seam.
 
-**Why `contextSizeExceeded` carries a payload and the other cases do not (rev 7).** Apple's `ContextSizeExceeded` carries `contextSize` and `tokenCount`, and this is the one built-in where the numbers change what the app can *do*: N3 makes window overflow a headline on-device failure, and `recoverableUpstream(.reduceContext)` is a far better affordance when the app can say how far over it was. The fields are **optional** because the ledger records what was reported, and non-Apple providers report neither. **Classification ignores the payload** — §8 maps the case, and a number cannot change what the user can do about it — exactly as `rateLimited`'s slot reads its own duration for display and nothing else.
+**Why `contextSizeExceeded` carries a payload and the other cases do not (rev 7).** Apple's `ContextSizeExceeded` carries `contextSize` and `tokenCount`, and this is the one built-in where the numbers change what the app can *do*: N3 makes window overflow a headline on-device failure, and `recoverableUpstream(.reduceContext)` is a far better affordance when the app can say how far over it was. **Rev 9 vindicates the widening emphatically:** the on-device budget turned out to be 4096 tokens, exhausted in two turns, so this is not a rare case whose payload is a nicety — it is the on-device failure, and the numbers arrived exactly as D17 bet they would (`contextSize: 4096`, `tokenCount: 4223`). The fields are **optional** because the ledger records what was reported, and non-Apple providers report neither. **Classification ignores the payload** — §8 maps the case, and a number cannot change what the user can do about it — exactly as `rateLimited`'s slot reads its own duration for display and nothing else.
 
 **This was additive on the wire, which is the only reason it happened after ratification.** The `contextSizeExceeded` discriminator is unchanged; nil fields encode as absent keys (ADR-001 R-4), so this build writes byte-identical bytes to the pre-widening build for a payload-less value; and keyed containers skip unknown keys, so a rev-6 reader ignores fields a rev-7 writer adds. The two new field keys join ADR-001 R-2's permanent registry. `wire/contextSizeExceededLegacy` pins all three shapes from bytes — pre-widening, post-widening, and a *future* version's extra field — so the claim is a test rather than an argument. **Not free in Swift, though, and worth recording for the next one:** enum cases cannot have default parameter values, so widening a case is source-breaking at every construction site even when it is wire-additive.
 
@@ -929,8 +933,9 @@ Rev 8 was opened by the **M4 boundary audit** (2026-07-27) and closed by **M5** 
 > `M6-PLAN.md` §6.
 >
 > **Landed:** batch A (cancellation & the straddle), batch B (the stream's
-> honest properties), batch C (usage), batch D (the error taxonomy's edges).
-> **Outstanding:** E (context budget), F (sketch & residues).
+> honest properties), batch C (usage), batch D (the error taxonomy's edges),
+> batch E (the context budget).
+> **Outstanding:** F (sketch & residues).
 
 Rev 9 is **M6's revision** — the milestone in which `Session/` first ran against
 the real framework — and its character is different from rev 8's. Rev 8 was
@@ -1083,3 +1088,28 @@ Recorded because the *reason* is not thrift — pre-1.0 the wire is free to chan
   *prose* justifying its disposition — and a disposition of "unreachable" is a
   claim about the world, not about the SDK, so no shape test can falsify one.
   Only running code did.
+
+### Batch E — the context budget (from M6 Phase 4)
+
+- **N3's ⚠️ is discharged: the on-device budget is 4096 tokens (N3, §7.1, §8).**
+  Rev 4 wrote "reported ~4k shared tokens — verify against the beta"; the
+  verification happened, and the number is exact. Apple's own
+  `contextSizeExceeded` carries it (`contextSize: 4096`, `tokenCount: 4223`),
+  which **vindicates D17's widening**: rev 7 added those two fields on the
+  argument that window overflow is *the* headline on-device failure and the
+  numbers change what an app can do. Both halves proved right, and the payload
+  is what turned a residue into a measurement rather than an investigation.
+- **⚠️ The number is not the finding — *two turns* is (N3, §7.1).** The window
+  was exhausted by two turns of roughly 2k tokens. That is not a pathological
+  conversation; it is a short one with substantial messages. So full-path
+  rehydration on-device is not an edge case that bites eventually — it is the
+  ordinary outcome for any conversation with real content, and N3's compaction
+  escape is something apps meet in week one rather than a v0.3 deferral they can
+  plan around. The spec now says so in both places a reader would look: N3,
+  where the consequence is owned, and §7.1, where the operation lives.
+  Nothing about the design changes — the failure was always typed and graceful,
+  and the ledger is undamaged because only the *session* could not be rebuilt.
+  What changes is the honest advice: an on-device app should treat compaction as
+  part of its normal regenerate path, not as error handling it hopes never to
+  reach. Providers with larger windows are unaffected; this is a property of the
+  substrate, not of the design.

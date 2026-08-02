@@ -283,7 +283,7 @@ struct DeviceResidueTests {
         #expect(verdicts.isEmpty, "a real provider revised a segment: \(verdicts)")
     }
 
-    /// **N3's ⚠️: the real on-device context budget**, which sets how soon a long
+    /// **N3's ⚠️: the real on-device context budget**, which sets how soon a
     /// conversation becomes unregenerable after process death (§7.1's rehydration
     /// is full-path).
     ///
@@ -292,12 +292,16 @@ struct DeviceResidueTests {
     /// them.
     ///
     /// ### ✅ **ANSWERED: 4096 tokens** (2026-08-02) — `contextSize=4096
-    /// tokenCount=4223`, refused after **two** ~2k-token turns. N3's "~4k
-    /// shared, reported, unverified" hedge becomes a measured number.
+    /// tokenCount=4223`, refused after **two** ~2k-token turns. Earlier
+    /// revisions carried an approximate, explicitly unverified figure;
+    /// SPEC rev 9 replaces it with this measurement. (Paraphrased rather than
+    /// quoted, so the retired-phrase sweep does not re-report a fixed site.)
     ///
-    /// ⚠️ **Two turns is the part worth carrying into §7.1.** Full-path
-    /// rehydration overflows far sooner than the design discussion assumed, so
-    /// the compaction question M7/M8 inherit is concrete rather than abstract.
+    /// ⚠️ **Two turns is the part worth carrying, and rev 9 carried it into both
+    /// N3 and §7.1.** Full-path rehydration overflows far sooner than the design
+    /// discussion assumed — this is an ordinary conversation, not a long one —
+    /// so compaction is a week-one concern for on-device apps rather than the
+    /// v0.3 deferral N3 reads as.
     ///
     /// Asserted rather than reported, deliberately as a **tripwire**: a beta
     /// that moves the budget fails here, which is the same bet as pinning the

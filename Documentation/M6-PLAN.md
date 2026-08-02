@@ -1177,7 +1177,7 @@ Extend as phases surface more; the M4/M5 pattern.
 > | B — the stream's honest properties | 10, 14-OQ4, **+ a stale "M6 should"** | §7.3 | ☑ **landed in SPEC 2026-08-02** (Appendix G) |
 > | C — usage | 5, 11, 14-§7.7 | §6.1, §7.7 | ☑ **landed in SPEC 2026-08-02** (Appendix G) + `TokenUsage` doc |
 > | D — the error taxonomy's edges | 8, 13+15 | §8 | ☑ **landed in SPEC 2026-08-02** (Appendix G) + normalization, fixture, manifest |
-> | E — context budget | 14-N3 | §7.1, N3 | ☐ drafted |
+> | E — context budget | 14-N3 | §7.1, N3, §8 | ☑ **landed in SPEC 2026-08-02** (Appendix G) + `contextSizeExceeded` doc |
 > | F — sketch & residues | 3, 4, 6 | §11, §14 | ☐ drafted |
 >
 > ⚠️ **Wire changes are free pre-1.0** (owner's call, 2026-08-02). Rev 8's

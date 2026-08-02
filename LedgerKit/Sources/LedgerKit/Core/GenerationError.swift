@@ -28,6 +28,13 @@ public enum GenerationError: Error, Sendable, Equatable {
     /// `recoverableUpstream(.reduceContext)` is far more actionable when the app
     /// can say *how far over* (M4-PLAN D17).
     ///
+    /// ⚠️ **On-device the budget is 4096 tokens, and M6 exhausted it in two
+    /// turns of ~2k** (SPEC rev 9, N3). An app on the on-device model should
+    /// therefore expect this case on ordinary conversations rather than long
+    /// ones, and treat a compaction pass as part of its normal regenerate path.
+    /// Nothing is lost when it fires — the ledger is intact, and only the
+    /// *session* could not be rebuilt from it.
+    ///
     /// **Not a tag retirement.** The `contextSizeExceeded` discriminator is
     /// unchanged, the fields encode as absent keys when nil (ADR-001 R-4), and
     /// keyed containers skip unknown extras — so pre-widening logs decode with
