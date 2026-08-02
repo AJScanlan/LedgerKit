@@ -203,8 +203,10 @@ enum DriverDiagnostic: Equatable, Sendable {
     /// The prose after the prefix. Non-contractual (ADR-001) — the *structure*
     /// asserted in tests is the prefix, never this. The non-prefix case carries
     /// its reason because that string is what a bug report about a real provider
-    /// would need to quote, and §14's OQ4 residue is exactly a question about
-    /// which of these ever fires in the wild.
+    /// would need to quote. Which of them fires in the wild was §14's OQ4
+    /// residue; M6 answered it — **none did**, across 412 snapshots of a real
+    /// generation (§7.3 consequence 4) — so this string is written for a report
+    /// nobody has had to file yet.
     private var detail: String {
         switch self {
         case .sessionBusy:

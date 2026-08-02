@@ -91,7 +91,11 @@ enum SnapshotDelta: Equatable, Sendable {
     /// The driver treats all four identically; they are distinguished because a
     /// test asserting *which* violation it caught is a stronger test than one
     /// asserting merely that something was refused, and because these are the
-    /// shapes to quote if a real provider ever trips one (§14's OQ4 residue).
+    /// shapes to quote if a real provider ever trips one. **None has yet:** M6
+    /// observed zero non-prefix snapshots across 412 snapshots of a real
+    /// generation (§7.3 consequence 4), which is why these cases are reachable
+    /// only from unit tests — and why they stay, since the API still permits
+    /// the revision the observation merely failed to produce.
     enum Reason: Equatable, Sendable {
         /// A segment's text changed rather than grew — the `replaceTextSegment`
         /// shape exactly.

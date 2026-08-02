@@ -1174,7 +1174,7 @@ Extend as phases surface more; the M4/M5 pattern.
 > | Batch | Items | Sections | State |
 > |---|---|---|---|
 > | A — cancellation & the straddle | 1, 2+12, 9 | §7.2, §7.5, §9 | ☑ **landed in SPEC 2026-08-02** (Appendix G) |
-> | B — the stream's honest properties | 10, 14-OQ4 | §7.3 | ☐ drafted |
+> | B — the stream's honest properties | 10, 14-OQ4, **+ a stale "M6 should"** | §7.3 | ☑ **landed in SPEC 2026-08-02** (Appendix G) |
 > | C — usage | 5, 11, 14-§7.7 | §6.1, §7.7 | ☐ drafted |
 > | D — the error taxonomy's edges | 8, 13+15 | §8 | ☐ drafted; **item 15 needs a decision** |
 > | E — context budget | 14-N3 | §7.1, N3 | ☐ drafted |
@@ -1261,11 +1261,22 @@ Extend as phases surface more; the M4/M5 pattern.
    One sentence, in the section that already insists cancelled ≠ failed ≠
    interrupted.
 10. **§7.3 — the round trip recovers text, not fragment boundaries** (Phase 2).
-   The claim that `deltaAppended` rows "recover exactly the fragments the script
-   emitted" is false against the real framework, which coalesces on its own
-   snapshot cadence — and the flush policy reshapes boundaries again anyway
-   (§7.4). The property worth stating is that the *concatenation* survives
-   exactly. M6's exit criterion needs the same edit.
+   ☑ **Landed 2026-08-02 (batch B).** The fragment-level claim is false against
+   the real framework, which coalesces on its own snapshot cadence — and the
+   flush policy reshapes boundaries again anyway (§7.4). The property worth
+   stating is that the *concatenation* survives exactly.
+   ⚠️ **Correction: "M6's exit criterion needs the same edit" was wrong** — the
+   ROADMAP's M6 exit criterion never carried the fragment claim (checked, not
+   assumed). It *is* stale for an unrelated reason — it still promises
+   "Claude-package mappings" after cut line 4 was invoked — which belongs to the
+   alignment pass, not here.
+   **Batch B also swept up a stale forward-looking instruction the inventory
+   never listed:** §7.3 consequence (2) read "M6 *should* prefer segment-aware
+   diffing", and M6 built it (`GenerationDriver` extracts `(segmentID, text)`
+   pairs from `transcriptEntries`, falling back to flat). A "should" left in a
+   shipped spec is precisely the staleness the boundary audits keep finding, so
+   it is now a description — with the reason the segment view earns its keep,
+   which rev 7 could only assert.
 11. **§7.7 — reported usage is augmented, not passed through** (Phase 2). The
    framework adds its own output-token accounting on top of a provider's. Worth
    one clause, because it decides what an app may claim a number *means*.

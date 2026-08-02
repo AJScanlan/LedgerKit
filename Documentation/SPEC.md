@@ -1,9 +1,9 @@
 # LedgerKit v0.1 — Design Specification
 
-**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G records what has landed so far — **batch A only**. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
+**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G records what has landed so far — **batches A and B**. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
 **Date:** rev 9 in progress 2026-08-02 (rev 8: 2026-07-28, rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
 **Targets:** iOS 27 / macOS 27 (Foundation Models `LanguageModel` protocol as inference substrate)
-**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. Batch A landed; five batches outstanding. No invariant weakens; whether anything touches the wire is batch D's open question.
+**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. Batches A–B landed; four outstanding. No invariant weakens; whether anything touches the wire is batch D's open question.
 **Changes from rev 7:** Appendix F — two items from the M4 boundary audit, nine from M5. No invariant weakens, no event kind changes, nothing touches the wire.
 
 ---
@@ -373,11 +373,11 @@ The throw channel (§11) is exactly the complement — failures *before* the app
 
 FM streams *cumulative snapshots*, not deltas. The driver diffs successive snapshots and emits `deltaAppended` with the suffix. For plain text, snapshots are append-only **in practice**, so prefix-diffing is sound; assert the prefix property in debug. **Rev 7 is careful with the word "sound" here — see the amendment below: append-only is provider behaviour, not something the API guarantees.**
 
-**Which side of the stream you are on decides what you see (rev 6 — verified against the iOS 27 SDK, not inferred).** The two halves genuinely differ, and this paragraph exists because the sentence above reads as flatly contradicting Apple's provider-authoring guidance if you have only seen the other side. A **provider writes deltas**: `LanguageModelExecutor.respond(to:model:streamingInto:)` sends `.response(action: .appendText(_:segmentID:tokenCount:))` *fragments* into its channel. A **consumer reads cumulative state**: `LanguageModelSession.ResponseStream` vends `Snapshot` values whose `content` is the partially-generated whole. The framework accumulates in between. LedgerKit's driver is a consumer, so prefix-diffing is both correct and the only strategy available to it, and the ledger's `deltaAppended` events reconstruct *by subtraction* the fragments the provider originally sent. `ScriptedLanguageModel` (§10.1) sits on the **provider** side — which makes the round trip an end-to-end property the corpus can assert: scripted fragment → framework accumulation → snapshot → driver diff → `deltaAppended` must recover exactly the fragments the script emitted. **Release behavior on violation:** the driver fails the generation — `generationEnded(.failed(.unrecognized("driver: non-prefix snapshot")))`, terminal — and never emits a reconstructed or corrupt delta. A wrong transcript is worse than a dead one. (Guided-generation partials are *not* prefix-stable — one reason N8 exists.)
+**Which side of the stream you are on decides what you see (rev 6 — verified against the iOS 27 SDK, not inferred).** The two halves genuinely differ, and this paragraph exists because the sentence above reads as flatly contradicting Apple's provider-authoring guidance if you have only seen the other side. A **provider writes deltas**: `LanguageModelExecutor.respond(to:model:streamingInto:)` sends `.response(action: .appendText(_:segmentID:tokenCount:))` *fragments* into its channel. A **consumer reads cumulative state**: `LanguageModelSession.ResponseStream` vends `Snapshot` values whose `content` is the partially-generated whole. The framework accumulates in between. LedgerKit's driver is a consumer, so prefix-diffing is both correct and the only strategy available to it, and the ledger's `deltaAppended` events reconstruct *by subtraction* the fragments the provider originally sent. `ScriptedLanguageModel` (§10.1) sits on the **provider** side — which makes the round trip an end-to-end property the corpus can assert: scripted fragment → framework accumulation → snapshot → driver diff → `deltaAppended` must recover the emitted text **exactly, as a concatenation**. **Not the fragment boundaries (rev 9, measured at M6).** The framework coalesces on its own snapshot cadence — three back-to-back emissions can arrive as a single snapshot, and only pacing produces more — and §7.4's flush policy reshapes the boundaries again on the way to disk. So the property with teeth is that the *concatenation* survives byte-for-byte; a test asserting fragment boundaries is asserting the framework's scheduler, and will fail on a machine under different load. Byte-stable delta *rows* are still achievable, but the store's flush policy is what makes them so (§7.4) — the provider's cadence never reaches disk. **Release behavior on violation:** the driver fails the generation — `generationEnded(.failed(.unrecognized("driver: non-prefix snapshot")))`, terminal — and never emits a reconstructed or corrupt delta. A wrong transcript is worse than a dead one. (Guided-generation partials are *not* prefix-stable — one reason N8 exists.)
 
 **The stream element, and the limit of the prefix property (rev 7, OQ4 closed).** The element is `LanguageModelSession.ResponseStream<Content>.Snapshot`, carrying `content` (the partially-generated whole), `rawContent: GeneratedContent`, and — new at 27 — `transcriptEntries: ArraySlice<Transcript.Entry>` and `usage: Usage`. That confirms the cumulative-snapshot model rev 5 assumed. It also **withdraws a guarantee this spec implied**: the provider channel offers `replaceTextSegment(_:segmentID:tokenCount:)` beside `appendText(_:segmentID:tokenCount:)`, and both carry a `segmentID`. A provider may therefore legally *revise* a segment it already sent, in which case the accumulated snapshot is **not** a prefix extension of its predecessor. So append-only plain text is a property of well-behaved providers, not of the API.
 
-Three consequences, and none of them changes v0.1's shape. **(1) The fail-loud path is right and stays.** A non-prefix snapshot terminating the generation as `unrecognized("driver: non-prefix snapshot")` was chosen when it looked like a can't-happen assertion; it is now the honest response to a legal provider behaviour this version does not model. A wrong transcript is still worse than a dead one. **(2) M6 should prefer segment-aware diffing** via `transcriptEntries`, which sees the segment identities the flat-string view erases, and fall back to prefix-diffing only where entries are unavailable. **(3) Recording `replaceTextSegment` faithfully would need a new payload kind** — the ledger has no way to express "revise what I already told you", since `deltaAppended` is append-only by construction. That is a v0.2 conversation (§12), priced exactly like §7.6's started/ended split: new kind, old readers quarantine it, degrade rather than corrupt.
+Four consequences (rev 9 adds the fourth), and none of them changes v0.1's shape. **(1) The fail-loud path is right and stays.** A non-prefix snapshot terminating the generation as `unrecognized("driver: non-prefix snapshot")` was chosen when it looked like a can't-happen assertion; it is now the honest response to a legal provider behaviour this version does not model. A wrong transcript is still worse than a dead one. **(2) Segment-aware diffing is preferred, and M6 built it** (rev 9 — rev 7 wrote this as an instruction; it is now a description). The driver diffs over `(segmentID, text)` pairs extracted from `transcriptEntries`, which sees the segment identities the flat-string view erases, and falls back to flat prefix-diffing only where entries are unavailable. Seeing segments buys a distinction the flat view cannot express: a segment growing while a *later* segment already holds text is a legal per-segment append, yet an append-only ledger cannot represent it — expressing it would require inserting mid-string — so it must be refused rather than mis-encoded. A flat differ would have silently accepted it as a non-prefix and taken path (1) for the wrong reason. **(3) Recording `replaceTextSegment` faithfully would need a new payload kind** — the ledger has no way to express "revise what I already told you", since `deltaAppended` is append-only by construction. That is a v0.2 conversation (§12), priced exactly like §7.6's started/ended split: new kind, old readers quarantine it, degrade rather than corrupt. **(4) Measured at M6, and the guarantee is still absent (rev 9 — OQ4's residue, answered).** No real provider was observed revising: **zero non-prefix snapshots across 412 snapshots of 12 generations** from Apple's on-device model. A *scripted* revision proved unobservable to a consumer at every pacing tried (0/60/600 ms), because the framework's accumulation hides it — a provider may revise and the consumer still sees a well-behaved prefix sequence. Two things follow, and they pull in opposite directions on purpose. The fail-loud path in (1) **cannot currently be reached end-to-end**, so it is proved at unit level instead; and it **stays anyway**, because the API still permits the revision and "no provider has done this yet" is an observation, not a property. This section's framing is therefore confirmed rather than relaxed: prefix stability is *provider behaviour*. It held. Nothing promised it would.
 
 **Non-text stream content (rev 4):** provider streams can vend more than text — response metadata, usage updates, and *custom segments* (reasoning, provider-specific segments like search results). **v0.1 records text deltas only.** Non-text segments are ignored — neither persisted nor rehydrated (N11, OQ9) — deliberately and loudly in the docs, not as an accident of the diff loop. Usage and resolved model identity are the two exceptions, captured at completion into `StopInfo` (§7.7, §7.8).
 
@@ -899,9 +899,10 @@ Rev 8 was opened by the **M4 boundary audit** (2026-07-27) and closed by **M5** 
 > for the same reason. The batches and their sign-off state are tracked in
 > `M6-PLAN.md` §6.
 >
-> **Landed:** batch A (cancellation & the straddle).
-> **Outstanding:** B (the stream's honest properties), C (usage), D (the error
-> taxonomy's edges), E (context budget), F (sketch & residues).
+> **Landed:** batch A (cancellation & the straddle), batch B (the stream's
+> honest properties).
+> **Outstanding:** C (usage), D (the error taxonomy's edges), E (context
+> budget), F (sketch & residues).
 
 Rev 9 is **M6's revision** — the milestone in which `Session/` first ran against
 the real framework — and its character is different from rev 8's. Rev 8 was
@@ -945,3 +946,36 @@ settled up front, and pre-1.0 the wire is still free to change.
   sequence through the store actor", which is true and insufficient, because the
   claim and the append are two actor hops. **An atomicity argument is only as
   good as its unit** — and here the unit was smaller than the sentence assumed.
+
+### Batch B — the stream's honest properties (from M6 Phase 2/3)
+
+- **The round trip recovers *text*, not fragment boundaries (§7.3).** Rev 6
+  stated the end-to-end property as "`deltaAppended` must recover exactly the
+  fragments the script emitted", which is false against the real framework: it
+  **coalesces** on its own snapshot cadence, so three back-to-back emissions can
+  arrive as one snapshot, and §7.4's flush policy reshapes the boundaries again
+  before they reach disk. The property with teeth is that the **concatenation**
+  survives byte-for-byte. Worth recording as a general lesson rather than a
+  correction: the old claim was *true of the test double* — a scripted provider
+  emits exactly what it is told — and false of the thing the double stands for.
+  A round-trip property stated across a component you do not own can only assert
+  what that component preserves. Byte-stable delta rows remain achievable, but
+  the **store** is what makes them so, by owning the flush cadence.
+- **Segment-aware diffing is built, so the instruction becomes a description
+  (§7.3).** Rev 7 wrote "M6 should prefer segment-aware diffing"; M6 did, and a
+  forward-looking "should" left in a shipped spec is how the boundary audits
+  keep finding staleness. Recorded with the reason the segment view earns its
+  keep, which rev 7 could only assert: a segment growing while a *later* segment
+  already holds text is a legal per-segment append that an append-only ledger
+  **cannot express** — encoding it would mean inserting mid-string — so it has
+  to be refused rather than mis-encoded, and a flat differ cannot even see the
+  distinction.
+- **OQ4's residue, answered: real providers were never observed revising
+  (§7.3, §14).** Zero non-prefix snapshots across **412 snapshots of 12
+  generations** on Apple's on-device model, and a scripted revision proved
+  unobservable to a consumer at any pacing. The fail-loud path is therefore
+  **unreachable end-to-end and stays regardless** — the API still permits the
+  revision, and this is the distinction the amendment exists to protect: *no
+  provider has done this yet* is an observation, while *providers cannot do
+  this* would be a property, and only the second would justify deleting the
+  branch. Rev 7's framing is confirmed, not relaxed.

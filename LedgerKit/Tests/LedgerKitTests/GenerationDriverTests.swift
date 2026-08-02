@@ -83,22 +83,26 @@ struct GenerationDriverTests {
 
     // MARK: - The happy path
 
-    /// **§7.3's round trip, end to end — with one correction the substrate
-    /// forced.**
+    /// **§7.3's round trip, end to end.**
     ///
     /// The script emits *deltas*, the framework accumulates them into cumulative
-    /// snapshots, and the driver subtracts them back. §7.3 (and M5 handoff 3)
-    /// state the recovered result as "exactly the fragments the script emitted",
-    /// and that is **not** what happens: the framework's snapshot cadence is its
-    /// own, so three fragments emitted back-to-back arrive as one snapshot and
-    /// therefore one delta. Pacing the script produces more.
+    /// snapshots, and the driver subtracts them back. What survives exactly is
+    /// the **text** — not the fragment boundaries, which the framework's own
+    /// snapshot cadence decides: three fragments emitted back-to-back arrive as
+    /// one snapshot and therefore one delta, and only pacing the script produces
+    /// more.
     ///
-    /// What survives exactly is the **text**, which is the property the ledger
-    /// actually needs — message content is the concatenation of `deltaAppended`
-    /// rows, and where the boundaries fall is a durability detail the flush
-    /// policy already reshapes (§7.4). Asserting fragment boundaries would pin
-    /// the framework's buffering, which is not LedgerKit's to pin. Recorded for
-    /// rev 9.
+    /// Text is the property the ledger actually needs — message content is the
+    /// concatenation of `deltaAppended` rows, and where the boundaries fall is a
+    /// durability detail §7.4's flush policy already reshapes. Asserting
+    /// fragment boundaries would pin the framework's buffering, which is not
+    /// LedgerKit's to pin.
+    ///
+    /// (Rev 9 amended §7.3 to state the property this way; earlier revisions
+    /// promised fragment-level recovery, which was true of the test double and
+    /// false of the framework it stands for. Paraphrased rather than quoted, so
+    /// the retired-phrase sweep does not re-report a site that is already fixed
+    /// — M6-PLAN Phase 0's finding.)
     @Test("scripted text survives accumulation and diffing unchanged")
     func fragmentsRoundTrip() async throws {
         guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
