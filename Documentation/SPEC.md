@@ -1,8 +1,9 @@
 # LedgerKit v0.1 — Design Specification
 
-**Status:** **rev 8 — ratified 2026-07-28 at the M5 boundary**; subsequent amendments open rev 9. Rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
-**Date:** 2026-07-28 (rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
+**Status:** ⚠️ **rev 9 — OPEN, UNRATIFIED** (drafting at M6 Phase 5; ratifies at the M6 boundary). Body text carries `(rev 9)` markers and Appendix G records what has landed so far — **batch A only**. The last ratified revision is **rev 8, 2026-07-28 at the M5 boundary**; rev 7 was ratified 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
+**Date:** rev 9 in progress 2026-08-02 (rev 8: 2026-07-28, rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
 **Targets:** iOS 27 / macOS 27 (Foundation Models `LanguageModel` protocol as inference substrate)
+**Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. Batch A landed; five batches outstanding. No invariant weakens; whether anything touches the wire is batch D's open question.
 **Changes from rev 7:** Appendix F — two items from the M4 boundary audit, nine from M5. No invariant weakens, no event kind changes, nothing touches the wire.
 
 ---
@@ -362,6 +363,8 @@ The throw channel (§11) is exactly the complement — failures *before* the app
 
 **Task-cancellation across the boundary follows the same line:** cancelled before the append ⇒ the verb throws `CancellationError` — nothing started, Swift convention holds, nothing to record. Cancelled after ⇒ the §7.5 path: the call *returns* `.cancelled` (§11's documented deviation, now with a crisp boundary instead of a vibe).
 
+**"After" means the whole post-append region, not the driver call alone (rev 9).** The store does further work between the start append and the driver launch — notably the rehydration read (§7.1) — and a cancellation landing *there* is still post-append, so it still returns `.cancelled` with a recorded terminal. The boundary is the **append**, not the moment the provider request is issued. Any other reading leaves a generation in the log with no terminal because the store happened to be reading when the user pressed stop, which is the `.interrupted`-versus-`.cancelled` confusion §7.5 exists to prevent.
+
 **Defensive session gate:** the driver checks `isResponding` before issuing, and treats a busy session as a driver defect — `generationEnded(.failed(.unrecognized("driver: session busy")))` — never as a provider signal. The hazard was concrete, and rev 7 can now explain it rather than merely warn about it. **At iOS 26 a single enum — `LanguageModelSession.GenerationError` — carried both `rateLimited` and `concurrentRequests`**, which is why "busy session surfaces as `rateLimited`" was a plausible reading of the evidence. **At 27 the concerns are split:** `LanguageModelSession.Error { concurrentRequests, transcriptMutationWhileResponding }` is session *misuse*, while `LanguageModelError` carries model and provider failures. The whole 26 enum is deprecated case-by-case, each case naming its replacement.
 
 **The gate stays, for three reasons that survive the closure.** The deprecated enum still *exists* at 27, so a provider built against 26 can still throw the overloaded shape; a typed error is only useful to a driver that checks for it, which is what the gate is; and §6.5's parallel-generation relaxation is exactly when store single-flight stops making this unreachable. What changes is the *disposition* of a leak: it is now a recognizable, named condition rather than a mystery, so §8's normalization exclusion can name it. **M6 residue: confirm the 27 error is thrown rather than trapped** — a precondition failure would be a different design problem, and only running it answers that.
@@ -391,6 +394,8 @@ where `overlay_live` maps `.interrupted → .streaming(partial:)` for exactly th
 ### 7.5 Cancellation
 
 Two entry points, one semantics: `store.cancelGeneration(in:)` — the canonical path; the store is the authority on in-flight state and survives view teardown — or cancelling the `Task` awaiting `send` / `respond` / `regenerate` (sugar; structured-concurrency-friendly, but the handle dies with its owner). Either way: the driver winds down ⇒ the store flushes ⇒ appends `generationEnded(.cancelled)` ⇒ the suspended call returns `.cancelled`. (Pre-start Task-cancel is the one exception — it *throws*, §7.2: there is nothing to terminate.) A cancel racing a natural terminal is benign: first append wins, I3 quarantines the loser. Cancelled ≠ failed ≠ interrupted: three distinct UI treatments.
+
+⚠️ **Detecting the cancellation can be the driver's own job (rev 9, measured at M6).** Apple's `ResponseStream` ends **silently** when its consumer is cancelled — no error, no partial signal, simply no further snapshots. A driver waiting to catch a `CancellationError` therefore observes a stream that merely *finished*, and records a generation the user stopped as **`.completed`** — the exact confusion the line above forbids, arriving through the one door nobody was watching. A driver must check its own cancellation state after its consume loop ends, and must never assume a stream reports its own cancellation. Stated as a normative obligation rather than an implementation note because the failure is silent in both directions: the wrong terminal is written, and nothing anywhere throws.
 
 **A stop that lands in the start window is honoured, not dropped (rev 8).** §6.5's start atomicity opens an interval in which a generation is *claimed but not yet running* — the single-flight slot is taken, the start append has not returned. A cancel arriving there has no running work to stop, and treating it as "nothing live" would let a visibly-started generation run to completion after the user pressed stop, which is precisely the affordance the stop button exists to deny. The intent is therefore recorded and acted on the moment the generation begins. §11's "no-op if none live" remains true for its intended case: a conversation with nothing claimed at all.
 
@@ -604,7 +609,7 @@ Normalization risk, revised: anchoring on the built-in enum shrinks the empirica
 - **Atomicity:** an event append is the transactional unit; multi-event operations (send = `userMessageAppended` + `generationStarted`, rev 4; edit = `messageEdited` + `activePathChanged`; respond/regenerate = `generationStarted` + `activePathChanged` when off-endpoint, §6.4) commit in **one** transaction, so no crash can strand half an operation. A crash between transactions is by construction a valid log (I2/I5 handle the rest). Note the limit of this guarantee: operation boundaries exist only as DB transactions — the log itself doesn't record them. Promoting an operation/correlation ID onto the envelope is deferred to the v0.3 sync design doc (§6.1, §12); noted here so it reads as a decision, not an omission.
 - **Log versioning:** every event row carries a schema version. v0.1 policy: reducer reads all past versions, writes current. **Forward compatibility:** payload kinds written by a *newer* LedgerKit decode to quarantine (§6.6) — the conversation loads, degraded, never fails — with the single tolerant-terminal exception (§6.1). Codable evolution of `Payload` is the sharpest long-term maintenance edge in the whole design — encoding is tagged JSON (ratified, was OQ1); ADR-001 formalizes it: the discriminator registry (tags are never reused; removed tags stay reserved), the unknown-discriminator → quarantine rule, the tolerant-terminal exception, the gap-diagnostic rule (§6.1), and the version-frozen fixture corpus (§10).
 - **Log growth:** delta rows dominate — at the default flush cadence a 60 s generation is ~240 rows. Storage cost is trivial (text), but state the stance: **no delta consolidation in v0.1.** Collapsing a completed generation's deltas into one row is a history rewrite, in direct tension with tenet 2; if it ever happens it is a deliberate archival design (v0.3+ at the earliest), not a cleanup task. Snapshots address read cost, not size.
-- **Deletion & erasure:** conversation-level delete = transactional `DELETE` of that conversation's events, snapshots, and index row, via `store.deleteConversation(_:)`. **It cancels any in-flight generation first (rev 4):** the cancel runs to its terminal through the normal path (§7.5 — the suspended verb returns `.cancelled`, not a persistence error), then the `DELETE` commits; both steps sequence through the store actor, so the terminal-append-vs-DELETE race cannot occur. It is out-of-band — not an event — because there is no log left to append to; document that it is irreversible. **Sync consequence, priced in now:** these DELETE semantics are local-only. Log-shipping sync (v0.3 design doc, §12) must introduce deletion tombstones or an equivalent, or a deleted conversation resurrects from any peer still holding its log — the classic resurrection problem. Inbox item for the sync doc, not a v0.1 concern. Message-level redaction is out of scope (N9). The honest note for the README: append-only and erasure are structurally opposed; the known idioms are **crypto-shredding** (encrypt payloads under per-conversation or per-message keys; deleting the key is the erasure) versus an explicit, versioned log rewrite. Choosing one is the v0.2 erasure design doc (§12).
+- **Deletion & erasure:** conversation-level delete = transactional `DELETE` of that conversation's events, snapshots, and index row, via `store.deleteConversation(_:)`. **It cancels any in-flight generation first (rev 4):** the cancel runs to its terminal through the normal path (§7.5 — the suspended verb returns `.cancelled`, not a persistence error), then the `DELETE` commits; both steps sequence through the store actor, so the terminal-append-vs-DELETE race cannot occur. **A generation that is *claimed but not yet confirmed* is waited out on the same footing (rev 9).** §6.5's start atomicity opens an interval in which the single-flight slot is taken and the start append has not returned; a `DELETE` that waited only on *running* work would commit straight through it and erase a log the start transaction is about to write into. Sequencing through the actor is not sufficient on its own here, because the claim and the append are two actor hops — which is precisely why the race survived a design that had already reasoned about it. It is out-of-band — not an event — because there is no log left to append to; document that it is irreversible. **Sync consequence, priced in now:** these DELETE semantics are local-only. Log-shipping sync (v0.3 design doc, §12) must introduce deletion tombstones or an equivalent, or a deleted conversation resurrects from any peer still holding its log — the classic resurrection problem. Inbox item for the sync doc, not a v0.1 concern. Message-level redaction is out of scope (N9). The honest note for the README: append-only and erasure are structurally opposed; the known idioms are **crypto-shredding** (encrypt payloads under per-conversation or per-message keys; deleting the key is the erasure) versus an explicit, versioned log rewrite. Choosing one is the v0.2 erasure design doc (§12).
 - **Privacy:** conversations are user content. File protection `.completeUntilFirstUserAuthentication` minimum; document that apps handling sensitive domains should layer their own encryption. Tool recording defaults to `.metadataOnly` (§7.6) because recorded tool results outlive the session. No LedgerKit telemetry, ever.
 
 ---
@@ -881,3 +886,62 @@ Rev 8 was opened by the **M4 boundary audit** (2026-07-27) and closed by **M5** 
 - **The healthy-log property is stated, *with its limit* (§6.5).** Store-written logs always reduce with empty `diagnostics`, which is what lets an app read a non-empty `diagnostics` as evidence of damage or of a newer writer. The limit matters as much as the property: a healthy log is not a *correct* one — an edit missing its paired path event reduces perfectly cleanly while being wrong — so this certifies only that the store never writes what the reducer would reject. Mutation testing is what forced the distinction; it would have been comfortable to leave it implied.
 
 - rev 6 → rev 7 map: see Appendix E.
+
+---
+
+## Appendix G — Changes from rev 8
+
+> ### ⚠️ **REV 9 IS OPEN AND UNRATIFIED.** Drafting in progress at M6 Phase 5.
+>
+> Amendments land here batch by batch as they are signed off, and rev 9 ratifies
+> at the **M6 boundary** — not before. Until then this appendix is an accurate
+> record of what has changed *so far*, and §-body text carries `(rev 9)` markers
+> for the same reason. The batches and their sign-off state are tracked in
+> `M6-PLAN.md` §6.
+>
+> **Landed:** batch A (cancellation & the straddle).
+> **Outstanding:** B (the stream's honest properties), C (usage), D (the error
+> taxonomy's edges), E (context budget), F (sketch & residues).
+
+Rev 9 is **M6's revision** — the milestone in which `Session/` first ran against
+the real framework — and its character is different from rev 8's. Rev 8 was
+mostly *sentences this document assumed and never wrote down*; rev 9 is mostly
+**measurements that contradicted something a reader would reasonably have
+believed.** Almost nothing here was reasoned out in advance. It was run.
+
+No invariant weakens and the reducer's semantics are untouched. Whether anything
+touches the wire is **batch D's open question** — unlike rev 8, that is not
+settled up front, and pre-1.0 the wire is still free to change.
+
+### Batch A — cancellation & the straddle (from the M5 boundary audit + M6 Phase 0/2)
+
+- **⚠️ Cancellation may arrive as *silence*, not as an error (§7.5).** M6's
+  sharpest finding, and the one with a bug attached: Apple's `ResponseStream`
+  ends **without throwing** when its consumer is cancelled — zero snapshots, no
+  error — so a driver that only catches `CancellationError` records a stopped
+  generation as **`.completed`**. That is precisely the cancelled-≠-interrupted
+  confusion §7.5 has insisted on since rev 1, reached through a door the section
+  never named. Detecting the cancellation is therefore the *driver's* obligation:
+  check `Task.isCancelled` after the consume loop ends, and never assume a stream
+  reports its own cancellation. Found by measurement — the driver shipped this
+  bug until a test on the real framework caught it. Pairs with rev 8's "a
+  cancelled task cannot record its own cancellation": between them, both halves
+  of cancellation are now stated, and *both* were walls the implementation hit
+  rather than subtleties anyone anticipated.
+- **The throw/return straddle covers the whole post-append region (§7.2).** Rev
+  4 drew the boundary at the start append and rev 8 sharpened its wording, but
+  both left "cancelled after" readable as "cancelled during the driver call".
+  The store does real work in between — the rehydration read (§7.1) — and a
+  cancellation there is still post-append: it returns `.cancelled` with a
+  recorded terminal, rather than escaping as a throw. The boundary is the
+  **append**, not the provider request. Generalizes the M5 audit's A2 finding
+  from the one site that had the bug to the rule that prevents its siblings.
+- **`deleteConversation` waits out the reservation window (§9).** §6.5's start
+  atomicity opens an interval in which a generation is *claimed but not yet
+  confirmed*, and rev 4's delete waited only on **running** work — so a `DELETE`
+  could commit through that window and erase a log the start transaction was
+  about to write into. The wait now covers both states. Worth recording for the
+  reasoning that hid it: §9 already argued the race away with "both steps
+  sequence through the store actor", which is true and insufficient, because the
+  claim and the append are two actor hops. **An atomicity argument is only as
+  good as its unit** — and here the unit was smaller than the sentence assumed.
