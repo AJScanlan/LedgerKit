@@ -2,16 +2,19 @@
 <Workspace
    version = "1.0">
    <FileRef
-      location = "group:Playground.playground">
-   </FileRef>
-   <FileRef
-      location = "group:Projection/Projection.xcodeproj">
+      location = "group:LedgerKit">
    </FileRef>
    <FileRef
       location = "group:Understudy">
    </FileRef>
    <FileRef
-      location = "group:LedgerKit">
+      location = "group:Projection/Projection.xcodeproj">
+   </FileRef>
+   <FileRef
+      location = "group:Playground.playground">
+   </FileRef>
+   <FileRef
+      location = "group:Formal">
    </FileRef>
    <FileSystemSynchronizedGroup
       location = "group:Documentation"

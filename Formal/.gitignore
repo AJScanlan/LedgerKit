@@ -1,0 +1,10 @@
+# PlusCal translator backup of the pre-translation module.
+*.old
+
+# TLC's working directory (one timestamped subdirectory per run).
+states/
+
+# The translator emits a default config alongside the module. The four named
+# LedgerStore_*.cfg files are the real ones and are passed with -config; this
+# one is regenerated on every translation and is never the one to run.
+LedgerStore.cfg
