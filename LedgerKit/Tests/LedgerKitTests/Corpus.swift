@@ -190,6 +190,63 @@ enum Corpus {
         )
     }
 
+    /// Two failed generations — **the only fixture that reaches
+    /// `MessageState.failed`**, added at M7 Phase 1 and found by mutation testing
+    /// rather than by reading.
+    ///
+    /// The corpus held eight `.completed` outcomes and two `.cancelled` ones and no
+    /// failure at all, so no sweep in the package had ever seen the most
+    /// complicated state a message can be in: three payloads, the only one carrying
+    /// `Recoverability`, and the entire subject of §8. The overlay mutation "flip
+    /// every `.failed` to `.streaming`" therefore passed the whole suite — not
+    /// because P2's clause 2 is weak, but because it had nothing to look at. This
+    /// is the same finding M3 Phase 1 made about healthy logs (see the golden
+    /// section's note above), arriving by the same route one milestone later, which
+    /// is an argument for reading that note as a standing instruction rather than a
+    /// historical remark.
+    ///
+    /// Two failures, because they are two different shapes:
+    ///
+    /// - **`genA` failed with a partial**, so the ledger keeps text the user saw
+    ///   alongside the error. `rateLimited` is chosen for its `retryAfter`, which
+    ///   is the one affordance whose display math reads `terminalTimestamp +
+    ///   retryAfter` (§6.2, §8) — so this fixture is also the only one where that
+    ///   pairing exists to be got wrong.
+    /// - **`genB` failed with *nothing*** — §7.2's zero-token request-time failure,
+    ///   which renders `.failed(partial: "")`. An empty failed bubble showing how
+    ///   to recover is the feature, not an artifact, and a 401 is the case §7.2
+    ///   says would be unreachable through observation without the outcome
+    ///   boundary: the error must land in the log as an `Outcome`, or §11's reauth
+    ///   bubble could never render at all.
+    ///
+    /// Healthy, with zero residue: a generation that failed is a perfectly
+    /// well-formed log. Nothing here is hostile.
+    static var failedGenerations: CorpusFixture {
+        var log = Log()
+        log.append(.conversationCreated(title: "Origami"))
+        log.append(.userMessageAppended(message: Fix.userA, content: "Explain valley folds", parent: nil))
+        log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantA, parent: Fix.userA, model: Fix.model))
+        log.append(.deltaAppended(generation: Fix.genA, text: "A valley fold b"))
+        log.append(.generationEnded(generation: Fix.genA, outcome: .failed(.rateLimited(retryAfter: .seconds(30)))))
+        // Regenerate: a sibling under the same parent. The parent is not the
+        // endpoint — auto-extend put that on `assistantA` — so the path event rides
+        // along in the same transaction (§6.4).
+        log.append(.generationStarted(generation: Fix.genB, message: Fix.assistantB, parent: Fix.userA, model: Fix.model))
+        log.append(.activePathChanged(endpoint: Fix.assistantB))
+        log.append(.generationEnded(
+            generation: Fix.genB,
+            outcome: .failed(.providerFailure(status: 401, code: "invalid_api_key", message: "credentials rejected"))
+        ))
+
+        return CorpusFixture(
+            name: "failedGenerations",
+            kind: .golden,
+            summary: "a failure with a partial (rateLimited) and a zero-token failure (401 → reauthenticate)",
+            log: log,
+            residue: []
+        )
+    }
+
     /// Metadata and the audit trail: instructions set, title set then cleared,
     /// tool records inside the generation's bounds under both recording
     /// policies' shapes (§7.6).
@@ -356,6 +413,7 @@ enum Corpus {
             editBranch,
             rootEdit,
             regenerateAfterInterruption,
+            failedGenerations,
             toolsAndMetadata,
             empty,
             gapSwallowedTerminal,

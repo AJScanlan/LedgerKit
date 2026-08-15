@@ -24,15 +24,11 @@ import Foundation
 // `InvariantChecks.swift` — the caller attaches the context ("hostile at split
 // 7") that makes a failure legible.
 
-/// The generations this process is currently generating, and the partial text
-/// each has accumulated so far (SPEC §7.4).
-///
-/// A dictionary because the overlay is a *keyed* lookup — never iterated into
-/// output, per the I1 hazard. At M7 this is assembled from the store actor's
-/// in-flight registrations plus its delta buffer; here it is supplied by the test,
-/// which is exactly the seam that makes the property checkable without a live
-/// store.
-typealias LiveSet = [GenerationID: String]
+// `LiveSet` was declared here from M4 until M7 Phase 1, when `Projection/` began
+// shipping the real one. It is the *same* type — `[GenerationID: String]`, the value
+// being the full partial to show — so the harness now speaks the production
+// vocabulary rather than a parallel copy of it. Deleting the duplicate is the only
+// change this file needed to accept `overlay(_:live:)`; no assertion moved.
 
 /// The shape `overlay_live` will have (SPEC §6.3's third pipeline stage).
 ///

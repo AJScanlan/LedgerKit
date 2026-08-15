@@ -1,10 +1,11 @@
 # M7 Implementation Plan — Observable projection + `overlay_live`
 
-**Status:** 🟩 **Phase 0 done 2026-08-15 — 429 tests green** (406 `LedgerKit` +
-23 `Understudy`, warning-free, both substrates). Phases 1–4 not started.
-D38–D45 are **Accepted**; **D44 resolved as `guard`, adopted alone**; D46–D49
-were taken at the Phase 0 gate and fix gaps in D39/D41/D42 rather than merely
-confirming them.
+**Status:** 🟩 **Phases 0–1 done 2026-08-15 — 435 tests green** (412 `LedgerKit` +
+23 `Understudy`, warning-free, both substrates, deep tier included). Phases 2–4
+not started. D38–D49 are **Accepted**; **D44 resolved as `guard`, adopted alone**;
+D46–D49 were taken at the Phase 0 gate and fix gaps in D39/D41/D42 rather than
+merely confirming them. `Projection/` is no longer empty: it holds
+`overlay(_:live:)` and `LiveSet`.
 
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M7 section) · [SPEC.md](./SPEC.md)
 §6.2 (derived state), §6.3 (the three-name table), §7.4 (two cadences, one truth
@@ -521,16 +522,49 @@ D44's choice.
 
 ### Phase 1 — `overlay_live` against the waiting harness (tier 1)
 
-**Status:** ⬜ not started
+**Status:** ✅ **done 2026-08-15 — 435 tests green** (412 `LedgerKit` + 23
+`Understudy`, warning-free, both substrates, deep tier included).
+**The no-assertion-changed criterion is met and verified by diff:**
+`ProjectionCheckTests.swift` is **untouched**, and the only edit to
+`ProjectionChecks.swift` deletes its now-duplicated `LiveSet` typealias. Three
+mutations run; **one was not caught, and finding out why closed a coverage hole
+two milestones old** — see the A-note below.
 
 **Goal:** the pure half of the milestone — the overlay function, P2 completed
 over the corpus, no assertion changed.
 
-- [ ] **`Projection/Overlay.swift`**: `overlay_live` per D40 — flip
+- [x] **`Projection/Overlay.swift`**: `overlay_live` per D40 — flip
       `.interrupted → .streaming(partial: liveSet[generation])` for live
       generations, identity otherwise. Pure, `@Sendable`, no clocks, no I/O —
       §6.3's third stage, finally written.
-- [ ] **P2 completed:** every existing `ProjectionChecks` sweep re-run with
+
+      **Landed as `overlay(_:live:)`** — a free `nonisolated` function beside
+      `fold` and `classify`, since it is the third seam of the same pipeline and
+      §6.3 names the seams; the Swift spelling drops `_live` the way the other two
+      drop the pipeline notation, and `live:` carries it at every call site.
+      `LiveSet` moved into `Projection/` as the production type, so the harness now
+      speaks the production vocabulary instead of a parallel copy.
+
+      Two decisions inside it worth recording. **The empty live set returns its
+      argument** rather than running a no-op transform — §7.4's
+      `overlay_live(…, ∅) ≡ …` stated structurally, and it is also the hot path
+      (every cold open, every launch after a crash). And a live generation is
+      **flipped unconditionally**, not only from `.interrupted`: for a well-formed
+      live set the question never arises (clause 3 ⇒ live ⊆ open ⇒ `.interrupted`),
+      and declining to flip would make the projection silently disagree with the
+      live set it was handed, so P2 would report a clause-1 mismatch *as well as*
+      clause 3's — two fingers pointed at the overlay for a defect one layer up.
+      Flipping leaves exactly one failure, naming the store. Asserted:
+      `problems.count == 1` on that input.
+- [x] **D49 landed as `MessageTree.updateStates(_:)`** — internal, `mapValues`-based,
+      so the key set is preserved *by construction* and the overlay cannot drop or
+      invent a message however it is written. It sits in `Core/MessageTree.swift`
+      rather than beside its caller, breaking the `Payload.updatesIndex` placement
+      pattern for a reason with no alternative: `nodes` is `private`, so only that
+      file can offer a mutation this narrow, and widening `nodes` to internal to
+      relocate one method would hand the whole module the tree-rebuilding power the
+      method exists to withhold.
+- [x] **P2 completed:** every existing `ProjectionChecks` sweep re-run with
       `overlay_live` in the seat `identityOverlay` and `referenceOverlay`
       occupied — empty-live-set sweeps unchanged (the degenerate case is the
       cold open), plus live-set sweeps: for every corpus fixture truncation
@@ -540,20 +574,95 @@ over the corpus, no assertion changed.
       assertion in `ProjectionChecks.swift` changes** (M6-PLAN handoff 1); if
       one has to, stop and review — either the harness was wrong for two
       milestones or the overlay is.
-- [ ] **Negative sweeps:** the overlay refuses nothing (it is total), so the
+      **Done, and the criterion held.** `OverlayTests.p2OverTheCorpus` sweeps every
+      fixture × every truncation × **every subset of that truncation's open
+      generations** (bitmask over the sorted open set, so the empty subset — the
+      cold open — is included). Live partial = folded text + a synthetic unflushed
+      tail, the shape D47 says the store computes. Measured: **132 projections, 38
+      with something live, 2 concurrent live generations reached.** Non-vacuity is
+      pinned in four dimensions using the *measured* values rounded down, including
+      that both ends of the three-name table were reached (`.streaming` seen,
+      `.interrupted` seen). *The first draft guessed `checks >= 200` and failed
+      against the real 132 — the small version of the same lesson twice in one
+      milestone: bound on what you measured.*
+- [x] **Negative sweeps:** the overlay refuses nothing (it is total), so the
       hostile inputs are *live sets that lie* — a live generation the fold
       says terminated (clause 3 must flag it), a live partial shorter than the
       folded text (clause 1 must flag the mismatch when the projection
-      mis-assembles). These pin the predicate's teeth against the real
-      overlay, the same role the deliberately-wrong projections played at M4.
-- [ ] **Mutations:** overlay also rewrites `terminalTimestamp` (P2's
+      mis-assembles).
+
+      ⚠️ **The second is no longer reachable by an input, and D47 is why.** The plan
+      wrote it against D40's original shape, where the *projection* assembled the
+      shown partial from folded text plus an accumulator — so a bad assembly was an
+      input-level possibility. D47 moved that computation into the store, so the
+      overlay shows `live[gen]` verbatim and `shown == live[gen]` holds **by
+      construction**. Clause 1 now polices the store's arithmetic rather than the
+      overlay's, and is reachable here only as a mutation — which is how it is
+      exercised. Not a gap: D47 doing exactly what it was chosen for, turning a
+      checked property into an unrepresentable one.
+      Clause 3's **two** branches are both swept by input instead — a live
+      generation the log says terminated, and one naming no message at all.
+- [x] **Mutations:** overlay also rewrites `terminalTimestamp` (P2's
       more-than-state clause must catch); overlay applies to `.failed`
       messages (clause 2); overlay keeps the folded partial and ignores the
       live set (clause 1 — this is D40's first wrong shape, and the mutation
       proves the harness distinguishes it).
 
-**Review gate:** tier-1 suites green; the no-assertion-changed claim verified
-by diff, not memory; mutation results recorded.
+      **All three run, and one of them mattered:**
+      - *Ignores the live set's value* → caught by clause 1, on all 38 live sweep
+        cases plus the unit test.
+      - *Rewrites `terminalTimestamp`* → caught by three tests (44 issues). Worth
+        recording that **it could not be written at all** through `updateStates`:
+        expressing it required first widening `MessageTree` to the general
+        `updateMessages(_: (Message) -> Message)` that D49 declined. A mutation
+        needing an act of API widening before it can even be typed is the strongest
+        available evidence that D49 earned its keep.
+      - *Applies to `.failed` messages* → **NOT caught.** The whole suite passed
+        with every `.failed` message flipped to `.streaming`. See the A-note.
+
+- [x] **A-note (Phase 1): the corpus had never contained a failure.** The uncaught
+      mutation was not a weak clause 2 — it was clause 2 having nothing to look at.
+      `Corpus.all` held **eight `.completed` outcomes, two `.cancelled`, and zero
+      `.failed`**, so no sweep anywhere in the package had ever seen the most
+      complicated state a message can be in: three payloads, the only one carrying
+      `Recoverability`, and the entire subject of §8. Not the P2 sweeps, not
+      crash-fuzz, not P1/P3, not the invariant predicates.
+
+      This is **the same finding M3 Phase 1 made about healthy logs**, one
+      milestone later and by the same route — the golden section's own note reads
+      "before Phase 1 the corpus held `rich` and `hostile` alone, so every mutation
+      sweep started from a log that was already damaged." That note should be read
+      as a standing instruction rather than a historical remark: *ask what the
+      corpus cannot express, not only what it does.*
+
+      Fixed the designed way — a new golden fixture, `failedGenerations`, which
+      inherits every sweep for free. Two failures, because they are two shapes:
+      `genA` fails **with a partial** under `rateLimited(retryAfter:)`, the one
+      affordance whose display math reads `terminalTimestamp + retryAfter` (§6.2,
+      §8), so this is now the only fixture where that pairing exists to be got
+      wrong; `genB` fails with **nothing** — §7.2's zero-token request-time failure
+      on a 401, the case §7.2 says would be *unreachable through observation*
+      without the outcome boundary, since §11's reauth bubble can only render if the
+      error reached the log as an `Outcome`. `dev/` regenerated. With the fixture in
+      place, the mutation is caught by clause 2.
+
+**Review gate:** ✅ **passed 2026-08-15.** Tier-1 suites green (412 + 23),
+warning-free, **plus** the iOS 27 simulator tier (412/412) and the
+`LEDGERKIT_DEEP=1` sweep (38 s). The no-assertion-changed claim verified **by diff,
+not memory**: `ProjectionCheckTests.swift` untouched, one duplicated typealias
+deleted from `ProjectionChecks.swift`. Mutation results recorded above, including
+the one that was not caught and what it exposed. `ImportBoundaryTests` green, so
+`Projection/`'s zero beta risk stays a tested property rather than an intention.
+
+⚠️ **One flake worth knowing, because CI runs this substrate.** The first Phase 1
+simulator run reported `** TEST FAILED **` with **zero individual test failures**:
+the harness logged "Restarting after unexpected exit, crash, or test timeout"
+between two suites, and every test after that point was listed as failing because
+it never ran. The named suite passed in isolation, and a clean re-run passed
+412/412. So the signature to recognize is *a long "failing tests" list with no
+`✘` lines anywhere in the log* — that is the simulator harness dying, not a
+regression. Recorded rather than dismissed, since a weekly CI run that hits it
+will look alarming and is not.
 
 ---
 
@@ -807,9 +916,13 @@ Item 4 is **already decided** and awaits only the wording pass.
 | A3: TLC reproduces the shipped bug (`Fix = "none"` fails) — the model's calibration, re-run when the await structure changes | `Formal/LedgerStore.tla` | ✅ 2026-08-15 |
 | A4: wrapped cancellation not recorded as failure (reachable half) | `GenerationDriverTests.spuriousCancellationIsNotAStop` | ✅ 2026-08-15 |
 | Playground: the example compiles **and runs** against public-only API | scratch SwiftPM target over `LedgerKit` (not in-repo) | ✅ 2026-08-15 |
-| P2 over the real overlay, no assertion changed | — | ⬜ |
+| P2 over the real overlay, no assertion changed | `OverlayTests.p2OverTheCorpus`; criterion verified by `git diff` of `ProjectionChecks.swift` / `ProjectionCheckTests.swift` | ✅ 2026-08-15 |
+| The empty live set is the identity — §7.4's theorem, as value equality | `OverlayTests.emptyLiveSetIsTheIdentity` | ✅ 2026-08-15 |
+| Clause 3, both branches, by input: a terminated generation and one naming no message | `OverlayTests.liveSetOutrunsTheLog` / `.liveSetNamesNoMessage` | ✅ 2026-08-15 |
+| The corpus reaches `MessageState.failed` at all (partial + zero-token shapes) | `Corpus.failedGenerations`, inherited by every sweep | ✅ 2026-08-15 |
 | Display cadence independent of flush cadence | — | ⬜ |
-| Overlay flips state only; full-partial assembly exact (clause 1) | — | ⬜ |
+| Overlay flips state only — structurally, via `MessageTree.updateStates` (D49) | `OverlayTests.overlayTouchesOnlyState`, plus the mutation that needed API widening to express | ✅ 2026-08-15 |
+| Clause 1 exactness — now a **store** obligation, not the overlay's (D47) | mutation-only at this layer; the store side is Phase 2's | 🟨 Phase 2 |
 | Live ⊆ open, terminal drops the accumulator (clause 3) | — | ⬜ |
 | Mapping override rides the projection | — | ⬜ |
 | List tracks index, no delta-cadence churn | — | ⬜ |
@@ -843,5 +956,6 @@ Item 4 is **already decided** and awaits only the wording pass.
 | Date | Phase | Tests | Note |
 |---|---|---|---|
 | 2026-08-13 | **Plan drafted** at the M6 boundary | 415 (392 + 23) | Drafted from the M6 boundary audit. Phase 0 carries the audit's A1–A4 (A1/A3 owner-approved 2026-08-13); rev 10 inventory seeded with one item already decided (DoD-2 → PCC). Batch B's mechanical staleness fixes (ROADMAP header/banner/beta-track/cut-line, ADR index, two stale code comments) landed the same day, ahead of Phase 0 |
+| 2026-08-15 | **Phase 1 done** — `overlay_live`, P2 completed, D49 landed | **435 (412 + 23)** | Both substrates green plus `LEDGERKIT_DEEP=1`. **The no-assertion-changed criterion held, verified by diff**: `ProjectionCheckTests.swift` untouched; the only edit to `ProjectionChecks.swift` deletes a typealias that `Projection/` now ships. P2 sweeps 132 projections over every fixture × truncation × subset of open generations, 38 of them live, reaching 2 concurrent live generations. **Three mutations run; the one that was *not* caught was the finding of the phase:** flipping every `.failed` message to `.streaming` passed the entire suite, because `Corpus.all` contained **no failed generation at all** — 8 `.completed`, 2 `.cancelled`, 0 `.failed` — so nothing anywhere in the package had ever swept the most complex `MessageState` case, the only one carrying `Recoverability` and the whole subject of §8. Fixed with a `failedGenerations` golden fixture (a failure with a partial, and §7.2's zero-token 401), which inherits every sweep for free. **This is M3 Phase 1's healthy-log finding repeating one milestone later by the same route**, which promotes that note from history to standing instruction: ask what the corpus *cannot* express. Also: the `terminalTimestamp` mutation could not be typed without first widening `MessageTree` past D49's narrow API — the strongest evidence available that D49 was worth taking |
 | 2026-08-15 | **Phase 0 done** — the audit's A1–A4, D44 resolved, Playground rewritten | **429 (406 + 23)** | Both substrates green (macOS 27 host + iOS 27 simulator). Five mutations run, five caught. D38–D43 promoted to Accepted; D44 resolved as **`guard` alone**; **D46–D49 taken**, three of which fix gaps rather than confirm the plan: D41 named a store verb that did not exist (D46), D39's suffix-accumulation double-counts and cannot handle a projection created mid-generation (D47), and D42's ~16 ms cadence default duplicates work SwiftUI already does (D48). **Two audit characterisations were corrected by measurement.** A2 is not "the field held unparseable text" — Apple's `debugDescription` *is* JSON, so the test this plan specified passes against the bug; the real defect is **dictionary-order instability** (three processes, three orderings), the per-process hasher seed reaching a durable audit field. And A1's duration is attributable only when a snapshot preceded the throw, which for a tool called as the model's first action never happens. The recurring lesson, now from the other direction: **an audit finding is an empirical claim too** |
 | 2026-08-15 | Pre-Phase-0 spike: generated-log sweeps + `Formal/` | 420 (397 + 23) | **Two additions, neither on the critical path, one of which changed a decision.** (1) `LogGenerator.swift` / `GeneratedLogSweepTests.swift` — bounded-exhaustive generated logs over a 26-shape alphabet, closing the corpus's shape-diversity gap (every prior input was a subsequence of ten hand-written fixtures). Four oracles, one new: **containment**, which makes I2's "reduction continues as if the event were absent" executable for the first time. Tiered — length 3 (17,576 logs, ~1s) always, length 4 (456,976, ~25s) behind `LEDGERKIT_DEEP=1`, because the rest of the suite runs in ~1.2s. Found no bugs; mutation-tested to prove the containment oracle is not vacuous. (2) `Formal/LedgerStore.tla` — **TLC reproduced A3 in ten states and then falsified the proposed tombstone fix** (D44, rev 10 items 8–9) |

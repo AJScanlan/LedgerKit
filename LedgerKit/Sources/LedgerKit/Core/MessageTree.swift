@@ -40,6 +40,40 @@ public struct MessageTree: Sendable, Equatable {
         return message.children.compactMap { self[$0] }
     }
 
+    /// Replaces message states in place, and **can do nothing else** (M7-PLAN D49).
+    ///
+    /// Exists for one caller — `Projection/Overlay.swift`, whose whole contract is
+    /// "message state changes; nothing else does". P2's *"had more than its state
+    /// overlaid"* clause polices that, but a predicate is a test and this is a
+    /// type: going through here, the overlay cannot move a parent, reorder
+    /// siblings, invent tool records or touch `terminalTimestamp`, so the
+    /// predicate becomes belt-and-braces rather than the only defence. Tenet 1
+    /// applied to the read side — the same move `FoldedMessageState` makes one
+    /// layer down by simply having no `.streaming` case.
+    ///
+    /// **`mapValues` deliberately**, where a keyed loop would do: it preserves the
+    /// key set *by construction*, so "the overlay cannot drop or invent a message"
+    /// is a property of the API rather than of this body being written carefully.
+    /// It is also order-independent — each value depends only on its own old value
+    /// — which matters because a dictionary walk is normally the I1 hazard.
+    ///
+    /// Lives here rather than beside its caller, breaking the pattern that puts
+    /// `Payload.updatesIndex` beside the index writer, for a reason with no
+    /// alternative: `nodes` is `private`, so only this file can offer a mutation
+    /// this narrow. Widening `nodes` to internal to move one method would hand
+    /// the whole module the tree-rebuilding power this method exists to withhold.
+    ///
+    /// - Parameter transform: The new state for a message, or `nil` to leave it
+    ///   exactly as it is.
+    mutating func updateStates(_ transform: (Message) -> MessageState?) {
+        nodes = nodes.mapValues { message in
+            guard let state = transform(message) else { return message }
+            var updated = message
+            updated.state = state
+            return updated
+        }
+    }
+
     /// The *other* branches at this message's position — its parent's
     /// children excluding the message itself, sibling-ordered. For root-level
     /// messages the parent is the virtual root (I6), so the group is
