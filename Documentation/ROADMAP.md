@@ -1,6 +1,6 @@
 # LedgerKit v0.1 — Build Roadmap
 
-**Companion to:** [SPEC.md](./SPEC.md) — **rev 8 ratified 2026-07-28** at the M5 boundary (Appendix F). Further amendments open **rev 9**, which ratifies at the M6 boundary. (Rev 7: M4 boundary, 2026-07-26; rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
+**Companion to:** [SPEC.md](./SPEC.md) — **rev 9 ratified 2026-08-02** at the M6 boundary (Appendix G). Further amendments open **rev 10**, which is collected across the M6 boundary audit and M7 and ratifies at the M7 boundary. (Rev 8: M5 boundary, 2026-07-28; rev 7: M4 boundary, 2026-07-26; rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
 **Target:** tagged `0.1.0` before iOS 27 GA (~Sept 2026). Estimate from spec §12: **4–6 weeks part-time**, assuming the ⚠️ beta verifications hold.
 **Sequencing strategy:** *pure core first* — build and fully test everything platform-agnostic (§6) before touching the beta-coupled session seam (§7).
 
@@ -205,7 +205,7 @@ The one OS-coupled module (§7). Expect one verification evening per beta — bu
 > **Also from the reading session, and it moves work earlier:** all nine `LanguageModelError` payload structs have public initializers, so §10.5's fixtures need no device — but the *current* family is 27-only while the **deprecated iOS 26 family is available at 26**, so the two families land in different test tiers, the opposite way round from intuition. That deprecated family also carries two cases §8's coverage table does not account for — `assetsUnavailable` and `decodingFailure` — which is a rev 9 item, because §8 states its totality as a *checkable* claim and two silent fall-throughs would repeat the defect rev 6 fixed for the four `unsupported*` cases.
 
 - **Conforms to `GenerationDriving`, the seam M5 defined** — if that protocol needs to move, it is a rev 9 conversation first, never a silent widening.
-- Takes `any LanguageModel`; per-conversation session cache (§7.8 cardinality).
+- Takes `any LanguageModel`; ~~per-conversation session cache~~ **sessions rebuilt per generation** (M6-PLAN D33 — the reuse cache is optional headroom that deliberately never landed; rebuild-always satisfies §7.8's cardinality ceiling, and there is no cache for `deleteConversation` to leave stale).
 - **First `Understudy` import lands here, not at M5** (corrected 2026-07-27): `Cue.park()` is internal to that package, so a store-level driver double could not park on one and used a test-target `Latch` instead. At M6 the arrangement inverts and `Cue` is used as designed — the script *player* parks, the test drives it through the public `reached()` / `signal()`.
 - **Rehydration** (§7.1) — materialize active path + instructions into a seeded transcript via `LanguageModelSession(model:tools:transcript:)` (**OQ1 closed**). Text-fidelity only (N11 fidelity classes).
 - **Outcome boundary** (§7.2) — `generationStarted` appended *before* the provider request; every post-append failure is an `Outcome`, never a throw (this is what makes §8's reauth row reachable). `isResponding` defensive gate — **kept even though OQ6 closed**, because the iOS 26 error family is deprecated rather than removed, and because §6.5's parallel-generation relaxation is exactly when store single-flight stops covering for it. *Residue: thrown or trapped.*
@@ -224,10 +224,12 @@ The one OS-coupled module (§7). Expect one verification evening per beta — bu
 >
 > **The substrate moved mid-milestone**, which is worth recording because it validates D31: the build machine reached **macOS 27** with Apple Intelligence live, so the three hardware-deferred residues answered themselves **with no code change** — a runtime `#available` gate reclassified the same binary, where a bumped package floor could not have. `swift test` now executes the 27-gated tier natively; the simulator is a second substrate rather than the only one.
 >
-> **SPEC rev 9** (Appendix G, six batches) is drafted in full and ratifies at this boundary. **Nothing touches the wire.**
+> **SPEC rev 9** (Appendix G, six batches) **ratified at this boundary, 2026-08-02**. **Nothing touches the wire.**
 
 ### M7 — Observable projection + `overlay_live`
 The `@MainActor @Observable` read side (§6.2, §7.4, §11).
+
+**Build order, decision log (D38–D43) and phase gates: [M7-PLAN.md](./M7-PLAN.md)** (drafted 2026-08-13 from the M6 boundary audit; opens with a hygiene phase carrying the audit's four code findings, and seeds the rev 10 inventory — which ratifies at this milestone's boundary).
 
 - `projection = overlay_live(reduce(persistedLog ++ unflushedTail, mapping))`, where `overlay_live` maps `.interrupted → .streaming` for in-flight `GenerationID`s only, identity otherwise.
 - **P2** (overlay correctness, §10.6): live set ⊆ open generations; crash recovery is the degenerate empty-live-set case (overlay disappears → `.interrupted` shows through). **The harness already exists** — M4 Phase 4 shipped `ProjectionChecks.swift` with the predicate parameterized over the overlay (`LiveOverlay`), swept over every truncation of every fixture with an empty live set, and with the predicate itself tested against deliberately wrong projections. **M7 supplies the real `overlay_live` as an argument and should need to change no assertion**; if it does, that is a signal worth stopping on. `referenceOverlay` in the test target is a *control*, not a draft implementation — do not promote it.
@@ -245,7 +247,7 @@ The [Projection](../Projection) Xcode app (built from `LedgerKit.xcworkspace`, s
 
 - Chat UI driving the exhaustive `switch message.state` (§11) — the code-aesthetics showpiece.
 - **Kill-and-relaunch:** kill mid-stream → relaunch → `.interrupted` with partial text; Regenerate works; the interrupted partial survives as its own branch, reachable via the branch switcher (**DoD-1**, the README hero GIF).
-- **Provider swap:** `SystemLanguageModel` → Claude package with only the driver-init line changed (**DoD-2**).
+- **Provider swap:** one-line driver-init swap to a **second real provider** (**DoD-2 — restated 2026-08-13 at the M6 boundary audit; rev 10 item**). The demonstrable second provider is `PrivateCloudComputeLanguageModel` — a genuinely non-on-device Apple provider whose error family §8 already maps — because cut line 4 (invoked at M6) established the Claude package is not in this beta ring. The Claude package remains the aspiration if a later ring carries it; the product claim was always the one-line swap, not the vendor.
 
 **Satisfies:** G8, DoD-1, DoD-2.
 **Exit:** the kill/relaunch GIF is recordable; provider swap compiles & runs with a one-line change.
@@ -271,16 +273,16 @@ GA is ~Sept 2026. Treat this as a recurring per-beta checklist, not a one-time g
 
 > **All nine OQs are closed as of SPEC rev 7 (2026-07-26, M4 boundary) — every one of them by *reading* the installed SDK rather than by running it** (Beta 4 swiftinterface; the confirmed citation list is [M4-PLAN.md](./M4-PLAN.md) §2). OQ3 and OQ5 closed at M3 in rev 6; OQ1/2/4/6/7/8/9 closed at M4 in rev 7. **The lesson is the one worth carrying into M6:** these were carried for three milestones as "one spike evening each, likely recurring," and seven of them were a file read away. Read the interface first; spend the evening on what the interface cannot answer.
 >
-> **What is genuinely empirical, and therefore actually M6's** (also listed at the head of SPEC §14):
+> **What was genuinely empirical belonged to M6, and all four residues are answered as of rev 9 (2026-08-02)** — each written back into the section it changes; SPEC §14 keeps the one-line index and, for the first time since rev 1, holds no open questions:
 >
-> | Residue | Why only running it answers this |
+> | Residue | Answer |
 > |---|---|
-> | Is `LanguageModelSession.Error.concurrentRequests` **thrown** or **trapped**? (OQ6) | A precondition failure is a different design problem from a catchable error, and the interface cannot say which it is |
-> | Do real providers ever emit **`replaceTextSegment`** on plain text? (OQ4) | The API *permits* segment revision, so the prefix property is provider behaviour; the driver's fail-loud path fires only if someone actually does it |
-> | Is `Usage.Input.totalTokenCount` **inclusive of** `cachedTokenCount`? (§7.7) | Undocumented, and it decides whether an app may sum the two |
-> | The real on-device **context budget** (~4k shared tokens, reported) | N3's remaining ⚠️ — it sets how soon a long conversation becomes unregenerable after process death |
+> | Is `LanguageModelSession.Error.concurrentRequests` **thrown** or **trapped**? (OQ6) | **Thrown** (§7.2). The `isResponding` gate stays defence in depth, and §8's exclusion has something real to exclude. Substrate-independent — the check is the *session's* — so it runs in CI permanently |
+> | Do real providers ever emit **`replaceTextSegment`** on plain text? (OQ4) | **Never observed** — 0 non-prefix across 412 snapshots of 12 real generations (§7.3). The fail-loud path stays: the API still permits what no provider has yet done |
+> | Is `Usage.Input.totalTokenCount` **inclusive of** `cachedTokenCount`? (§7.7) | **Inclusive** — the cache is a subset of the total, so an app must never sum `input.total + cached` |
+> | The real on-device **context budget** (N3) | **4096 tokens**, exhausted by **two** ~2k turns (N3, §7.1) — compaction is a week-one concern for on-device apps, not a v0.3 nicety |
 >
-> Re-verify the closed ones per beta. A **new built-in error case**, or a change to `LanguageModel`'s two protocol requirements, is the kind of change that reopens one.
+> Re-verification is scheduled by **CI rather than memory** (weekly, `.github/workflows/ci.yml`): the surface tripwires re-check the SDK's shape and the residue suite re-asks these questions on every run. A **new built-in error case**, or a change to `LanguageModel`'s two protocol requirements, is the kind of change that reopens one.
 
 | OQ | What to pin | Blocks |
 |----|-------------|--------|
@@ -303,7 +305,7 @@ Cut from the *top* first; never cross the "never cut" line.
 1. Branch-switcher UX in the demo (keep the events, hide the UI).
 2. GRDB polish → naive SQLite.
 3. Tool-invocation recording → v0.2.
-4. Provider-mapping breadth → ship on-device + Claude-package only; Chat-Completions → v0.2.
+4. ~~Provider-mapping breadth → ship on-device + Claude-package only; Chat-Completions → v0.2.~~ **Invoked at M6, with a different outcome than the line priced:** the Claude package is not in this beta ring (a remote dependency is a person's decision), and what shipped is *wider* on the Apple side — on-device + three further Apple families + the deprecated 26 family + `URLError` + the generic `ProviderFault` lift rules (§8's second table). What is missing is a third-party family, and the generic path is what one would use. DoD-2 is restated against this reality (see M8).
 
 **Never cut:** I1–I7 **and** P1–P3 tests, interruption recovery, `ScriptedLanguageModel`.
 

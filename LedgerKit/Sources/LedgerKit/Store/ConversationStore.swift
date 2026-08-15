@@ -223,12 +223,6 @@ public actor ConversationStore {
     }
 
     // MARK: - Lifecycle & metadata
-    //
-    // Bodies still spelled `fatalError` belong to a later phase. This is the one
-    // place in the package where that is permitted (M5-PLAN Phase 0): they are
-    // compile scaffolding for a surface under review, and no test may reach one
-    // — a test that does has found a missing implementation, which is exactly
-    // what it should report.
 
     /// Creates a conversation — a `conversationCreated` genesis event — and
     /// returns its (empty) reduced state.

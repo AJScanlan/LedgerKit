@@ -30,9 +30,14 @@ import Foundation
 //    material (§7.1), already folded and classified. What a driver does with it
 //    (build a `Transcript`, hit a per-conversation session cache, §7.8) is M6's
 //    business and invisible here.
-// 5. **Cancellation flows through structured concurrency.** The store runs the
-//    driver inside the verb's task and cancels that task (§7.5); the driver's
-//    obligation is to wind down and return `.cancelled`.
+// 5. **Cancellation is bridged to the driver, never inherited by the
+//    recording.** The store runs the driver in an *unstructured* task and
+//    explicitly cancels it from both stop paths (§7.5) — deliberately outside
+//    structured inheritance, because the wind-down that records the
+//    cancellation must not run inside a cancelled scope (rev 8's finding: a
+//    cancellation-aware backend would make the terminal append throw instead
+//    of write). The driver's obligation is unchanged: wind down and return
+//    `.cancelled`.
 
 /// Runs one generation and reports how it ended.
 ///

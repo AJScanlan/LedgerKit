@@ -23,6 +23,6 @@ On any conflict, **the spec wins** (per `CLAUDE.md`) and the ADR is stale — fi
 
 | # | Title | Status | Ratifies at |
 |---|---|---|---|
-| [001](ADR-001-event-encoding.md) | Tagged-JSON event encoding & discriminator registry | Draft | M9 |
+| [001](ADR-001-event-encoding.md) | Tagged-JSON event encoding & discriminator registry | Draft (no open questions — D-1–D-3 closed at M4) | M9 |
 | [002](ADR-002-identifiers.md) | Identifier design | Accepted | M1 |
-| [003](ADR-003-persistence-dependency.md) | Persistence dependency: GRDB behind an internal seam | Draft | M4 |
+| [003](ADR-003-persistence-dependency.md) | Persistence dependency: GRDB behind an internal seam | **Accepted** (ratified at M4 Phase 1, by wiring) | M4 |

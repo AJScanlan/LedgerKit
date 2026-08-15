@@ -2,6 +2,7 @@
 
 **Status:** Draft · opened 2026-07-18 at M1 · updated 2026-07-19 (M1 wire types landed) ·
 **D-1/D-2 closed at M4 Phase 1, D-3 closed at M4 Phase 4** (no open questions remain) ·
+**R-5's scope corrected 2026-08-01 at M6 Phase 3.5** (durations are governed too — see R-5) ·
 ratifies at M9
 **Spec:** §6.1 (envelope/payload, tolerant terminals, gaps), §6.6 (quarantine table), §9
 (persistence & versioning), §10 (test corpus), §13 DoD-5
