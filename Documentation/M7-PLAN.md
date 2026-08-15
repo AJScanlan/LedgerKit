@@ -1,11 +1,13 @@
 # M7 Implementation Plan — Observable projection + `overlay_live`
 
-**Status:** 🟩 **Phases 0–1 done 2026-08-15 — 435 tests green** (412 `LedgerKit` +
-23 `Understudy`, warning-free, both substrates, deep tier included). Phases 2–4
-not started. D38–D49 are **Accepted**; **D44 resolved as `guard`, adopted alone**;
+**Status:** 🟩 **Phases 0–2 done (2026-08-15/16) — 447 tests green** (424
+`LedgerKit` + 23 `Understudy`, warning-free, both substrates). Phases 3–4 not
+started. D38–D49 are **Accepted**; **D44 resolved as `guard`, adopted alone**;
 D46–D49 were taken at the Phase 0 gate and fix gaps in D39/D41/D42 rather than
 merely confirming them. `Projection/` is no longer empty: it holds
-`overlay(_:live:)` and `LiveSet`.
+`overlay(_:live:)`, `LiveSet`, and both public types. The store has its feed
+(`StoreNotification`, `notifications()`, `shownPartials`) and two new internal read
+verbs (`foldedState(of:)`, `liveSet(of:)`, `conversationSummaries()`).
 
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M7 section) · [SPEC.md](./SPEC.md)
 §6.2 (derived state), §6.3 (the three-name table), §7.4 (two cadences, one truth
@@ -668,12 +670,16 @@ will look alarming and is not.
 
 ### Phase 2 — The feed and the projection types (tier 1)
 
-**Status:** ⬜ not started
+**Status:** ✅ **done 2026-08-16 — 447 tests green** (424 `LedgerKit` + 23
+`Understudy`, warning-free, both substrates). `Projection/` now holds the overlay
+and both public types; the store has its feed. **Two of the three planned
+mutations turned out to be unfalsifiable, and finding out why produced the
+phase's most useful test** — see the mutation notes.
 
 **Goal:** D38/D39's notifications exist store-side; D42's two types consume
 them; everything driven by `ScriptedDriver` on any Mac.
 
-- [ ] **Store-side feed (D38/D39):** the internal notification stream —
+- [x] **Store-side feed (D38/D39):** the internal notification stream —
       `.delta` forwarded at signal receipt (in `consume`, *before* the flush
       buffer decision), `.changed` at non-delta append commit, terminal, and
       delete. One stream per subscriber or a broadcast — implementer's call,
@@ -681,14 +687,59 @@ them; everything driven by `ScriptedDriver` on any Mac.
       with the actor's own state change** (no detached hop between the append
       landing and the notification existing, or a `.changed` could describe a
       state a re-pull cannot yet see).
-- [ ] **`ConversationProjection` (D42):** subscribe; on `.changed` re-pull
+
+      **As landed:** `StoreNotification` with **three** cases — `.delta`,
+      `.changed`, `.deleted`. Delete earns its own case because a reader that
+      answered it with a re-pull would have `unknownConversation` thrown at it and
+      have to infer a lifecycle fact from an error.
+      **Fan-out per subscriber**, keyed by token, with `onTermination` hopping back
+      onto the actor to deregister — a conversation view and a list are two
+      subscribers and `AsyncStream` has one consumer each.
+      **`.changed` is published from exactly one place: `foldForward`.** It is where
+      all five write paths converge (`createConversation`, `edit`, `switchBranch`,
+      `generate`, `append`), and none can advance the cache without passing through
+      — so the alternative was five call sites and a sixth waiting to forget, which
+      is how §7.4's pre-terminal flush would have been lost had the wind-down been
+      written twice.
+      **`shownPartials` is new actor state** (D47): every delta the driver emits
+      accumulates there, so the store — and only the store — can say what the whole
+      partial is. That is what the plan meant by the feed being the milestone's one
+      genuinely new architectural surface: before this, what the user was looking at
+      was a local variable inside `consume`.
+- [x] **`ConversationProjection` (D42):** subscribe; on `.changed` re-pull
       through the store and rebuild; on `.delta` accumulate and schedule the
       display tick (D42's cadence; `.zero` applies immediately); assemble the
       live set (folded partial + accumulator) and apply `overlay_live`.
       `conversation` is the only published property.
-- [ ] **`ConversationListProjection` (D41):** subscribe; re-pull
-      `conversationSummaries()` on `.changed`/delete.
-- [ ] **Tests, all tier 1 via `ScriptedDriver`:** streaming shows `.streaming`
+
+      **Three deviations from D42, all deliberate, all worth confirming at the gate:**
+      1. **`async throws` init.** Attaching reads the log (so it suspends) and the
+         conversation may not exist (so it can fail). A synchronous initializer would
+         have to publish a `Conversation` that is not yet a reduction of anything, and
+         the only honest spelling of that is an `Optional` whose `nil` conflates
+         "loading" with "deleted" with "the disk failed" — three conditions with three
+         responses. Paying once at construction keeps `conversation` non-optional,
+         which is what D42 asked for.
+      2. **A second published property, `isDeleted`.** Deletion is irreversible and
+         out-of-band; the projection freezes its last view and says so. `conversation`
+         stays non-optional (a frozen last view serves a screen that is navigating
+         away better than a sudden absence), and the app is not left inferring a
+         lifecycle fact from a thrown read.
+      3. **No accumulator** — D47 removed it, so `.delta` handling is one idempotent
+         assignment.
+      Also added because it is a real case the plan did not name:
+      **`store.liveSet(of:)`**, read at attach. A projection created *mid-generation*
+      (list → detail navigation) would otherwise render `.interrupted` for something
+      still streaming. ⚠️ **P2 would not have flagged it** — the predicate checks the
+      projection against the live set it was handed, and an empty live set is
+      self-consistent. Only a person looking at the screen would have noticed, which
+      is the class of bug worth naming.
+- [x] **`ConversationListProjection` (D41):** subscribe; re-pull
+      `conversationSummaries()` on `.changed`/delete. Landed with D46's internal
+      `ConversationStore.conversationSummaries()` underneath it — the verb D41
+      assumed existed. `.delta` is handled as an explicit no-op case rather than
+      falling through a `default`, so a future notification kind has to be decided.
+- [x] **Tests, all tier 1 via `ScriptedDriver`:** streaming shows `.streaming`
       with the exact concatenation at cadence `.zero` (P2 clause 1, live);
       terminal flips to `.complete` and the accumulator drops (clause 3 by
       construction); mid-stream `edit`/`switchBranch` re-pulls without
@@ -698,20 +749,86 @@ them; everything driven by `ScriptedDriver` on any Mac.
       ordering tracks `last_event_at` and does **not** churn during delta
       flushes (§9's index rule, observed from above); delete removes the row
       and ends the conversation projection coherently.
-- [ ] **The P2 pipeline test:** a live store mid-generation, `projectionProblems`
+
+      All landed, plus mid-generation attach and D48's cadence measurement.
+      The no-churn test is bounded on **both** sides: an upper bound alone would
+      pass if the list never refreshed at all.
+
+      ⚠️ **Three of these were flaky as first written, and the full parallel suite
+      is what found it.** They spun on `projection.live.count == 1` before asserting
+      the *complete* text — but that condition goes true after the **first** delta,
+      not the last. A driver reaching its pause means it *emitted* three deltas; it
+      says nothing about whether the store's consume loop and the projection's feed
+      have drained them. Filtered runs passed every time; the parallel suite failed
+      two of them. Fixed by spinning on the awaited **content** rather than on
+      liveness. Generalizable: *a spin condition must be the assertion's actual
+      precondition, not a proxy that happens to precede it* — and a filtered green
+      run is not evidence of an async test's soundness.
+- [x] **The P2 pipeline test:** a live store mid-generation, `projectionProblems`
       run against the projection's actual output with the store's actual live
       set — the predicate's first contact with fully real inputs on the live
       side.
+
+      ⚠️ **And clause 1 is *tautological* here, which is a limit of P2 rather than of
+      the test.** The predicate asserts `shown == live[generation]`, and the overlay
+      builds `shown` *from* `live[generation]` — so against a live store the two
+      agree by construction **even when the live set is wrong**. Measured, not
+      argued: the accumulate-instead-of-assign mutation left this test green and was
+      caught only by the test that compares against the script. §10.6's own wording
+      is the stronger one — the partial equals *the concatenated deltas*, a claim
+      about the **log** — so the test now carries the script's text as an independent
+      oracle, and the mutation is caught by three tests instead of one. What the
+      predicate still buys here is clauses 2 and 3 and the not-more-than-state checks
+      against inputs nobody constructed.
 - [ ] **Mutations:** drop the pre-buffer forwarding (deltas only render at
       flush cadence — the display-cadence test must catch the collapse); apply
       a delta twice (clause 1 exactness); notify `.changed` before the fold
       cache advances (the re-pull races — the synchronous-notification
       constraint's test).
 
-**Review gate:** suites green; the two types' API reviewed against the §11
-sketch (which gains its projection lines — §6 item 6); D41's
-no-ValueObservation deviation signed off with ADR-003's amendment drafted;
-display-cadence knob's default reviewed.
+- [x] **Mutations:** drop the pre-buffer forwarding (deltas only render at
+      flush cadence — the display-cadence test must catch the collapse); apply
+      a delta twice (clause 1 exactness); notify `.changed` before the fold
+      cache advances (the re-pull races — the synchronous-notification
+      constraint's test).
+
+      **Results — and two of the three were not falsifiable as written:**
+      - *Deltas forwarded only at flush cadence* → **caught** by three tests, two of
+        them via `.timeLimit` expiry, which is what those limits are for. §7.4's two
+        cadences collapse into one and the screen simply stops advancing.
+      - *Treat the cumulative partial as a suffix* (D47's hazard; "apply a delta
+        twice" restated, since assignment is idempotent and cannot be applied twice)
+        → **caught**, but initially by only **one** test. See the P2 tautology note
+        above; after adding the independent oracle, three.
+      - *Notify before the fold cache advances* → **NOT caught, and cannot be.**
+        `yield` does not run the subscriber inline, and a subscriber must hop to the
+        actor to read — which it cannot do until the store suspends. Since nothing
+        suspends between the two statements, no reader can observe the intermediate
+        state, so their **order is genuinely unobservable**. D38's constraint is
+        therefore satisfied by something stronger than statement order: *the absence
+        of a suspension point*. The `defer` placement remains good hygiene against a
+        future `await` appearing between them, but it is not what makes the property
+        hold, and pretending a test proves it would be theatre.
+
+      **So the constraint was re-derived and then tested properly.** The reorder that
+      would *not* self-heal is a **`.delta` arriving after its generation's terminal
+      `.changed`**: the projection has pruned the live entry, the delta puts it back,
+      and the overlay sits on `.streaming` forever with no further notification to
+      correct it. A late `.changed`, by contrast, is harmless — its handling is
+      "re-read the latest", which is idempotent. `StoreFeedTests.feedOrderingIsCausal`
+      collects the feed directly and pins the whole sequence, and **it does catch the
+      detached-hop mutation** (`["changed", "changed", "delta", "delta", "delta",
+      "changed"]` — the terminal's notification jumping the queue), which is D38's
+      actual prohibition rather than its proxy.
+
+**Review gate:** ✅ **passed 2026-08-16.** Suites green (424 + 23), warning-free,
+both substrates, and the parallel suite run three times to confirm the flakes are
+gone rather than hiding. Mutations recorded above, including the one that is
+unfalsifiable and why. **Still owed at review:** the two types' API against §11's
+sketch (which gains its projection lines — §6 item 6, Phase 4); D41's
+no-ValueObservation deviation signed off with ADR-003's amendment drafted; and the
+three `ConversationProjection` API deviations listed above (`async throws` init,
+`isDeleted`, `store.liveSet(of:)`), none of which D42 anticipated.
 
 ---
 
@@ -818,6 +935,27 @@ Item 4 is **already decided** and awaits only the wording pass.
    earned its §11 lines): the spec already says "fed by the store" and "deltas
    hop at display cadence"; if D38/D39 add anything a *consumer* can observe,
    say it — otherwise no text change, and the spec stays implementation-silent.
+
+   **Phase 2's answer: two things are consumer-observable and one is not.** The
+   notification shapes and their ordering are internal and stay unsaid. But
+   **attaching mid-generation shows the live partial** — a projection created while
+   a generation streams renders `.streaming`, not `.interrupted` — and that is a
+   promise an app depends on when it navigates from a list into a streaming
+   conversation. And **deletion is surfaced rather than thrown** (`isDeleted`),
+   which §9's "irreversible, out-of-band" prose does not currently reach the read
+   side to say. One sentence each, in §7.4 and §9 respectively.
+13. **§10.6 — P2's clause 1 needs its scope stated, because the harness implements
+    something weaker than the wording** (found at Phase 2 by a mutation that
+    survived). §10.6 says the projection shows "`.streaming` with partial equal to
+    the concatenated deltas" — a claim about the **log**. The predicate compares the
+    shown partial against the **live set** instead, which is the only thing available
+    when the live set is synthetic (the M4→Phase 1 sweeps) but is *tautological*
+    against a live store, since the overlay builds the shown partial from the live
+    set. So clause 1 as implemented polices the overlay's fidelity to its input, and
+    the wording's stronger claim — that the input itself equals the log's deltas plus
+    the unflushed tail — is a **store** obligation needing an independent oracle.
+    Say which is which, because a reader checking "is P2 green?" would otherwise
+    reasonably conclude the stronger property is under test.
 8. **§6.5 / §9 — the healthy-log property needs a stated enforcement point.**
    Rev 8 established "store-written logs never quarantine" and rev 9 left it a
    claim about store *discipline*. A3 shows discipline is not enough: an
@@ -920,12 +1058,17 @@ Item 4 is **already decided** and awaits only the wording pass.
 | The empty live set is the identity — §7.4's theorem, as value equality | `OverlayTests.emptyLiveSetIsTheIdentity` | ✅ 2026-08-15 |
 | Clause 3, both branches, by input: a terminated generation and one naming no message | `OverlayTests.liveSetOutrunsTheLog` / `.liveSetNamesNoMessage` | ✅ 2026-08-15 |
 | The corpus reaches `MessageState.failed` at all (partial + zero-token shapes) | `Corpus.failedGenerations`, inherited by every sweep | ✅ 2026-08-15 |
-| Display cadence independent of flush cadence | — | ⬜ |
+| Display cadence independent of flush cadence | `ConversationProjectionTests.streamingShowsTheExactText` (a policy that cannot flush, so any text on screen bypassed disk) | ✅ 2026-08-16 |
+| The feed's causal order: a generation's deltas all precede its terminal | `StoreFeedTests.feedOrderingIsCausal` — catches the detached-hop mutation D38 forbids | ✅ 2026-08-16 |
+| A projection attaching mid-generation shows the live partial, not `.interrupted` | `ConversationProjectionTests.attachingMidGenerationSeesTheLiveText` | ✅ 2026-08-16 |
+| D48's knob measured, not assumed: a non-zero cadence does strictly less overlay work | `ConversationProjectionTests.displayCadenceCoalesces` | ✅ 2026-08-16 |
 | Overlay flips state only — structurally, via `MessageTree.updateStates` (D49) | `OverlayTests.overlayTouchesOnlyState`, plus the mutation that needed API widening to express | ✅ 2026-08-15 |
-| Clause 1 exactness — now a **store** obligation, not the overlay's (D47) | mutation-only at this layer; the store side is Phase 2's | 🟨 Phase 2 |
-| Live ⊆ open, terminal drops the accumulator (clause 3) | — | ⬜ |
-| Mapping override rides the projection | — | ⬜ |
-| List tracks index, no delta-cadence churn | — | ⬜ |
+| Clause 1 exactness — a **store** obligation since D47, not the overlay's | `ConversationProjectionTests.streamingShowsTheExactText` and `.p2AgainstALiveStore`, both against the **script's** text — P2's own clause 1 is tautological here | ✅ 2026-08-16 |
+| Live ⊆ open, terminal drops the live entry (clause 3, by construction) | `ConversationProjectionTests.terminalDropsTheLiveEntry` — pruned from the base on re-pull, so no "generation ended" notification is needed | ✅ 2026-08-16 |
+| Mapping override rides the projection, store keeps `.default` | `ConversationProjectionTests.mappingOverrideRidesTheProjection` | ✅ 2026-08-16 |
+| List tracks the index, no delta-cadence churn (bounded both sides) | `ConversationListProjectionTests.listTracksTheIndex` / `.deltaFlushesDoNotChurnTheList` | ✅ 2026-08-16 |
+| Deletion surfaced coherently; the last view frozen | `ConversationProjectionTests.deletionIsSurfaced` | ✅ 2026-08-16 |
+| P2 against a live store mid-generation (clauses 2–3 on real inputs) | `ConversationProjectionTests.p2AgainstALiveStore` | ✅ 2026-08-16 |
 | Kill-shaped recovery: overlay vanishes, `.interrupted` shows through | — | ⬜ |
 | Pipeline through real session under the projection (tier 2) | — | ⬜ |
 | §11 sketch incl. projection lines runs against the real driver | — | ⬜ |
@@ -956,6 +1099,7 @@ Item 4 is **already decided** and awaits only the wording pass.
 | Date | Phase | Tests | Note |
 |---|---|---|---|
 | 2026-08-13 | **Plan drafted** at the M6 boundary | 415 (392 + 23) | Drafted from the M6 boundary audit. Phase 0 carries the audit's A1–A4 (A1/A3 owner-approved 2026-08-13); rev 10 inventory seeded with one item already decided (DoD-2 → PCC). Batch B's mechanical staleness fixes (ROADMAP header/banner/beta-track/cut-line, ADR index, two stale code comments) landed the same day, ahead of Phase 0 |
+| 2026-08-16 | **Phase 2 done** — the store feed, `ConversationProjection`, `ConversationListProjection` | **447 (424 + 23)** | Both substrates green; the parallel suite run three times to confirm no flakes. `.changed` publishes from **one** place (`foldForward`, where all five write paths converge); `shownPartials` becomes actor state so the store can state the whole partial (D47); D46's summaries verb lands under the list. **Three `ConversationProjection` API deviations from D42, all owed sign-off:** `async throws` init (so `conversation` can be non-optional without `nil` conflating loading/deleted/failed), a second published `isDeleted`, and a new `store.liveSet(of:)` read at attach — without which a projection created mid-generation renders `.interrupted` over a running stream, **which P2 would not have flagged** because an empty live set is self-consistent. **Two of three planned mutations were unfalsifiable, and chasing why produced the phase's best test.** "Notify before the cache advances" cannot be caught: `yield` runs no subscriber inline and a reader must hop to the actor to read, so the two statements' order is unobservable — D38's constraint holds by *absence of a suspension point*, not by ordering. Re-derived the reorder that would genuinely break (a `.delta` after its terminal's `.changed`, which sticks `.streaming` forever) and pinned the feed's whole sequence in `feedOrderingIsCausal`, which **does** catch the detached hop. Also found: **P2's clause 1 is tautological against a live store** — the overlay builds `shown` from `live[generation]`, so they agree even when the live set is wrong; the fix is an independent oracle (the script's text), and the suffix-accumulation mutation went from 1 catcher to 3. And **three tests were flaky as written**, spinning on `live.count == 1` before asserting the complete text; the parallel suite caught what every filtered run had passed |
 | 2026-08-15 | **Phase 1 done** — `overlay_live`, P2 completed, D49 landed | **435 (412 + 23)** | Both substrates green plus `LEDGERKIT_DEEP=1`. **The no-assertion-changed criterion held, verified by diff**: `ProjectionCheckTests.swift` untouched; the only edit to `ProjectionChecks.swift` deletes a typealias that `Projection/` now ships. P2 sweeps 132 projections over every fixture × truncation × subset of open generations, 38 of them live, reaching 2 concurrent live generations. **Three mutations run; the one that was *not* caught was the finding of the phase:** flipping every `.failed` message to `.streaming` passed the entire suite, because `Corpus.all` contained **no failed generation at all** — 8 `.completed`, 2 `.cancelled`, 0 `.failed` — so nothing anywhere in the package had ever swept the most complex `MessageState` case, the only one carrying `Recoverability` and the whole subject of §8. Fixed with a `failedGenerations` golden fixture (a failure with a partial, and §7.2's zero-token 401), which inherits every sweep for free. **This is M3 Phase 1's healthy-log finding repeating one milestone later by the same route**, which promotes that note from history to standing instruction: ask what the corpus *cannot* express. Also: the `terminalTimestamp` mutation could not be typed without first widening `MessageTree` past D49's narrow API — the strongest evidence available that D49 was worth taking |
 | 2026-08-15 | **Phase 0 done** — the audit's A1–A4, D44 resolved, Playground rewritten | **429 (406 + 23)** | Both substrates green (macOS 27 host + iOS 27 simulator). Five mutations run, five caught. D38–D43 promoted to Accepted; D44 resolved as **`guard` alone**; **D46–D49 taken**, three of which fix gaps rather than confirm the plan: D41 named a store verb that did not exist (D46), D39's suffix-accumulation double-counts and cannot handle a projection created mid-generation (D47), and D42's ~16 ms cadence default duplicates work SwiftUI already does (D48). **Two audit characterisations were corrected by measurement.** A2 is not "the field held unparseable text" — Apple's `debugDescription` *is* JSON, so the test this plan specified passes against the bug; the real defect is **dictionary-order instability** (three processes, three orderings), the per-process hasher seed reaching a durable audit field. And A1's duration is attributable only when a snapshot preceded the throw, which for a tool called as the model's first action never happens. The recurring lesson, now from the other direction: **an audit finding is an empirical claim too** |
 | 2026-08-15 | Pre-Phase-0 spike: generated-log sweeps + `Formal/` | 420 (397 + 23) | **Two additions, neither on the critical path, one of which changed a decision.** (1) `LogGenerator.swift` / `GeneratedLogSweepTests.swift` — bounded-exhaustive generated logs over a 26-shape alphabet, closing the corpus's shape-diversity gap (every prior input was a subsequence of ten hand-written fixtures). Four oracles, one new: **containment**, which makes I2's "reduction continues as if the event were absent" executable for the first time. Tiered — length 3 (17,576 logs, ~1s) always, length 4 (456,976, ~25s) behind `LEDGERKIT_DEEP=1`, because the rest of the suite runs in ~1.2s. Found no bugs; mutation-tested to prove the containment oracle is not vacuous. (2) `Formal/LedgerStore.tla` — **TLC reproduced A3 in ten states and then falsified the proposed tombstone fix** (D44, rev 10 items 8–9) |

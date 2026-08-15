@@ -163,6 +163,33 @@ public actor ConversationStore {
     /// completion changes state in place and emits no path event, so the bubble
     /// stays wherever the user left it.
     private var live: [ConversationID: Reservation] = [:]
+    /// The **whole** partial each live generation has shown, keyed by generation
+    /// (M7-PLAN D47).
+    ///
+    /// Every delta a driver emits passes through ``consume(_:of:in:)``, so
+    /// accumulating them here yields exactly what the screen is displaying — of
+    /// which the *folded* partial is the flushed prefix. That is what makes a
+    /// `.delta` notification carry an absolute value rather than a suffix, and what
+    /// lets a projection attaching **mid-generation** be told the truth instead of
+    /// only the part that reached disk.
+    ///
+    /// Promoted to actor state at M7 Phase 2. Until then the buffered tail was a
+    /// local inside `consume`, which is why the M7 plan calls the store→projection
+    /// feed the milestone's one genuinely new architectural surface: nothing outside
+    /// that function could see what the user was looking at.
+    ///
+    /// Cleared when the generation winds down — the entry's whole purpose is to
+    /// describe something still running.
+    private var shownPartials: [GenerationID: String] = [:]
+    /// Live notification sinks, keyed by subscription token (D38).
+    ///
+    /// A fan-out list rather than one shared stream because `AsyncStream` has a
+    /// single consumer: a conversation view and a conversation list are two
+    /// subscribers, and both must see every notification. Tokens rather than
+    /// identity because a continuation is not `Hashable`.
+    private var subscribers: [Int: AsyncStream<StoreNotification>.Continuation] = [:]
+    private var nextSubscription = 0
+
     /// Verbs suspended until a `.reserved` slot resolves (M6-PLAN A1).
     ///
     /// Only ``deleteConversation(_:)`` waits today, and only because it is the
@@ -317,6 +344,11 @@ public actor ConversationStore {
             throw LedgerError.wrapping(error)
         }
         evict(conversation)
+        // Published after the DELETE committed and the cache went with it, so a
+        // subscriber acting on this cannot observe a half-erased conversation. Its
+        // own case rather than `.changed` because a re-read would only get
+        // `unknownConversation` thrown at it (see ``StoreNotification/deleted(_:)``).
+        notify(.deleted(conversation))
     }
 
     // MARK: - Reading
@@ -342,6 +374,135 @@ public actor ConversationStore {
     ///   indistinguishable from one that is genuinely empty.
     public func conversation(_ id: ConversationID) async throws -> Conversation {
         classify(try await existingFold(of: id).state, mapping: .default)
+    }
+
+    // MARK: - Observation (M7 Phase 2)
+
+    /// A stream of every change this store makes, for one subscriber (D38).
+    ///
+    /// **Subscribe before you read.** The projection's attach sequence is
+    /// `notifications()` → read → consume, and the order is load-bearing: reading
+    /// first leaves a window in which a change lands unseen and is never mentioned
+    /// again, while subscribing first merely buffers it, and a redundant re-read is
+    /// free because re-reading is idempotent. Two actor hops instead of one, in
+    /// exchange for needing no atomicity argument at all.
+    ///
+    /// **Unbounded buffering**, the same choice ``GenerationChannel`` made one seam
+    /// over and for the same reason: every bounded policy *drops*, and a dropped
+    /// notification is a screen that stays wrong until something unrelated happens
+    /// to it. Staleness that heals on the next notification is only tolerable if
+    /// the next notification is guaranteed.
+    ///
+    /// The subscription ends itself — `onTermination` fires when the consumer's task
+    /// is cancelled or the stream is deallocated, so a projection that goes away
+    /// stops costing anything without having to say so.
+    func notifications() -> AsyncStream<StoreNotification> {
+        nextSubscription += 1
+        let token = nextSubscription
+        let (stream, continuation) = AsyncStream<StoreNotification>.makeStream(bufferingPolicy: .unbounded)
+        subscribers[token] = continuation
+        continuation.onTermination = { [weak self] _ in
+            // Hops back onto the actor: `onTermination` runs on an arbitrary
+            // context, and `subscribers` is actor state.
+            Task { await self?.endSubscription(token) }
+        }
+        return stream
+    }
+
+    private func endSubscription(_ token: Int) {
+        subscribers[token] = nil
+    }
+
+    /// Ends every subscription, so a consumer's `for await` returns.
+    ///
+    /// Test-facing, and it exists because the ordering contract can only be asserted
+    /// by *collecting* the whole sequence — which needs the sequence to end. The
+    /// projections never call it: their feeds end when the projection is deallocated
+    /// and `onTermination` fires, which is the direction that matters in production.
+    ///
+    /// Not public. A consumer cannot end a subscription it does not know it has, and
+    /// a store that could silently stop talking to every projection at once is not a
+    /// capability an app should be handed.
+    func finishNotifications() {
+        for continuation in subscribers.values { continuation.finish() }
+        subscribers.removeAll()
+    }
+
+    /// Publishes one notification to every subscriber.
+    ///
+    /// **Synchronous with the state change it describes** (D38's constraint). No
+    /// detached hop between the append landing and the notification existing —
+    /// otherwise a `.changed` could describe a state that a re-read cannot yet see,
+    /// which is the fold-cache-lags-the-notification race Phase 2 mutation-tests.
+    /// `yield` never suspends, so "synchronous" costs nothing here.
+    private func notify(_ notification: StoreNotification) {
+        for continuation in subscribers.values {
+            continuation.yield(notification)
+        }
+    }
+
+    /// The conversation's folded state — what a projection classifies with **its
+    /// own** mapping.
+    ///
+    /// Internal, and deliberately not `conversation(_:)`: that verb uses §8's
+    /// default table, and an app's `RecoverabilityMapping` override rides the
+    /// projection rather than the store, because `Recoverability` is never persisted
+    /// and a mapping fix retroactively upgrades historical failures. Handing over
+    /// the fold puts classification where the mapping lives.
+    ///
+    /// - Throws: ``LedgerError/unknownConversation(_:)``, or a persistence failure.
+    func foldedState(of conversation: ConversationID) async throws -> FoldedState {
+        try await existingFold(of: conversation).state
+    }
+
+    /// The full partial each of this conversation's live generations is showing
+    /// (D47) — what a projection needs to render correctly when it attaches
+    /// **mid-generation**.
+    ///
+    /// Without it, a projection created while a generation streams would start from
+    /// the flushed text alone and render `.interrupted` for something that is very
+    /// much still running — briefly, until the next delta, but "briefly wrong" on
+    /// the state whose whole job is to distinguish crashed from live is not a
+    /// rounding error. Note P2 would *not* flag it: the predicate checks the
+    /// projection against the live set it was handed, and an empty live set is
+    /// self-consistent. Only a person looking at the screen would notice, which is
+    /// exactly the kind of bug this reads to prevent.
+    func liveSet(of conversation: ConversationID) -> LiveSet {
+        var set: LiveSet = [:]
+        for generation in liveGenerations(in: conversation) {
+            set[generation] = shownPartials[generation] ?? ""
+        }
+        return set
+    }
+
+    /// This conversation's running generations. At most one in v0.1 (§6.5's
+    /// single-flight), which is store *policy* — the log and the overlay both
+    /// tolerate more, so nothing here assumes a count.
+    private func liveGenerations(in conversation: ConversationID) -> [GenerationID] {
+        if case .running(let generation, _) = live[conversation] { [generation] } else { [] }
+    }
+
+    /// The conversation index, ordered by `lastEventAt` descending — one table read,
+    /// not N reductions (§9, G9).
+    ///
+    /// **A second read verb on the store, and D46 is the argument for it.** D28 says
+    /// the store exposes exactly one read verb, and §11 says the conversation list
+    /// lives on the projection rather than the store — but §11's actual prohibition
+    /// is on *synchronous* reads, and this has `conversation(_:)`'s shape exactly.
+    /// D41 assumed this method existed when it decided the list re-pulls on
+    /// notification; it did not, because the index read lived only on the
+    /// `PersistenceStore` seam. Internal keeps the public surface at D42's two types.
+    ///
+    /// ADR-003 rule 4 is untouched: that caps the **seam** at six verbs, and this
+    /// calls one of them rather than adding a seventh.
+    func conversationSummaries() async throws -> [ConversationSummary] {
+        do {
+            return try await persistence.conversationSummaries()
+        } catch let error as CancellationError {
+            throw error
+        } catch {
+            throw LedgerError.wrapping(error)
+        }
     }
 
     // MARK: - Branching
@@ -636,8 +797,23 @@ public actor ConversationStore {
     /// no gap — state diverging from disk while both halves look plausible
     /// alone, which is the worst available shape and precisely what P1 exists to
     /// catch. Dropping costs one replay and cannot be wrong.
+    /// - Note: This is also the **one** place a `.changed` notification is published
+    ///   (M7 Phase 2), because it is the one place every write path converges —
+    ///   `createConversation`, `edit`, `switchBranch`, `generate` and `append` all
+    ///   arrive here, and none of them can advance the cache without passing
+    ///   through. Publishing from each caller instead would be five chances for the
+    ///   sixth to forget, which is how §7.4's pre-terminal flush would have been
+    ///   forgotten if the wind-down had been written twice.
+    ///
+    ///   **Published last, and after the cache has moved** (D38's constraint):
+    ///   nothing suspends between the advance above and the notification below, so a
+    ///   subscriber that re-reads on this notification is guaranteed to see at least
+    ///   the event that caused it. Notified on the eviction path too — the events
+    ///   landed either way, and a subscriber's re-read is what repairs the cache.
     private func foldForward(_ tail: [LedgerEvent], in conversation: ConversationID) {
         guard let first = tail.first, let last = tail.last else { return }
+        defer { notifyChanged(for: tail, in: conversation) }
+
         guard var entry = folds[conversation], entry.lastSequence + 1 == first.sequence else {
             evict(conversation)
             return
@@ -649,6 +825,18 @@ public actor ConversationStore {
         )
         entry.lastSequence = last.sequence
         folds[conversation] = entry
+    }
+
+    /// Publishes `.changed` unless this batch was **only** delta flushes (D39).
+    ///
+    /// The exclusion mirrors §9's index rule exactly, one layer up: a streaming
+    /// generation would otherwise fire at flush cadence carrying nothing a `.delta`
+    /// had not already carried, waking every subscriber to re-reduce for no new
+    /// information. `contains` rather than `first`, because a batch is the unit of
+    /// meaning — any non-delta event in it is a reason to re-read.
+    private func notifyChanged(for tail: [LedgerEvent], in conversation: ConversationID) {
+        guard tail.contains(where: { !$0.payload.isDelta }) else { return }
+        notify(.changed(conversation))
     }
 
     // MARK: - Eligibility
@@ -1013,6 +1201,15 @@ public actor ConversationStore {
                 try await append(.deltaAppended(generation: generation, text: pending), in: conversation)
             }
             try await append(.generationEnded(generation: generation, outcome: outcome), in: conversation)
+            // Dropped **after** the terminal is durable, never before: until then the
+            // generation is still the thing a mid-generation subscriber should be
+            // told about, and the terminal's own `.changed` is what tells every
+            // subscriber to stop treating it as live (D47).
+            //
+            // Not in `drive`'s `defer` beside `release`, deliberately — that runs on
+            // the throwing path too, where no terminal was written and the partial
+            // is still the truest account of what the user saw.
+            shownPartials[generation] = nil
         }.value
         return outcome
     }
@@ -1053,6 +1250,24 @@ public actor ConversationStore {
             do {
                 switch signal {
                 case .delta(let text):
+                    // **Forwarded before the flush decision below, and that
+                    // ordering is §7.4's two cadences** (D39). The projection hears
+                    // about this text now; disk hears about it when the policy says
+                    // so. Move this after the `isDue` check and the screen advances
+                    // at flush cadence instead — the collapse Phase 2
+                    // mutation-tests, because it is invisible in any test that only
+                    // reads the log.
+                    //
+                    // The accumulated value is what crosses, not `text` (D47): the
+                    // store is the one place that knows the whole partial, so it
+                    // says it rather than making the projection reconstruct it.
+                    shownPartials[generation, default: ""] += text
+                    notify(.delta(
+                        conversation: conversation,
+                        generation: generation,
+                        partial: shownPartials[generation] ?? text
+                    ))
+
                     buffer.append(text)
                     if buffer.isDue {
                         try await append(.deltaAppended(generation: generation, text: buffer.text), in: conversation)
