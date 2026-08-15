@@ -19,19 +19,6 @@ import GRDB
 /// and never see this type, GRDB, or a `Database` handle (ADR-003 rules 1 and 3).
 final class SQLitePersistenceStore: PersistenceStore {
 
-    /// Errors that mean the *caller* got it wrong, as opposed to the data being
-    /// damaged. Internal: the public error surface is ``LedgerError``, which M5
-    /// designed against the real verbs — deferring it was what stopped M4
-    /// committing to a shape before the callers who must live with it existed.
-    /// Anything thrown here reaches a consumer as `.persistenceFailure`, opaque
-    /// by ADR-003 rule 1.
-    enum StoreError: Error, Equatable {
-        /// A record in the batch names a different conversation than the one
-        /// being appended to. Thrown *before* anything is written, so the batch's
-        /// all-or-nothing promise holds.
-        case conversationMismatch(expected: ConversationID, found: ConversationID)
-    }
-
     private let writer: any DatabaseWriter
 
     /// Opens (or creates) the database and brings the schema up to date.
@@ -157,16 +144,22 @@ final class SQLitePersistenceStore: PersistenceStore {
         _ records: [LedgerEvent.Record],
         to conversation: ConversationID
     ) async throws -> [LedgerEvent] {
-        guard !records.isEmpty else { return [] }
+        guard let first = records.first else { return [] }
 
         // Checked before opening the transaction: this is a caller bug, and
         // there is nothing to roll back if we never start.
         for record in records where record.conversationID != conversation {
-            throw StoreError.conversationMismatch(
+            throw PersistenceRefusal.conversationMismatch(
                 expected: conversation,
                 found: record.conversationID
             )
         }
+
+        // Half of the write-boundary rule (D44), answered here because it is a
+        // question about the *batch* and needs no lock. The other half — whether
+        // the conversation already has rows — is answered inside the transaction,
+        // and only the conjunction refuses.
+        let opensConversation = first.payload.isGenesis
 
         // Timestamps must arrive already canonical (ADR-001 R-5). Canonicalizing
         // *here* would be the tempting fix and the wrong one: it gives every
@@ -190,6 +183,22 @@ final class SQLitePersistenceStore: PersistenceStore {
                 sql: "SELECT MAX(sequence) FROM events WHERE conversation_id = ?",
                 arguments: [conversation.sqlText]
             ) ?? 0
+
+            // **The write-boundary rule** (D44). The `MAX(sequence)` above is
+            // already fetched and already under the write lock, so this costs
+            // nothing but the comparison — and the lock is exactly what makes it
+            // worth anything: "no rows exist" and "I am adding rows" are true of
+            // the *same instant* here, which no in-memory flag can promise
+            // (`Formal/README.md` has the counterexample trace).
+            //
+            // Without it, a starter that raced a `DELETE` restarts this run at
+            // sequence 1 with a non-genesis row, and every subsequent read of
+            // that conversation quarantines under §6.6 row 5 forever — a log the
+            // store wrote that the reducer rejects, which is precisely what
+            // §6.5's healthy-log property promises cannot happen.
+            if lastSequence == 0, !opensConversation {
+                throw PersistenceRefusal.missingGenesis(conversation)
+            }
 
             var events: [LedgerEvent] = []
             events.reserveCapacity(records.count)

@@ -1188,6 +1188,19 @@ public actor ConversationStore {
     /// failure and must not be reported as one — §7.2 gives it its own meaning
     /// on this channel, and a caller distinguishing "the disk failed" from "I
     /// cancelled this" is the whole point of a typed error.
+    ///
+    /// **A refused batch is translated, not wrapped** (D44). The seam's
+    /// write-boundary rule fires when this verb raced a `deleteConversation`, and
+    /// the honest answer to the caller is the one it would have received had the
+    /// race not happened: the conversation does not exist. Reporting
+    /// `persistenceFailure` instead would hand the app an affordance for a broken
+    /// disk over a conversation that was simply deleted — the §8 lesson (an
+    /// affordance claim is an empirical claim) applied on this channel.
+    ///
+    /// The other refusal, `conversationMismatch`, is deliberately *not*
+    /// translated: it means this actor passed records it had no business passing,
+    /// and there is no caller-facing recovery for a LedgerKit bug. It takes the
+    /// opaque floor, loudly, exactly as before.
     private func commit(
         _ records: [LedgerEvent.Record],
         to conversation: ConversationID
@@ -1196,6 +1209,8 @@ public actor ConversationStore {
             return try await persistence.append(records, to: conversation)
         } catch let error as CancellationError {
             throw error
+        } catch PersistenceRefusal.missingGenesis(let id) {
+            throw LedgerError.unknownConversation(id)
         } catch {
             throw LedgerError.wrapping(error)
         }

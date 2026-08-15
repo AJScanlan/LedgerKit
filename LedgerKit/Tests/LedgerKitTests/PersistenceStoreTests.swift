@@ -80,7 +80,7 @@ struct PersistenceAppendTests {
         log.append(.userMessageAppended(message: Fix.userA, content: "mine", parent: nil))
         log.append(.titleChanged("theirs"), from: Fix.foreign)
 
-        await #expect(throws: SQLitePersistenceStore.StoreError.conversationMismatch(
+        await #expect(throws: PersistenceRefusal.conversationMismatch(
             expected: Fix.conversation, found: Fix.foreign
         )) {
             try await store.append(log.records, to: Fix.conversation)
@@ -92,6 +92,46 @@ struct PersistenceAppendTests {
         // contract literally rather than approximately true.
         #expect(try await store.events(in: Fix.conversation, from: 1).isEmpty)
         #expect(try await store.conversationSummaries().isEmpty)
+    }
+
+    /// **The write-boundary rule** (M7-PLAN D44). The unit half; the
+    /// interleavings that make it necessary are `StoreDeletionTests`'.
+    @Test("a first row that is not the genesis is refused, recording nothing")
+    func genesislessFirstRowIsRefused() async throws {
+        let store = try SQLitePersistenceStore(.inMemory)
+        var orphan = Log()
+        orphan.append(.titleChanged("no genesis here"))
+
+        await #expect(throws: PersistenceRefusal.missingGenesis(orphan.conversation)) {
+            try await store.append(orphan.records, to: orphan.conversation)
+        }
+
+        // The artifact this exists to prevent: `MAX(sequence)+1` restarting at 1,
+        // so the row lands at sequence 1 and every later read of this
+        // conversation quarantines under §6.6 row 5 — forever, since nothing
+        // rewrites a log. §6.5's healthy-log property is the promise being kept.
+        #expect(try await store.events(in: orphan.conversation, from: 1).isEmpty)
+        #expect(try await store.conversationSummaries().isEmpty)
+    }
+
+    /// The rule's other side, and the reason it is a *conjunction*: a batch
+    /// appended to a conversation that already has rows needs no genesis. Without
+    /// this control the guard could be "every batch must open with a genesis",
+    /// which would refuse every delta flush in the package.
+    @Test("a later batch needs no genesis")
+    func laterBatchNeedsNoGenesis() async throws {
+        let store = try SQLitePersistenceStore(.inMemory)
+        let opened = Log.opened(title: "fine")
+        _ = try await store.append(opened.records, to: opened.conversation)
+
+        // A second `Log` over the same conversation: `Record` omits `sequence`
+        // (§6.1 — the column is its only physical home), so the backend assigns
+        // 2 regardless of where this builder thinks it is.
+        var next = Log(opened.conversation)
+        next.append(.titleChanged("renamed"))
+        let tail = try await store.append(next.records, to: opened.conversation)
+
+        #expect(tail.map(\.sequence) == [2])
     }
 
     @Test("reads from a sequence return exactly the suffix")

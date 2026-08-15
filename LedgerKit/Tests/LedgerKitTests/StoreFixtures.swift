@@ -102,6 +102,7 @@ final class SteppingClock: Sendable {
 final class RecordingStore: PersistenceStore {
     private let wrapped: any PersistenceStore
     private let captured = Mutex<[[LedgerEvent.Record]]>([])
+    private let attempted = Mutex<[[LedgerEvent.Record]]>([])
     private let reads = Mutex(0)
 
     init(_ wrapped: any PersistenceStore) {
@@ -124,7 +125,19 @@ final class RecordingStore: PersistenceStore {
     /// is cheap, not that the resume path's own read is.
     var rowsRead: Int { reads.withLock { $0 } }
 
+    /// Batches **handed to** `append`, successful or not — the deliberate
+    /// counterpart to ``appends`` (M7-PLAN D44).
+    ///
+    /// Needed because a *refused* batch writes nothing, so ``written`` cannot
+    /// distinguish a verb that reached the write boundary and was turned away
+    /// there from one that never got that far. That distinction is the whole
+    /// content of the interleaving the TLA+ model used to falsify the tombstone
+    /// remedy: the starter's existence read succeeded, so it *did* reach the
+    /// append, and only the write transaction could still refuse it.
+    var attemptedAppends: [[LedgerEvent.Record]] { attempted.withLock { $0 } }
+
     func append(_ records: [LedgerEvent.Record], to conversation: ConversationID) async throws -> [LedgerEvent] {
+        attempted.withLock { $0.append(records) }
         let tail = try await wrapped.append(records, to: conversation)
         captured.withLock { $0.append(records) }
         return tail
@@ -166,6 +179,9 @@ struct StoreUnderTest {
     var written: [LedgerEvent.Record] { recorder.written }
     /// One element per transaction — see ``RecordingStore/appends``.
     var appends: [[LedgerEvent.Record]] { recorder.appends }
+    /// Batches handed to `append`, refused ones included — see
+    /// ``RecordingStore/attemptedAppends``.
+    var attemptedAppends: [[LedgerEvent.Record]] { recorder.attemptedAppends }
     /// Rows handed to the reducer — the cold-open criterion's measure.
     var rowsRead: Int { recorder.rowsRead }
 
@@ -400,6 +416,12 @@ final class ParkingStore: PersistenceStore {
     enum Verb: Sendable {
         case events
         case append
+        /// Parks *after* the `DELETE` commits (M7-PLAN D44) — the window where
+        /// the conversation's rows are gone but `deleteConversation` has not
+        /// returned to the actor, so its cache eviction has not run either. A
+        /// starter interleaving here holds a cached fold that says the
+        /// conversation exists and is about to append into nothing.
+        case delete
     }
 
     private let wrapped: any PersistenceStore
@@ -435,6 +457,7 @@ final class ParkingStore: PersistenceStore {
 
     func deleteConversation(_ conversation: ConversationID) async throws {
         try await wrapped.deleteConversation(conversation)
+        if verb == .delete { await parkIfFirst() }
     }
 
     func conversationSummaries() async throws -> [ConversationSummary] {
@@ -649,6 +672,49 @@ final class ReadHostileStore: PersistenceStore {
     func conversationSummaries() async throws -> [ConversationSummary] {
         try await wrapped.conversationSummaries()
     }
+}
+
+/// A store that already holds rows **this build's write path cannot produce**
+/// (M7-PLAN D44).
+///
+/// The write boundary refuses a conversation's first row unless it is the genesis,
+/// so a genesis-less log is no longer writable through the seam — and the read
+/// side's interpretation of one still needs testing, because such a log is
+/// reachable from every direction that does not go through `append`: a partial
+/// restore, external tampering, or a database written by a build older than the
+/// guard. That is the same category as `wire/undecodableRows`, and it wants the
+/// same treatment — supply the bytes, do not ask the writer to forge them.
+///
+/// Deliberately **not** a wrapper that also writes. Its `append` traps the test
+/// rather than delegating: anything reaching it means the test wandered off the
+/// read path it was written for, and a silent delegation would let that pass while
+/// quietly exercising the guard it exists to sidestep.
+final class PrewrittenStore: PersistenceStore {
+    private let rows: [LoadedEvent]
+    private let conversation: ConversationID
+
+    /// Seeds from a `Log`, so a genesis-less fixture reads exactly as the reducer
+    /// suites already fold it — the `ReducerFixtures` sharing that keeps the two
+    /// layers from disagreeing about the same log.
+    init(_ log: Log) {
+        self.rows = log.rows
+        self.conversation = log.conversation
+    }
+
+    func append(_ records: [LedgerEvent.Record], to conversation: ConversationID) async throws -> [LedgerEvent] {
+        Issue.record("PrewrittenStore models rows already on disk; nothing should write through it")
+        return []
+    }
+
+    func events(in conversation: ConversationID, from sequence: Int64) async throws -> [LoadedEvent] {
+        guard conversation == self.conversation else { return [] }
+        return rows.filter { $0.sequence >= sequence }
+    }
+
+    func latestSnapshot(for conversation: ConversationID) async throws -> Snapshot? { nil }
+    func save(_ snapshot: Snapshot) async throws {}
+    func deleteConversation(_ conversation: ConversationID) async throws {}
+    func conversationSummaries() async throws -> [ConversationSummary] { [] }
 }
 
 /// A store whose every verb fails — the two-channel contract's other half, where

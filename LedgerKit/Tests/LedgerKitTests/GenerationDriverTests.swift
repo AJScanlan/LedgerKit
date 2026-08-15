@@ -401,6 +401,214 @@ struct GenerationDriverTests {
         #expect(text(of: off.signals) == "The fold is a valley fold.")
     }
 
+    /// **A2, and the audit's characterisation of it needs correcting** (M7 Phase 0,
+    /// measured).
+    ///
+    /// The audit called this a data-fidelity bug on the grounds that
+    /// `argumentsJSON` held `String(describing:)` of a `GeneratedContent` — "a debug
+    /// description". The first half is literally right: `GeneratedContent` conforms
+    /// to `CustomDebugStringConvertible` and **not** `CustomStringConvertible`, so
+    /// `String(describing:)` resolves to `debugDescription`. The implied half —
+    /// that the field therefore held something unparseable — is **false**. Apple's
+    /// debug rendering emits JSON, so a test asserting the value merely parses
+    /// passes against the bug. That is why this test asserts something else.
+    ///
+    /// **The real defect is byte instability, and it is the I1 hazard arriving
+    /// through Apple's API.** `debugDescription` renders an object's keys in
+    /// *dictionary order*, so the same tool arguments recorded twice produce
+    /// different bytes — measured directly: three processes, three orderings
+    /// (`{"arr":…,"s":…}`, `{"b":…,"s":…}`, `{"n":…,"s":…}`). Swift's hasher seed
+    /// varies per process, which is exactly the leak `Reduce/` is forbidden from
+    /// and which nothing stopped at this layer. In an append-only audit log that is
+    /// worse than unparseable text: it is a record that silently disagrees with
+    /// itself across launches. `jsonString` preserves declaration order and was
+    /// stable across the same three runs.
+    ///
+    /// Driven through ``ToolObservation`` directly rather than a scripted session:
+    /// order needs several keys, `Transcript.ToolCall`/`ToolCalls` are publicly
+    /// constructible (OQ2's closure), and the choice under test is this type's.
+    @Test("argumentsJSON preserves declaration order, so a record cannot disagree with itself")
+    func argumentsAreOrderStableJSON() throws {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+        // Four keys, because two could agree by luck and one cannot disagree at all.
+        let arguments = GeneratedContent(properties: [
+            "alpha": "1", "beta": "2", "gamma": "3", "delta": "4",
+        ])
+        var observation = ToolObservation(policy: .full)
+        let entries: [Transcript.Entry] = [
+            .toolCalls(Transcript.ToolCalls([
+                Transcript.ToolCall(id: "call-1", toolName: "StubTool", arguments: arguments),
+            ])),
+            .toolOutput(Transcript.ToolOutput(
+                id: "call-1",
+                toolName: "StubTool",
+                segments: [.text(Transcript.TextSegment(content: "ok"))]
+            )),
+        ]
+
+        let json = try #require(observation.records(in: entries[...]).first?.argumentsJSON)
+
+        // Keys in the order they appear, which is the property that must be
+        // deterministic. Scanned rather than parsed because `JSONSerialization`
+        // discards order — and asserting Apple's exact spacing would pin a
+        // formatting choice that is not LedgerKit's to pin.
+        let keys = json.matches(of: /"([a-z]+)":/).map { String($0.1) }
+        #expect(keys == ["alpha", "beta", "gamma", "delta"])
+    }
+
+    /// A model that asks for a tool which **throws**.
+    ///
+    /// One script, not two: the tool's throw ends the generation, so the model is
+    /// never asked again (which is itself the reason §7.6's success path cannot
+    /// observe a failure — an output entry only exists when there was an output).
+    ///
+    /// - Parameter afterText: Text the model emits *before* calling the tool.
+    ///   Not decoration — it decides whether the driver ever sees the call, which
+    ///   is measured by the two tests below.
+    @available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
+    private func failingToolDriver(
+        _ policy: ToolRecordingPolicy,
+        afterText text: String? = nil
+    ) -> GenerationDriver {
+        let call = Script.Step.callTool("FailingTool", arguments: #"{"value":"valley"}"#)
+        return GenerationDriver(
+            model: ScriptedLanguageModel(
+                scripts: [Script(text.map { [.emit($0), call] } ?? [call])],
+                capabilities: LanguageModelCapabilities([.toolCalling])
+            ),
+            descriptor: descriptor,
+            tools: [FailingTool()],
+            toolRecording: policy
+        )
+    }
+
+    /// **A1 — §8's "two facts, two events", asserted as two events** (M7 Phase 0).
+    ///
+    /// The claim §8 makes and M6 did not implement: unwrapping a `ToolCallError`
+    /// loses nothing *because* the tool's identity has its own channel. It did not
+    /// — `ToolObservation` emitted only on `toolOutput`, which exists only when the
+    /// tool produced one, so `ToolRecord.Status.failed` was wire surface no code
+    /// could reach and a failed invocation left no trace at all.
+    ///
+    /// Both facts are asserted here on purpose. Either alone is satisfiable by a
+    /// wrong implementation: recording the tool without unwrapping gives the user
+    /// an opaque terminal, and unwrapping without recording loses which tool failed.
+    @Test("a failed tool invocation is recorded, and the terminal carries the unwrapped error")
+    func failedToolInvocationIsRecorded() async throws {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+        let result = await collect(from: failingToolDriver(.metadataOnly, afterText: "thinking… "), request())
+
+        let records = result.signals.compactMap { signal -> ToolRecord? in
+            if case .toolRecord(let record) = signal { record } else { nil }
+        }
+        #expect(records.count == 1, "one record for the one invocation that failed")
+        let record = try #require(records.first)
+        #expect(record.name == "FailingTool")
+        #expect(record.status == .failed)
+        // `.metadataOnly` — no payloads. And `resultJSON` is nil under *every*
+        // policy: the tool threw instead of producing a result.
+        #expect(record.argumentsJSON == nil)
+        #expect(record.resultJSON == nil)
+
+        // **Attributed**, because the preceding text produced a snapshot whose
+        // `transcriptEntries` carried the `toolCalls` entry — see the sibling test
+        // for the case where it does not. Not asserted to a value (it is a real
+        // measurement), but asserted to be **canonical**: ADR-001 R-5 governs this
+        // field, and a `ContinuousClock` measurement arrives at nanosecond
+        // precision where the wire form is integer milliseconds.
+        let duration = try #require(record.duration)
+        #expect(duration == Duration(wireMilliseconds: duration.wireMilliseconds),
+                "a duration that does not survive its own encoding means one thing in the store's cache and another on disk")
+
+        // Fact two: the terminal is classified on what the tool threw, not on the
+        // wrapper. `transport(.timeout)` classifies `retryable`, which is the
+        // affordance §8 says a timed-out tool call must give the user.
+        #expect(result.outcome == .failed(.transport(.timeout)))
+
+        // The same attribution carries the arguments under `.full` — the only way
+        // a *failed* record can ever hold a payload, so without this the field
+        // would be unreachable on this path and nothing would notice.
+        let full = await collect(from: failingToolDriver(.full, afterText: "thinking… "), request())
+        let recorded = try #require(full.signals.compactMap { signal -> ToolRecord? in
+            if case .toolRecord(let record) = signal { record } else { nil }
+        }.first)
+        let json = try #require(recorded.argumentsJSON)
+        #expect(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: String] == ["value": "valley"])
+    }
+
+    /// **The record lands even when nothing about the call was observed** — A1's
+    /// actual claim, and the shape a real failure most often takes.
+    ///
+    /// Measured (M7 Phase 0): when the tool call is the model's **first** action,
+    /// the driver receives *no snapshot at all* before the throw, so it never sees
+    /// a `toolCalls` entry and has nothing to attribute a duration or arguments to.
+    /// The framework reports the failure as a thrown error and the call itself is
+    /// never surfaced as data.
+    ///
+    /// So the identity comes from the error's own `tool`, and the timing is `nil` —
+    /// "not reported", the rule everywhere else in this package. The alternative
+    /// would be recording no event at all, which is the bug A1 fixes, or inventing
+    /// a duration, which would be read as fact for the life of the log.
+    @Test("an unobserved failed call still reaches the ledger, without a fabricated duration")
+    func unobservedFailedCallIsStillRecorded() async throws {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+        // `.full` deliberately: even the policy that wants payloads gets none,
+        // because there was nothing to capture them from.
+        let result = await collect(from: failingToolDriver(.full), request())
+
+        let records = result.signals.compactMap { signal -> ToolRecord? in
+            if case .toolRecord(let record) = signal { record } else { nil }
+        }
+        let record = try #require(records.first, "a failed invocation must leave a trace even unobserved")
+        #expect(record.name == "FailingTool", "the error names the tool, which is enough")
+        #expect(record.status == .failed)
+        #expect(record.duration == nil)
+        #expect(record.argumentsJSON == nil)
+        #expect(result.outcome == .failed(.transport(.timeout)))
+    }
+
+    /// **A4's reachable half** (M7 Phase 0).
+    ///
+    /// A provider throwing a `CancellationError` it wrapped itself, while the task
+    /// is **not** cancelled, is a failure — not a user's stop. The check A4 added
+    /// keys on `Task.isCancelled` rather than on the error's type for exactly this
+    /// reason: the error says nothing reliable about who wanted the stop.
+    ///
+    /// ⚠️ **Honest limit, recorded rather than glossed** (§7.3's precedent for
+    /// unreachable-but-retained paths): the *cancelled* side of that check may be
+    /// unreachable end-to-end, because a cancelled `ResponseStream` ends silently
+    /// before any error escapes — which is the measurement that put the
+    /// post-loop `Task.isCancelled` check in `stream` in the first place. So the
+    /// check is defence in depth against a provider that behaves differently, and
+    /// what is testable is that it does not fire when it should not.
+    @Test("a wrapped CancellationError from an uncancelled task is a failure, not a stop")
+    func spuriousCancellationIsNotAStop() async throws {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+        let wrapped = LanguageModelSession.ToolCallError(tool: StubTool(), underlyingError: CancellationError())
+
+        let result = await collect(from: driver([.fail(wrapped)]), request())
+
+        #expect(result.outcome != .cancelled, "nobody cancelled this; recording a stop would be a lie")
+        // Unwrapped to a bare `CancellationError`, which belongs to no Apple
+        // family and no `URLError` bucket, so it lands on §8's floor. The case is
+        // the contract; the wording is not (ADR-001).
+        guard case .failed(.unrecognized) = result.outcome else {
+            Issue.record("expected the floor, got \(result.outcome)")
+            return
+        }
+        // And it is still a tool failure, so the record lands too — A1 and A4
+        // compose rather than competing.
+        let records = result.signals.compactMap { signal -> ToolRecord? in
+            if case .toolRecord(let record) = signal { record } else { nil }
+        }
+        #expect(records.map(\.status) == [.failed])
+        #expect(records.first?.name == "StubTool")
+        // Unattributable: no `toolCalls` entry was ever observed, since this error
+        // is injected rather than produced by a real invocation. Nil is "not
+        // reported", which is the rule everywhere else in this package.
+        #expect(records.first?.duration == nil)
+    }
+
     // MARK: - Cancellation (§7.5)
 
     /// Parked at a point the *test* chose, then cancelled — `Cue` used as
@@ -445,3 +653,4 @@ struct GenerationDriverTests {
         #expect("half an answer".hasPrefix(emitted), "emitted \(emitted.debugDescription)")
     }
 }
+

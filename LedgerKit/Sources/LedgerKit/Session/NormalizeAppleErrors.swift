@@ -41,10 +41,18 @@ func normalize(_ error: any Error, since now: Date) -> GenerationError {
     // error underneath. A tool whose network call timed out should give the user
     // `transport(.timeout)` and a Retry, not an opaque tool-shaped mystery.
     //
-    // Nothing is lost by unwrapping: "a tool failed" already has its own channel
-    // (§7.6's `toolInvocationRecorded`, carrying the tool's name and a `.failed`
-    // status). The terminal says how the *generation* ended; the tool record says
-    // what the tool did. Two facts, two events, neither standing in for the other.
+    // Nothing is lost by unwrapping: "a tool failed" has its own channel (§7.6's
+    // `toolInvocationRecorded`, carrying the tool's name and a `.failed` status).
+    // The terminal says how the *generation* ended; the tool record says what the
+    // tool did. Two facts, two events, neither standing in for the other.
+    //
+    // **The second event is emitted by `GenerationDriver.stream`'s catch arm**,
+    // which peeks at this same wrapper before calling in here (M7 Phase 0 A1).
+    // Worth stating precisely, because until that landed the sentence above was
+    // *aspirational* — normalization discarded `tool` and nothing else recorded
+    // it, so `ToolRecord.Status.failed` was wire surface no code could reach. The
+    // peek lives there rather than here for one reason: this function is pure and
+    // holds no channel.
     //
     // Bounded, because `ToolCallError` is publicly constructible and its payload
     // is `any Error`: a nested chain is representable, and a class-based error

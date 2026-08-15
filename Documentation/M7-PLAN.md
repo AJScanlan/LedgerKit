@@ -1,8 +1,10 @@
 # M7 Implementation Plan — Observable projection + `overlay_live`
 
-**Status:** ⬜ **DRAFT — drafted 2026-08-13 from the M6 boundary audit.** No phase
-has started. Decisions D38–D43 are **Proposed** and promote to Accepted at the
-Phase 0 / Phase 2 gates, per the M6 pattern.
+**Status:** 🟩 **Phase 0 done 2026-08-15 — 429 tests green** (406 `LedgerKit` +
+23 `Understudy`, warning-free, both substrates). Phases 1–4 not started.
+D38–D45 are **Accepted**; **D44 resolved as `guard`, adopted alone**; D46–D49
+were taken at the Phase 0 gate and fix gaps in D39/D41/D42 rather than merely
+confirming them.
 
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M7 section) · [SPEC.md](./SPEC.md)
 §6.2 (derived state), §6.3 (the three-name table), §7.4 (two cadences, one truth
@@ -10,22 +12,27 @@ hierarchy, one overlay), §10.6 (P2), §11 (isolation sketch) ·
 [M6-PLAN.md](./M6-PLAN.md) §7 (the four inherited handoffs) · the **M6 boundary
 audit** (2026-08-13), whose findings A1–A4 are Phase 0 and whose rev 10 items
 seed §6.
-**Baseline:** M0–M6 done and audited, **420 tests green** (397 `LedgerKit` + 23
-`Understudy`, warning-free, both substrates), SPEC **rev 9 ratified 2026-08-02**.
+**Baseline:** M0–M6 done and audited; **429 tests green** as of Phase 0
+(406 `LedgerKit` + 23 `Understudy`, warning-free, both substrates), from 420 at
+plan time. SPEC **rev 9 ratified 2026-08-02**.
 The M6 boundary audit (2026-08-13) found one contract gap (A1: failed tool
-invocations leave no ledger trace), one data-fidelity bug (A2: `argumentsJSON`
-holds a debug description), one store race (A3: delete versus a *new* starter),
-and one speculative cancellation door (A4) — **all folded into Phase 0 below**,
-because M7 is the milestone where the projection reads the store's every
-surface, and it must read a store that is actually correct.
+invocations leave no ledger trace), one wire-field defect (A2: `argumentsJSON`
+built from a debug rendering), one store race (A3: delete versus a *new*
+starter), and one speculative cancellation door (A4) — **all folded into Phase 0
+below and all now fixed**, because M7 is the milestone where the projection reads
+the store's every surface, and it must read a store that is actually correct.
 
-⚠️ **A3's remedy changed before Phase 0 started.** A TLA+ model of the store's
-delete-versus-start interleavings (2026-08-15, [`Formal/`](../Formal/README.md))
-reproduced A3 and then **falsified the tombstone the audit had proposed** — it
-covers the wrong interval, and clearing it on completion re-opens the window.
-Two alternatives verify; the choice is **D44, open**, and it gates Phase 0's A3
-item. Rev 10 items 8–9 follow from it. The same date added bounded-exhaustive
-generated-log sweeps to the reducer suite (+5 tests, hence the baseline above).
+⚠️ **A3's remedy changed before Phase 0 started, and A2's diagnosis changed
+during it.** A TLA+ model of the store's delete-versus-start interleavings
+(2026-08-15, [`Formal/`](../Formal/README.md)) reproduced A3 and then **falsified
+the tombstone the audit had proposed** — it covers the wrong interval, and
+clearing it on completion re-opens the window. Two alternatives verified;
+**D44 chose `guard` and dropped the tombstone entirely.** Rev 10 items 8–9 follow
+from it. Separately, A2's stated mechanism turned out to be wrong in a way that
+made the test this plan specified **pass against the bug** — the field held JSON
+all along; what it did not hold was *stable* JSON (see Phase 0's A2 item). The
+same date as the model added bounded-exhaustive generated-log sweeps to the
+reducer suite (+5 tests, hence the 420 above).
 **Spec work:** amendments open **rev 10**, which ratifies at the M7 boundary.
 The inventory is §6 — seeded from the audit, including one item **already
 decided** (DoD-2's restatement, owner sign-off 2026-08-13). The standing
@@ -275,12 +282,16 @@ closes the milestone and ratifies rev 10.
 
 ### Phase 0 — Hygiene: the M6 boundary audit's findings
 
-**Status:** ⬜ not started
+**Status:** ✅ **done 2026-08-15 — 429 tests green** (406 `LedgerKit` + 23
+`Understudy`, warning-free). All four A-findings fixed with mutation-verified
+tests; D44 resolved as **`guard`, adopted alone**; four further decisions
+(D46–D49) taken at the Phase 0 review and recorded below. Two of the audit's
+characterisations were **corrected by measurement** — see the status log.
 
 **Goal:** the audit's code findings fixed with the tests that would have caught
 them (the D30 pattern), plus the Playground rewrite. No projection code yet.
 
-- [ ] **A1 — failed tool invocations reach the ledger.** In
+- [x] **A1 — failed tool invocations reach the ledger.** In
       `GenerationDriver.stream`'s generic catch arm, peek before normalizing:
       if the thrown error is a `LanguageModelSession.ToolCallError` (outermost
       wrapper — its `tool` names the tool that failed), emit
@@ -301,13 +312,47 @@ them (the D30 pattern), plus the Playground rewrite. No projection code yet.
       carrying the *unwrapped* error. Mutation: drop the emission — the new
       test must catch it; the existing suites must not (that is the hole being
       closed).
-- [ ] **A2 — `argumentsJSON` is JSON.** `String(describing: call.arguments)` →
+
+      **Landed**, with the duration rule decided rather than discovered:
+      Apple's entries key on a call *id* while its error names a *tool*, so a
+      duration is attributed only when exactly one observed-but-uncompleted
+      call carries that name; otherwise nil ("not reported", the rule
+      everywhere else). **Two framework behaviours were measured and both are
+      now tested:** a tool call that is the model's *first* action produces
+      **no snapshot at all** before the throw, so nothing about the call is
+      ever observed and the record carries name + status only; a call preceded
+      by text lands a `toolCalls` entry in a snapshot, and duration *is*
+      attributed (3 ms, canonicalized per R-5 — asserted). The record lands
+      either way, which is A1's actual claim.
+      Mutation run: dropping the emission failed **only** the three new tests
+      and no pre-existing one — the hole, confirmed as a hole.
+- [x] **A2 — `argumentsJSON` is JSON.** `String(describing: call.arguments)` →
       `call.arguments.jsonString`, in `ToolObservation` and in A1's new path.
       Assert under `.full` that the recorded value parses as JSON — the test
       the field's name always implied.
-- [ ] **A3 — the remedy is an open decision (D44), because the tombstone does
-      not hold.** Model-checked 2026-08-15; the model, its four variants and
-      the counterexample traces are in [`Formal/`](../Formal/README.md).
+
+      ⚠️ **The audit's characterisation was wrong, and the corrected one is
+      worse.** "Holds a debug description" is literally right — `GeneratedContent`
+      conforms to `CustomDebugStringConvertible` and *not*
+      `CustomStringConvertible`, so `String(describing:)` resolved to
+      `debugDescription`. The implied consequence — that the field therefore held
+      unparseable text — is **false**: Apple's debug rendering emits JSON, so the
+      test this item asked for (assert it parses) **passes against the bug**, and
+      was observed doing so. The real defect is **byte instability**:
+      `debugDescription` renders keys in *dictionary* order, so the same arguments
+      recorded in two processes produce different bytes — measured directly, three
+      runs, three orderings. That is the per-process hasher seed `Reduce/` is
+      forbidden from leaking, arriving through Apple's API into a durable audit
+      field, where a record that disagrees with itself across launches is worse
+      than one that fails to parse. `jsonString` is order-preserving and was
+      stable across the same three runs. The test therefore asserts **key
+      order**, and that assertion does catch the mutation.
+      *Generalizable lesson, and it is the §8 `emptyResponse` lesson again from
+      the other side: an audit finding is an empirical claim too. This one named
+      the right line for a reason that would not have held up.*
+- [x] **A3 — resolved: `guard`, adopted alone (D44).** Model-checked
+      2026-08-15; the model, its four variants and the counterexample traces are
+      in [`Formal/`](../Formal/README.md).
 
       **What was proposed** (owner decision 2026-08-13): `deleting:
       Set<ConversationID>` on the store actor, set synchronously at
@@ -353,28 +398,68 @@ them (the D30 pattern), plus the Playground rewrite. No projection code yet.
       - **`sticky`** — the tombstone, never cleared. Costs an unbounded set of
         poisoned identifiers for the process's lifetime.
 
-      **Recommendation: `guard`**, with the tombstone retained only if it earns
-      its keep as an early, cheap `unknownConversation` for the common case —
-      as an *affordance*, never as the correctness argument. Owner decides
-      (D44).
+      **Decided 2026-08-15: `guard`, and the tombstone is dropped entirely** —
+      not even retained as a cheap early `unknownConversation`. The argument that
+      settled it goes past "interleaving-independent": **`guard` is a claim about
+      the log, both tombstones are claims about one process's memory.** The
+      property being protected is §6.5's healthy-log property, which is a property
+      of *logs*, so enforcement belongs where logs are written. A tombstone
+      protects nothing against a second process, a crash-restart, or v0.3 import
+      tooling; `guard` protects against all three without knowing they exist. And
+      keeping one as an affordance would leave a second mechanism that the next
+      reader reasonably mistakes for the protection — which is precisely the
+      misreading this finding already cost an audit cycle to correct.
 
-      **Test:** unchanged in shape and still wanted — `ParkingStore` parks the
-      DELETE (the harness gains a `.delete` parking point if it lacks one); a
-      concurrent `send` runs; assert the send throws, **no genesis-less row
-      exists**, and a follow-up `createConversation` succeeds. A second test
-      parks the *old generation's wind-down* and interleaves the send there.
-      **Add a third the model demands and the audit did not:** the starter's
-      existence read resolves *before* the delete and its `reserve` lands
-      *after* the delete completed — the interleaving that falsified the
-      tombstone. Mutation: remove whichever check is adopted; the tests must
-      catch it as junk rows or a healthy-log violation.
+      **As landed:** the check is inside the same write transaction that computes
+      `MAX(sequence)+1` and costs only a comparison, since that value is already
+      fetched. The batch-shape half (`first.payload.isGenesis`) is answered
+      *outside* the transaction, where it needs no lock; only the conjunction
+      refuses. The error is a **seam-level** `PersistenceRefusal.missingGenesis`,
+      defined in `Persistence.swift` rather than inside the GRDB conformance, so
+      `ConversationStore` translates a seam error and never a backend one
+      (ADR-003 rule 1 intact). It translates to
+      **`LedgerError.unknownConversation`** — the error the caller would have
+      received had the race not happened; reporting `persistenceFailure` would
+      hand an app a broken-disk affordance for a conversation that was simply
+      deleted. `conversationMismatch` moved to the same type and is deliberately
+      *not* translated: it means the store passed records it had no business
+      passing, and there is no caller-facing recovery for a LedgerKit bug.
+
+      **Tests (three, all landed) plus two seam-level unit tests.**
+      `ParkingStore` gained the `.delete` parking point it lacked. ① A starter
+      racing a *committed* DELETE is refused, no genesis-less row survives, and
+      the store stays usable. ② A starter arriving during delete's
+      cancel-and-wait — kept because "the guard covers it" is the *wrong* lesson:
+      the DELETE has not committed there, so single-flight is what covers it, and
+      conflating the two would leave one of them untested. ③ **The interleaving
+      that falsified the tombstone** — existence read before the delete, `reserve`
+      after it completed, reached via an explicit `evict` so the read must suspend.
+      `RecordingStore` gained `attemptedAppends` for ③, because a *refused* batch
+      writes nothing and `written` therefore cannot distinguish a verb that
+      reached the write boundary from one that never got that far — which is the
+      whole content of the interleaving.
+
+      ⚠️ **The mutation taught something the test nearly missed.** With the guard
+      removed, `send` *still* throws `unknownConversation`, by a longer route: the
+      append lands at sequence 1, `foldForward` drops the diverged cache (D29), the
+      rehydration read reloads cold, and the reloaded log has no genesis. Same
+      error, junk rows on disk. **A test asserting only the throw passes against
+      the bug** — the empty-rows assertion is the one with teeth. Three tests
+      caught the mutation; the throw assertion caught nothing.
+
+      A fourth structural exclusion was added to `Log.isStoreReplayable`
+      (a genesis-less log is now unwritable), derived from the log's own first row
+      rather than named per fixture. `PrewrittenStore` is a new double for the
+      read-side claim the guard makes unwritable: a genesis-less log **already on
+      disk** still reads as `unknownConversation`, which is reachable by partial
+      restore, tampering, or a pre-guard build.
 
       ⚠️ **Do not treat the model as the verification.** It says the shipped
       code is wrong and that two candidate remedies close *this* property under
       *these* abstractions (one conversation, no fold cache, no persistence
       failures — the head of `LedgerStore.tla` lists them). The Swift tests are
       still the evidence that the chosen remedy is what got written.
-- [ ] **A4 — the wrapped-cancellation door.** In the same catch arm, before
+- [x] **A4 — the wrapped-cancellation door.** In the same catch arm, before
       A1's peek and the normalize: `if Task.isCancelled { return .cancelled }`.
       Defensive, per §7.5's "never assume a stream reports its own
       cancellation" — a stop surfacing as any thrown error must not be recorded
@@ -387,21 +472,50 @@ them (the D30 pattern), plus the Playground rewrite. No projection code yet.
       *Ordering note: A4's check, then A1's peek, then normalize — a genuine
       stop should not also mint a failed tool record for a tool that was merely
       interrupted.*
-- [ ] **Playground rewrite** (inherited M4 → here): drop `@testable`, build a
-      short `Log`, `Conversation(reducing:loadedFrom:)`, keep the tree/branch
-      rendering. Compile-verified in Xcode (playgrounds are invisible to
-      `swift build` — the reason this waited for the milestone that is in
-      Xcode anyway).
-- [ ] **Comment truth pass:** `NormalizeAppleErrors`' unwrap comment and
+
+      **Landed in that order.** The reachable half is tested: an *uncancelled*
+      `ToolCallError(underlyingError: CancellationError)` lands `.failed` on §8's
+      floor **and** still emits its `.failed` tool record, so A1 and A4 compose
+      rather than compete. The mutation that matters is not *removing* the check
+      (whose cancelled side is unreachable, so nothing could catch it) but
+      **writing it wrong** — keying on the error's type instead of on task state,
+      which is exactly the implementation A4 warns against. That mutation was run
+      and is caught by this test alone.
+- [x] **Playground rewrite** (inherited M4 → here): drop `@testable`, build a
+      short log, `Conversation(reducing:loadedFrom:)`, keep the tree/branch
+      rendering.
+
+      **Verified better than the bar this item set.** Rather than
+      compile-checking in Xcode, both files were compiled *and run* as a scratch
+      SwiftPM executable depending on `LedgerKit` by path — so the check is that
+      the **public** API admits the example, which `@testable` in Xcode could not
+      have told us. Output: `diagnostics: []`, a 3-message active path, 1 sibling
+      branch. Three real defects surfaced that a visual read would not have: no
+      public initializer takes a `sequence` (it is `LedgerEvent(record:sequence:)`,
+      because nothing above the seam may choose one); the file relied on `UIKit`
+      re-exporting Foundation; and top-level `var`s are `@MainActor`-isolated
+      under Swift 6 while a free `func` is not, so the log builder had to become a
+      value type. `ConversationView` also became the **exhaustive** `switch` §11
+      calls the showpiece — it had a `default: "NOT HANDLED"`, which the new log's
+      `.failed` branch would have rendered. *Only the three-line
+      `PlaygroundSupport` live-view tail remains CLI-unverifiable.*
+- [x] **Comment truth pass:** `NormalizeAppleErrors`' unwrap comment and
       `ToolObservation`'s status comment gain the one clause A1 makes true
       ("the driver emits the `.failed` record from its catch path"). *(The
       audit's B5/B6 comment fixes landed 2026-08-13 with batch B, ahead of
-      this plan.)*
+      this plan.)* Both done, each stating what was *aspirational* before A1
+      rather than only what is true now — the paraphrase-don't-quote rule, so the
+      next retired-phrase sweep does not re-report a fixed site.
 
-**Review gate:** both suites green with the new tests; mutations run and
-caught; D38–D43 reviewed with the Phase 0 evidence in hand and promoted or
-revised; A-findings closed against the audit's wording; rev 10 items 1–3
-confirmed still accurate after the fixes.
+**Review gate:** ✅ **passed 2026-08-15.** Both suites green with the new tests
+(**429**: 406 + 23, warning-free) **on both substrates** — `swift test` on the
+macOS 27 host and `xcodebuild` on the iOS 27 simulator. Five mutations run, five
+caught, all reverted. D44 resolved; D38–D43 reviewed and **promoted to Accepted**;
+four new decisions taken (D46–D49) — three of which correct gaps in D39/D41/D42
+rather than merely confirming them. A-findings closed, with **two of the audit's
+characterisations corrected by measurement** (A2's mechanism, and A1's duration
+attribution). Rev 10 items 1–3 confirmed accurate; item 8 is now determined by
+D44's choice.
 
 ---
 
@@ -601,14 +715,14 @@ Item 4 is **already decided** and awaits only the wording pass.
    **interleaving**, not a coding slip, can make the store write a log that
    quarantines under row 5 forever — and an app is invited by §6.5 to read
    non-empty `diagnostics` as evidence of damage or of a newer writer, which is
-   only sound if the store genuinely cannot contribute noise. If D44 adopts
-   `guard`, §9 gains one sentence for the write-boundary rule (a batch that
-   would be a conversation's first row must *be* its genesis, refused inside
-   the append transaction) and §6.5's property cites it — turning a maintained
-   property into an enforced one, which is tenet 1 applied to the persistence
-   seam. If D44 adopts `sticky`, the amendment is smaller but still owed:
-   §6.5 should say **where** the property is enforced, because "the store is
-   careful" is precisely the argument A3 falsified.
+   only sound if the store genuinely cannot contribute noise. **D44 adopted
+   `guard`, so the amendment is the larger of the two options:** §9 gains one
+   sentence for the write-boundary rule (a batch that would be a conversation's
+   first row must *be* its genesis, refused inside the append transaction) and
+   §6.5's property cites it — turning a maintained property into an **enforced**
+   one, which is tenet 1 applied to the persistence seam. Worth landing with the
+   reason D44 turned on: the property is about *logs*, so an in-memory guard could
+   never have been the right unit however carefully it was written.
 9. **§6.3 — the TLA+ aside points at the wrong layer, and there is now
    evidence.** The section says I1–I7 "are a page of TLA+/PlusCal if you want
    the formal version… model-checking I5 against random truncation is exactly
@@ -626,7 +740,22 @@ Item 4 is **already decided** and awaits only the wording pass.
    actor reentrancy transcribes into PlusCal rather than being interpreted into
    it. Appendix A's "Model-checking a chat app" line gains a better subject at
    the same time.
-10. Anything Phases 1–3 surface — logged here as discovered.
+10. **§7.4 — "deltas hop to the main actor at display cadence (~a frame)" needs
+    one clause** (from D48, Phase 0). The wording reads as though the projection
+    must run a timer, and it should not: `@Observable` + SwiftUI already coalesce
+    invalidations per frame, so a timer buys no smoothness — it buys less
+    projection *work*. Say that the cadence is a work-reduction knob whose default
+    is immediate application, and that "~a frame" is the observation system's
+    guarantee rather than the projection's. Only land it if Phase 2's measurement
+    supports the default; otherwise D48 is revised instead and this item drops.
+11. **§7.6 — a note that a failed invocation's *duration* is often unreportable**
+    (from A1's measurement, Phase 0). §7.6 says the record carries duration, which
+    is true of a completed invocation and frequently false of a failed one: when a
+    tool call is the model's first action the framework vends no snapshot before
+    the throw, so nothing about the call is ever observed and only its *name* is
+    recoverable. One sentence, because an app reading `duration == nil` should know
+    it means "not observed" rather than "instantaneous". Pairs with item 1.
+12. Anything Phases 1–3 surface — logged here as discovered.
 
 ---
 
@@ -667,12 +796,17 @@ Item 4 is **already decided** and awaits only the wording pass.
 
 | Obligation | Suite / evidence | Status |
 |---|---|---|
-| A1: failed tool invocation recorded (`.failed`, name, unwrapped terminal) | — | ⬜ |
-| A2: `argumentsJSON` parses as JSON under `.full` | — | ⬜ |
-| A3: delete vs new starter — no genesis-less rows, under the D44 remedy | — | ⬜ |
-| A3: the interleaving that falsified the tombstone — starter's existence read *before* the delete, its `reserve` *after* completion | — | ⬜ |
+| A1: failed tool invocation recorded (`.failed`, name, unwrapped terminal) | `GenerationDriverTests.failedToolInvocationIsRecorded` | ✅ 2026-08-15 |
+| A1: the record lands even when the call was never observed (no fabricated duration) | `GenerationDriverTests.unobservedFailedCallIsStillRecorded` | ✅ 2026-08-15 |
+| A2: `argumentsJSON` is **order-stable** JSON — the audit's "parses as JSON" test passes against the bug | `GenerationDriverTests.argumentsAreOrderStableJSON` | ✅ 2026-08-15 |
+| A3: delete vs new starter — no genesis-less rows, under D44's `guard` | `StoreDeletionTests.starterRacingTheDeleteIsRefused` | ✅ 2026-08-15 |
+| A3: a starter during delete's cancel-and-wait (covered by single-flight, *not* the guard) | `StoreDeletionTests.starterDuringTheWindDownLeavesNothing` | ✅ 2026-08-15 |
+| A3: the interleaving that falsified the tombstone — starter's existence read *before* the delete, its `reserve` *after* completion | `StoreDeletionTests.staleExistenceReadIsRefused` | ✅ 2026-08-15 |
+| A3: the write boundary refuses a non-genesis first row, and needs no genesis on a later batch | `PersistenceAppendTests.genesislessFirstRowIsRefused` / `.laterBatchNeedsNoGenesis` | ✅ 2026-08-15 |
+| A3: a genesis-less log **already on disk** still reads as `unknownConversation` | `StoreLifecycleTests.genesislessLogIsUnknown` (via `PrewrittenStore`) | ✅ 2026-08-15 |
 | A3: TLC reproduces the shipped bug (`Fix = "none"` fails) — the model's calibration, re-run when the await structure changes | `Formal/LedgerStore.tla` | ✅ 2026-08-15 |
-| A4: wrapped cancellation not recorded as failure (reachable half) | — | ⬜ |
+| A4: wrapped cancellation not recorded as failure (reachable half) | `GenerationDriverTests.spuriousCancellationIsNotAStop` | ✅ 2026-08-15 |
+| Playground: the example compiles **and runs** against public-only API | scratch SwiftPM target over `LedgerKit` (not in-repo) | ✅ 2026-08-15 |
 | P2 over the real overlay, no assertion changed | — | ⬜ |
 | Display cadence independent of flush cadence | — | ⬜ |
 | Overlay flips state only; full-partial assembly exact (clause 1) | — | ⬜ |
@@ -691,18 +825,23 @@ Item 4 is **already decided** and awaits only the wording pass.
 
 | # | Decision | Status |
 |---|---|---|
-| D38 | The store notifies via an internal `AsyncStream`; the projection subscribes; unbounded buffering (the `GenerationChannel` argument) | **Proposed** 2026-08-13 |
-| D39 | Deltas cross by value (pre-buffer, at signal receipt); everything else by `.changed` invalidation + re-pull; no tool-record shape | **Proposed** 2026-08-13 |
-| D40 | The overlay flips `.interrupted → .streaming` and shows the live set's value as the full partial; the projection assembles folded + accumulated; P2 clause 1 polices the assembly | **Proposed** 2026-08-13 |
-| D41 | `conversationList` by store notification + `conversationSummaries()` re-pull; **GRDB `ValueObservation` deliberately not wired**; seam stays six verbs; ADR-003 amended to record the declined exception | **Proposed** 2026-08-13 — deviates from ADR-003 rule 4's and M6-PLAN handoff 2's sketches; explicit gate sign-off wanted |
-| D42 | Two public types (`ConversationProjection`, `ConversationListProjection`); mapping + display cadence as init parameters; no facade | **Proposed** 2026-08-13 |
-| D43 | The exit-criterion preview lives in the `Projection` app target as the demo's skeleton; the Playground stays a reducer example | **Proposed** 2026-08-13 |
-| D44 | **A3's remedy.** The 2026-08-13 tombstone is withdrawn as *the correctness argument* — TLC falsifies it (`Formal/`). Choose `guard` (refuse a non-genesis first row inside the append transaction) or `sticky` (tombstone never cleared). Recommendation: `guard`, keeping a tombstone only as a cheap early `unknownConversation` affordance | **Open** 2026-08-15 — owner choice; blocks Phase 0's A3 item |
-| D45 | `Formal/` is a repo artifact, not a scratch spike: TLA+/PlusCal models of the store's interleavings, calibrated by requiring TLC to reproduce a known-real bug before any of its other results are believed. Not wired into CI (no Java in the toolchain contract); re-run by hand when `ConversationStore`'s await structure changes | **Proposed** 2026-08-15 |
+| D38 | The store notifies via an internal `AsyncStream`; the projection subscribes; unbounded buffering (the `GenerationChannel` argument) | **Accepted** 2026-08-15 (proposed 08-13) |
+| D39 | Deltas cross by value (pre-buffer, at signal receipt); everything else by `.changed` invalidation + re-pull; no tool-record shape | **Accepted as amended** 2026-08-15 — **superseded in part by D47**: the delta payload is the *cumulative* shown partial, not a suffix |
+| D40 | The overlay flips `.interrupted → .streaming` and shows the live set's value as the full partial; the projection assembles folded + accumulated; P2 clause 1 polices the assembly | **Accepted** 2026-08-15 — D47 removes the assembly step, so clause 1 now polices a value the store computed |
+| D41 | `conversationList` by store notification + `conversationSummaries()` re-pull; **GRDB `ValueObservation` deliberately not wired**; seam stays six verbs; ADR-003 amended to record the declined exception | **Accepted** 2026-08-15 — deviation signed off; **completed by D46**, which supplies the store verb this decision assumed existed |
+| D42 | Two public types (`ConversationProjection`, `ConversationListProjection`); mapping + display cadence as init parameters; no facade | **Accepted** 2026-08-15 — cadence default revised by D48 |
+| D43 | The exit-criterion preview lives in the `Projection` app target as the demo's skeleton; the Playground stays a reducer example | **Accepted** 2026-08-15 |
+| D44 | **A3's remedy: `guard`, adopted alone.** Refuse a non-genesis first row inside the append transaction; the tombstone is dropped entirely, not even kept as an affordance. The deciding argument: `guard` is a claim about the **log**, both tombstones are claims about one **process's memory**, and §6.5's healthy-log property is a property of logs — so enforcement belongs where logs are written, and a retained tombstone would only invite the next reader to mistake it for the protection | **Accepted** 2026-08-15 |
+| D45 | `Formal/` is a repo artifact, not a scratch spike: TLA+/PlusCal models of the store's interleavings, calibrated by requiring TLC to reproduce a known-real bug before any of its other results are believed. Not wired into CI (no Java in the toolchain contract); re-run by hand when `ConversationStore`'s await structure changes | **Accepted** 2026-08-15 |
+| D46 | **The store gains a second read verb**, `conversationSummaries()`, **internal** like `liveGenerations`. D41 assumed it existed; it did not — the index read lived only on the `PersistenceStore` seam, and D28 says the store exposes exactly one read verb. §11 is satisfied because it forbids *synchronous* reads, and an `async` summaries verb has `conversation(_:)`'s shape exactly. Internal keeps D42's public surface at two types; ADR-003 rule 4 is untouched, since that caps the **seam**, not the store | **Accepted** 2026-08-15 |
+| D47 | **The feed carries the cumulative shown partial, not a suffix.** D39's accumulate-and-reconcile shape has two holes: a flush landing between a `.delta` and a `.changed` re-pull puts the same text in both the base partial and the accumulator (**double-counted** — D40's own named wrong shape, arriving through the feed rather than the overlay), and a projection created *mid-generation* (list → detail navigation, an ordinary case) starts with an empty accumulator and needs the base partial, so the two cases want opposite rules. The store already holds both halves (folded partial + `DeltaBuffer.text`), so it computes the whole partial trivially; the projection's rule becomes one idempotent assignment. Cost is one string copy per delta arrival — boring and measurable, against a correctness hazard that would otherwise need a rule in three places | **Accepted** 2026-08-15 |
+| D48 | **Display cadence defaults to `.zero`.** SwiftUI already coalesces `@Observable` invalidations per frame, so a ~16 ms timer buys no smoothness — it buys less *projection work* (one `overlay_live` + tree rebuild per delta rather than per frame), which is a different and unmeasured benefit. A non-zero default also means every app pays a latency floor and every test injects `.zero`, and "the default is the thing tests don't use" is a smell. The knob stays; **Phase 2 counts `overlay_live` invocations at both settings** so its value is measured rather than assumed. Rev 10 item 11 if §7.4's "~a frame" wording needs the note | **Accepted** 2026-08-15 |
+| D49 | **The overlay is made structurally unable to touch anything but state.** `MessageTree` gains a narrow internal state-setting mutation rather than the overlay rebuilding a tree through `init(nodes:rootChildren:)`. P2's "more than its state overlaid" clause then becomes belt-and-braces instead of the only defence — tenet 1 applied to the read side, the same move `FoldedMessageState` already makes one layer down | **Accepted** 2026-08-15 |
 
 ## 10. Status log
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
 | 2026-08-13 | **Plan drafted** at the M6 boundary | 415 (392 + 23) | Drafted from the M6 boundary audit. Phase 0 carries the audit's A1–A4 (A1/A3 owner-approved 2026-08-13); rev 10 inventory seeded with one item already decided (DoD-2 → PCC). Batch B's mechanical staleness fixes (ROADMAP header/banner/beta-track/cut-line, ADR index, two stale code comments) landed the same day, ahead of Phase 0 |
+| 2026-08-15 | **Phase 0 done** — the audit's A1–A4, D44 resolved, Playground rewritten | **429 (406 + 23)** | Both substrates green (macOS 27 host + iOS 27 simulator). Five mutations run, five caught. D38–D43 promoted to Accepted; D44 resolved as **`guard` alone**; **D46–D49 taken**, three of which fix gaps rather than confirm the plan: D41 named a store verb that did not exist (D46), D39's suffix-accumulation double-counts and cannot handle a projection created mid-generation (D47), and D42's ~16 ms cadence default duplicates work SwiftUI already does (D48). **Two audit characterisations were corrected by measurement.** A2 is not "the field held unparseable text" — Apple's `debugDescription` *is* JSON, so the test this plan specified passes against the bug; the real defect is **dictionary-order instability** (three processes, three orderings), the per-process hasher seed reaching a durable audit field. And A1's duration is attributable only when a snapshot preceded the throw, which for a tool called as the model's first action never happens. The recurring lesson, now from the other direction: **an audit finding is an empirical claim too** |
 | 2026-08-15 | Pre-Phase-0 spike: generated-log sweeps + `Formal/` | 420 (397 + 23) | **Two additions, neither on the critical path, one of which changed a decision.** (1) `LogGenerator.swift` / `GeneratedLogSweepTests.swift` — bounded-exhaustive generated logs over a 26-shape alphabet, closing the corpus's shape-diversity gap (every prior input was a subsequence of ten hand-written fixtures). Four oracles, one new: **containment**, which makes I2's "reduction continues as if the event were absent" executable for the first time. Tiered — length 3 (17,576 logs, ~1s) always, length 4 (456,976, ~25s) behind `LEDGERKIT_DEEP=1`, because the rest of the suite runs in ~1.2s. Found no bugs; mutation-tested to prove the containment oracle is not vacuous. (2) `Formal/LedgerStore.tla` — **TLC reproduced A3 in ten states and then falsified the proposed tombstone fix** (D44, rev 10 items 8–9) |

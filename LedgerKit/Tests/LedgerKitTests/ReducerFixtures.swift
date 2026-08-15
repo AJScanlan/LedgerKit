@@ -238,16 +238,26 @@ struct Log {
     /// - **A foreign event.** `append` rejects the whole batch, by design — it
     ///   refuses to manufacture the cross-stream contamination §6.6 row 4 exists
     ///   to detect.
+    /// - **No genesis.** The write boundary refuses a conversation's first row
+    ///   unless it *is* the genesis (M7-PLAN D44), so the store cannot express a
+    ///   log that opens with anything else — which is the point: such a log
+    ///   quarantines under §6.6 row 5 forever, and §6.5's healthy-log property
+    ///   promises the store never writes one. Reading the exclusion off the log's
+    ///   own first row keeps it derived rather than asserted.
     ///
     /// Excluding these is not a weaker test; it is the honest scope of the claim
     /// "a log survives the store", and stating it here keeps the exclusion from
     /// being a hard-coded list of fixture names that silently goes stale.
     var isStoreReplayable: Bool {
+        // An empty log is replayable — `append([])` is a documented no-op, and
+        // `empty` is a fixture. Only a log that *has* a first row owes it being a
+        // genesis.
+        if case .decoded(let first)? = rows.first, !first.payload.isGenesis { return false }
         // Enumerated rather than compared against `Array(1...count)`: that range
         // traps for an empty log, and `empty` is a fixture. A trapping helper is
         // worse than a failing one — it takes the whole test process down and
         // reports as a signal rather than as an expectation.
-        rows.enumerated().allSatisfy { offset, row in
+        return rows.enumerated().allSatisfy { offset, row in
             guard case .decoded(let event) = row else { return false }
             return event.sequence == Int64(offset + 1) && event.conversationID == conversation
         }

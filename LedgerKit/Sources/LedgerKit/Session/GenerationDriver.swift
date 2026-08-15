@@ -215,6 +215,41 @@ public actor GenerationDriver: GenerationDriving {
             // below, where a user's stop would be recorded as a failure.
             return .cancelled
         } catch {
+            // **A stop is never a failure, whatever shape it arrives in** (M7
+            // Phase 0 A4; §7.5). Checked *first*, ahead of everything below,
+            // because a cancellation that reaches this arm wrapped in some
+            // provider's error — a `ToolCallError` around a `CancellationError`,
+            // say — would otherwise be normalized into `.failed` and recorded as
+            // a failure for something the user explicitly did. §7.5's rule is
+            // "never assume a stream reports its own cancellation"; this is its
+            // contrapositive, on the arm that catches everything else.
+            //
+            // ⚠️ **Honest limit, recorded rather than implied** (§7.3's
+            // precedent): the *wrapped* case may be unreachable end-to-end,
+            // because a cancelled `ResponseStream` tends to end silently before
+            // any error escapes. What is reachable and tested is the dual — an
+            // *uncancelled* `ToolCallError(underlyingError: CancellationError)`
+            // still lands `.failed`, since a provider throwing spurious
+            // cancellation is not a user pressing stop.
+            if Task.isCancelled { return .cancelled }
+
+            // **§8's "two facts, two events", made true** (M7 Phase 0 A1).
+            // Normalization deliberately *unwraps* `ToolCallError` and classifies
+            // the error underneath on its merits — a tool whose network call
+            // timed out must give the user a Retry, not a tool-shaped mystery —
+            // and that unwrapping discards the one thing only this wrapper knows:
+            // which tool failed. §8 says nothing is lost because "a tool failed"
+            // has its own channel; until this line, it did not. `ToolRecord`
+            // has carried a `.failed` case since M1 that nothing could ever emit.
+            //
+            // The peek lives here rather than in `normalize` because normalize is
+            // pure and holds no channel — and it must come *after* the
+            // cancellation check, so a genuine stop does not also mint a failed
+            // record for a tool that was merely interrupted.
+            if let record = tools.failureRecord(for: error) {
+                channel.emit(.toolRecord(record))
+            }
+
             // §7.2: every failure after the store's start append is an
             // `Outcome`, including a request-time one that produced no tokens.
             // Those land as `.failed(partial: "")` — an empty failed bubble that
@@ -357,6 +392,10 @@ struct ToolObservation {
     /// monotonic because it is a `ContinuousClock`, not the wall clock a long
     /// generation might see adjusted.
     private var firstSeen: [String: ContinuousClock.Instant] = [:]
+    /// Call id → tool name, kept so a *failed* invocation can be attributed to an
+    /// observed call (``failureRecord(for:)``). The framework's error names the
+    /// tool; its entries key on the call, so bridging the two needs this index.
+    private var names: [String: String] = [:]
     private var arguments: [String: String] = [:]
     private var recorded: Set<String> = []
 
@@ -374,18 +413,43 @@ struct ToolObservation {
             case .toolCalls(let calls):
                 for call in calls where firstSeen[call.id] == nil {
                     firstSeen[call.id] = .now
+                    names[call.id] = call.toolName
                     if policy.recordsPayloads {
-                        arguments[call.id] = String(describing: call.arguments)
+                        // **`jsonString`, not `String(describing:)`** (M7 Phase 0
+                        // A2) — and the reason is not the obvious one.
+                        //
+                        // `GeneratedContent` conforms to
+                        // `CustomDebugStringConvertible` and not
+                        // `CustomStringConvertible`, so `String(describing:)`
+                        // resolved to `debugDescription`. That rendering *is*
+                        // JSON, so the field was never unparseable — what it was
+                        // is **unstable**: `debugDescription` emits an object's
+                        // keys in dictionary order, so the same arguments recorded
+                        // in two processes produce different bytes (measured:
+                        // three runs, three orderings). Swift's hasher seed varies
+                        // per process — the leak `Reduce/` is forbidden from,
+                        // arriving through Apple's API into a durable log, where a
+                        // record that disagrees with itself across launches is
+                        // worse than one that fails to parse.
+                        //
+                        // `jsonString` is documented, order-preserving, and was
+                        // stable across the same three runs.
+                        arguments[call.id] = call.arguments.jsonString
                     }
                 }
             case .toolOutput(let output) where !recorded.contains(output.id):
                 recorded.insert(output.id)
                 completed.append(ToolRecord(
                     name: output.toolName,
-                    // The framework surfaces no per-call status: a tool that
-                    // threw becomes a `ToolCallError` on the *response*, which
-                    // ends the generation rather than producing an output entry.
-                    // An output entry therefore means it succeeded.
+                    // The framework surfaces no per-call status: a tool that threw
+                    // becomes a `ToolCallError` on the *response*, which ends the
+                    // generation rather than producing an output entry. An output
+                    // entry therefore means it succeeded — and the failed half is
+                    // emitted from the driver's catch path instead, by
+                    // ``failureRecord(for:)`` (M7 Phase 0 A1). Both statuses are
+                    // reachable; they simply arrive through different doors,
+                    // because the framework reports success as data and failure as
+                    // a thrown error.
                     status: .succeeded,
                     // ⚠️ **Canonicalized at birth, for ADR-001 R-5's reason,
                     // in the field R-5 explicitly exempted.** Its scope note
@@ -414,6 +478,58 @@ struct ToolObservation {
             }
         }
         return completed
+    }
+
+    /// The record for an invocation that **threw** (M7 Phase 0 A1; §7.6, §8).
+    ///
+    /// `nil` unless the error is a `ToolCallError` — every other failure happened
+    /// somewhere that is not a tool, and inventing a record for it would put a
+    /// fiction in an append-only log. The wrapper checked is the **outermost** one:
+    /// that is the invocation the session actually ran, where an inner
+    /// `ToolCallError` (representable, since the payload is `any Error`) would name
+    /// a tool this session never called.
+    ///
+    /// **The name is certain; the timing is not, and the record says so.** Apple's
+    /// entries key on a call *id* while its error names a *tool*, so attribution is
+    /// only unambiguous when exactly one observed-but-uncompleted call carries that
+    /// name. With two concurrent calls to the same tool there is no way to tell
+    /// which threw, so `duration` and `argumentsJSON` are left nil — "not
+    /// reported", which is what nil means everywhere else in this package, and
+    /// strictly better than a guessed measurement that will be read as fact for
+    /// the life of the log. The record still lands, because *that* the tool failed
+    /// is the fact §8 promises has its own event.
+    mutating func failureRecord(for error: any Error) -> ToolRecord? {
+        guard policy.recordsInvocations else { return nil }
+        guard let call = error as? LanguageModelSession.ToolCallError else { return nil }
+        let name = call.tool.name
+
+        // Iterating a dictionary's keys, which is normally the I1 hazard — safe
+        // here because order cannot reach the output: the result is used only to
+        // count, and to read the single element when the count is one.
+        let pending = firstSeen.keys.filter { !recorded.contains($0) && names[$0] == name }
+        let attributed = pending.count == 1 ? pending.first : nil
+        if let attributed { recorded.insert(attributed) }
+
+        return ToolRecord(
+            name: name,
+            status: .failed,
+            // ⚠️ Canonicalized at birth, exactly as the success path is, and for
+            // ADR-001 R-5's reason: a `ContinuousClock` measurement arrives at
+            // nanosecond precision while the wire form is integer milliseconds, so
+            // an uncanonicalized value means one thing in the store's fold-forward
+            // cache and another once it has been to disk.
+            duration: attributed.flatMap { id in
+                firstSeen[id].map { start in
+                    Duration(wireMilliseconds: (ContinuousClock.now - start).wireMilliseconds)
+                }
+            },
+            argumentsJSON: attributed.flatMap { arguments[$0] },
+            // No result to record: the tool threw instead of producing one. The
+            // *error* is the terminal's business (§8 normalizes what the tool
+            // threw); this event's business is that the invocation happened and
+            // did not succeed.
+            resultJSON: nil
+        )
     }
 
     private func outputText(_ output: Transcript.ToolOutput) -> String {

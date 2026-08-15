@@ -39,3 +39,21 @@ struct StubTool: Tool {
         arguments.value
     }
 }
+
+/// A tool that always throws — the other half of §7.6's `ToolRecord.Status`
+/// (M7 Phase 0 A1).
+///
+/// Throws a **`URLError`** specifically, so the test can assert two things at
+/// once: that a failed invocation reaches the ledger with `status: .failed`, and
+/// that the *terminal* carries the error from **inside** the wrapper. §8's rule is
+/// that a wrapper is transparent to normalization — "a tool whose network call
+/// timed out must give the user `transport(.timeout)` and a Retry, not an opaque
+/// tool-shaped mystery" — and a tool throwing something already unclassifiable
+/// could not distinguish unwrapping from failing to unwrap.
+struct FailingTool: Tool {
+    let description = "a tool that always fails, so a failed invocation can be observed"
+
+    func call(arguments: StubArguments) async throws -> String {
+        throw URLError(.timedOut)
+    }
+}

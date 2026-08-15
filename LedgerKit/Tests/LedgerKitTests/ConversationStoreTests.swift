@@ -106,14 +106,18 @@ struct StoreLifecycleTests {
     /// answer for the right reason: every subsequent append to it would
     /// quarantine under §6.6 row 5, so there is nothing a caller could usefully
     /// do with it.
+    ///
+    /// Seeded through ``PrewrittenStore`` rather than through the seam, because
+    /// since D44 the write boundary **refuses** to produce this shape — that
+    /// refusal is `WriteBoundaryTests`' subject, and this test's subject is what
+    /// the read side does with such a log when it arrives by some other route: a
+    /// partial restore, tampering, or a database written before the guard existed.
     @Test("a conversation with no valid genesis is unknown")
     func genesislessLogIsUnknown() async throws {
-        let backing = try SQLitePersistenceStore(.inMemory)
         var orphan = Log()
         orphan.append(.titleChanged("no genesis here"))
-        _ = try await backing.append(orphan.records, to: orphan.conversation)
 
-        let fixture = try StoreUnderTest(over: backing)
+        let fixture = try StoreUnderTest(over: PrewrittenStore(orphan))
 
         await #expect(throws: LedgerError.unknownConversation(orphan.conversation)) {
             try await fixture.store.conversation(orphan.conversation)
@@ -1376,6 +1380,169 @@ struct StoreDeletionTests {
         // And the slot is not left claimed on a conversation that no longer exists.
         #expect(await fixture.store.conversationsAwaitingStart.isEmpty)
         try await fixture.store.reserve(seed.conversation)
+    }
+
+    /// **A3, the finding two boundary audits and a model checker converged on**
+    /// (M6 audit 2026-08-13; TLA+ 2026-08-15; M7-PLAN D44).
+    ///
+    /// `deleteConversation`'s cancel-and-wait is not atomic with its `DELETE`, so
+    /// a *new* starter can interleave at either await and append into a
+    /// conversation whose rows are gone. `MAX(sequence)+1` then restarts at 1 and
+    /// the log begins with something that is not a genesis — rows that quarantine
+    /// under §6.6 row 5 for the rest of the log's life, which is exactly what
+    /// §6.5's healthy-log property says the store cannot write.
+    ///
+    /// The remedy is at the **write boundary**, not in this actor's memory, and
+    /// the distinction is what TLC established: an in-memory tombstone covers
+    /// *[delete entry, delete completion]* while the interval needing cover is
+    /// *[starter's existence read, starter's append]*. The third test below is the
+    /// interleaving that separates them.
+    ///
+    /// Two facts carried the damage past every in-memory check, both verified in
+    /// source: `events` has no foreign key to `conversations`, and `append`
+    /// validated only that each record named its own target.
+    @Test("a starter racing a committed DELETE cannot leave a genesis-less row")
+    func starterRacingTheDeleteIsRefused() async throws {
+        let latch = Latch()
+        let fixture = try StoreUnderTest(
+            over: ParkingStore(try SQLitePersistenceStore(.inMemory), parkingFirst: .delete, at: latch)
+        )
+        let convo = try await fixture.store.createConversation(title: "doomed")
+
+        let deleting = Task { try await fixture.store.deleteConversation(convo.id) }
+        // Parked *after* the DELETE committed: the rows are gone, and
+        // `deleteConversation` has not returned, so its cache eviction has not
+        // run either. A starter arriving now reads a cached fold that says the
+        // conversation exists — which is the stale-read hazard an `await` inside
+        // an actor creates, and the reason this is a rendezvous rather than a
+        // sleep (§10.4).
+        await latch.waitForArrival()
+
+        let starting = Task {
+            try await fixture.store.send("q", in: convo.id, using: ScriptedDriver(saying: "unreachable"))
+        }
+        await #expect(throws: LedgerError.unknownConversation(convo.id)) { try await starting.value }
+
+        await latch.release()
+        try await deleting.value
+
+        // **The throw above is not the guarantee — this is** (measured, by
+        // removing the guard). Without D44 the `send` *still* throws
+        // `unknownConversation`, by a longer route: the append lands at sequence
+        // 1, `foldForward` sees a tail that does not continue the cache and drops
+        // it (D29), the rehydration read reloads cold, and the reloaded log has no
+        // genesis. Same error, junk rows on disk. So a test asserting only the
+        // throw would have passed against the bug, which is precisely how this
+        // one nearly got written.
+        #expect(try await fixture.rows(of: convo.id).isEmpty)
+        #expect(try await fixture.backing.conversationSummaries().isEmpty)
+        // And the store is still usable — a refused batch must not wedge the
+        // single-flight slot it reserved.
+        try await fixture.store.reserve(convo.id)
+        await fixture.store.release(convo.id)
+        _ = try await fixture.store.createConversation(title: "after")
+    }
+
+    /// The same race entered through delete's **other** await: the one where it is
+    /// waiting out the previous generation's wind-down (§9's cancel-first).
+    ///
+    /// Distinct from the test above because the DELETE has *not* committed here —
+    /// the conversation still has rows — so the write boundary does not fire and
+    /// the append legitimately succeeds. What must then hold is the older
+    /// guarantee: the DELETE, when it commits, erases those rows too, leaving
+    /// nothing behind. Included because "the guard covers it" would be the wrong
+    /// lesson to take from the first test; single-flight is what covers this one.
+    @Test("a starter arriving during delete's cancel-and-wait leaves nothing behind")
+    func starterDuringTheWindDownLeavesNothing() async throws {
+        let fixture = try StoreUnderTest()
+        let convo = try await fixture.store.createConversation(title: "doomed")
+        let paused = Latch()
+
+        let first = Task {
+            try await fixture.store.send(
+                "q",
+                in: convo.id,
+                using: ScriptedDriver([.delta("half"), .pause(paused), .delta("rest")])
+            )
+        }
+        await paused.waitForArrival()
+
+        // Delete cancels the running generation and waits on its task; the wait
+        // is an await, so a second starter can enter here.
+        let deleting = Task { try await fixture.store.deleteConversation(convo.id) }
+        let second = Task {
+            try await fixture.store.send("again", in: convo.id, using: ScriptedDriver(saying: "unreachable"))
+        }
+
+        // Single-flight is the mechanism here: the first generation still holds
+        // the slot, so the second starter is turned away before it can append.
+        await #expect(throws: LedgerError.generationInFlight(convo.id)) { try await second.value }
+
+        try await deleting.value
+        #expect(try await first.value == .cancelled)
+        #expect(try await fixture.rows(of: convo.id).isEmpty)
+        #expect(try await fixture.backing.conversationSummaries().isEmpty)
+    }
+
+    /// **The interleaving that falsified the tombstone** (M7-PLAN D44, and the
+    /// test the M6 audit did not ask for because it did not know it was needed).
+    ///
+    /// The starter's existence read resolves *before* the delete begins, and its
+    /// `reserve` lands *after* the delete has run to completion. Under the
+    /// proposed `deleting: Set<ConversationID>` tombstone — set at
+    /// `deleteConversation`'s entry, cleared on completion — this starter meets
+    /// **no guard at all**: its stale read says the conversation exists, the
+    /// tombstone says no deletion is in progress, and both are true statements
+    /// about moments that never overlapped. TLC produces the trace with
+    /// `deleting = FALSE`, `convExists = FALSE`, deleter terminated.
+    ///
+    /// Reaching it needs the starter's `existingFold` to *suspend*, which means a
+    /// cold fold cache — hence the explicit `evict`. Racing a real eviction would
+    /// be testing the scheduler (D29's lesson).
+    @Test("a starter whose existence read predates the delete is still refused")
+    func staleExistenceReadIsRefused() async throws {
+        let latch = Latch()
+        let sqlite = try SQLitePersistenceStore(.inMemory)
+        let fixture = try StoreUnderTest(over: ParkingStore(sqlite, parkingFirst: .events, at: latch))
+        let convo = try await fixture.store.createConversation(title: "doomed")
+
+        // Cold, so `existingFold` must go to disk and therefore must suspend.
+        await fixture.store.evict(convo.id)
+
+        let starting = Task {
+            try await fixture.store.send("q", in: convo.id, using: ScriptedDriver(saying: "unreachable"))
+        }
+        // Parked inside the first `events` read, holding rows that say the
+        // conversation exists — the stale value, captured before the delete.
+        await latch.waitForArrival()
+
+        // The delete runs to *completion* while the starter is parked: its own
+        // read is the second `events` call and is not parked, nothing is
+        // reserved so the start-wait returns immediately, and the DELETE commits.
+        try await fixture.store.deleteConversation(convo.id)
+
+        // Only now does the starter resume — with a fold that says "exists" and a
+        // conversation that does not.
+        await latch.release()
+        await #expect(throws: LedgerError.unknownConversation(convo.id)) { try await starting.value }
+
+        // **The interleaving was genuinely reached**, which is what distinguishes
+        // this test from the two above: the starter got past its existence check
+        // and *attempted* the append, so only the write transaction could still
+        // refuse it. Without this the test would pass just as happily if the
+        // starter had been turned away at its read, having never exercised D44.
+        let attemptedStart = fixture.attemptedAppends.contains { batch in
+            batch.contains { record in
+                if case .generationStarted = record.payload { true } else { false }
+            }
+        }
+        #expect(attemptedStart, "the starter must reach the write boundary, or this tests the wrong guard")
+        #expect(fixture.written.allSatisfy { record in
+            if case .generationStarted = record.payload { false } else { true }
+        }, "and the write boundary must refuse it")
+
+        #expect(try await fixture.rows(of: convo.id).isEmpty)
+        #expect(try await fixture.backing.conversationSummaries().isEmpty)
     }
 
     @Test("deleting an unknown conversation throws")

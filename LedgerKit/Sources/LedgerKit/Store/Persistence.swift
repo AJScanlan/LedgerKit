@@ -108,6 +108,69 @@ struct Snapshot: Sendable, Equatable {
     var payload: Data
 }
 
+/// Why the seam refused a batch **before writing any of it** (M7-PLAN D44).
+///
+/// Distinct from a backend *failure*, and the distinction is what the store acts
+/// on: a failure means storage broke and the caller gets
+/// ``LedgerError/persistenceFailure(description:)``; a refusal means the batch
+/// was never writable, and the caller gets the error describing *why*. Wrapping
+/// one as the other would hand an app the wrong affordance — "the disk failed"
+/// for a conversation that simply does not exist.
+///
+/// Defined here rather than inside the one conformance on purpose. Both cases are
+/// **seam contracts**, stated in ``PersistenceStore/append(_:to:)``'s
+/// documentation, so every conformance owes them and the `ConversationStore` can
+/// translate them without knowing which backend it holds — ADR-003 rule 1 keeps
+/// GRDB's types below this line, and a LedgerKit-defined error at the seam is not
+/// GRDB leaking.
+enum PersistenceRefusal: Error, Equatable {
+
+    /// A record in the batch names a different conversation than the one being
+    /// appended to. A caller bug: the store always passes matching records, so
+    /// nothing translates this and it surfaces as a persistence failure.
+    case conversationMismatch(expected: ConversationID, found: ConversationID)
+
+    /// The batch would be this conversation's **first** rows without opening it —
+    /// the write-boundary rule (§6.5's healthy-log property; M7-PLAN D44).
+    ///
+    /// Not "the batch omitted a genesis": a batch appended to a conversation that
+    /// already has rows never needs one. The condition is the conjunction —
+    /// *no rows exist* **and** *this batch does not create the conversation* —
+    /// which is why it can only be decided inside the write transaction, where
+    /// both halves are answered under the same lock.
+    ///
+    /// Reachable only by racing ``deleteConversation(_:)``, and the store
+    /// translates it to ``LedgerError/unknownConversation(_:)`` — the error the
+    /// caller would have received had the race not happened.
+    case missingGenesis(ConversationID)
+}
+
+// MARK: - Write-boundary policy
+
+extension LedgerEvent.Payload {
+
+    /// Whether this payload **opens** a conversation (SPEC §6.1's genesis event).
+    ///
+    /// The seam's write-boundary rule reads this, so it lives beside the seam
+    /// rather than inside one conformance: every backend owes the same refusal,
+    /// and a second copy of "which kind is genesis" is a second chance to
+    /// disagree with §6.1.
+    ///
+    /// Exhaustive rather than `if case .conversationCreated`, for
+    /// ``updatesIndex``'s reason: a future payload kind cannot be added without
+    /// someone deciding which side of this line it falls on.
+    var isGenesis: Bool {
+        switch self {
+        case .conversationCreated:
+            true
+        case .userMessageAppended, .instructionsChanged, .generationStarted,
+             .deltaAppended, .toolInvocationRecorded, .generationEnded,
+             .messageEdited, .activePathChanged, .titleChanged:
+            false
+        }
+    }
+}
+
 /// The six verbs LedgerKit needs from a storage backend. Implemented by the
 /// GRDB store (`SQLitePersistenceStore`); conformances must be `Sendable`
 /// because the `ConversationStore` actor calls across its isolation boundary.
@@ -141,6 +204,32 @@ protocol PersistenceStore: Sendable {
     /// tail into its in-memory state instead of re-reading (the
     /// `persisted ++ tail` shape P1 tests), and `last?.sequence` drives the
     /// every-500-events snapshot floor (§9).
+    ///
+    /// **The write boundary refuses a genesis-less first row** (M7-PLAN D44,
+    /// from the TLA+ model in `Formal/`). A batch that would be a conversation's
+    /// first rows must *be* its genesis; otherwise it is refused with
+    /// ``PersistenceRefusal/missingGenesis(_:)`` and nothing is written.
+    ///
+    /// This is where §6.5's healthy-log property stops being a claim about store
+    /// *discipline* and becomes an enforced invariant. A2's finding was that
+    /// discipline is not enough: `deleteConversation`'s cancel-and-wait is not
+    /// atomic with its `DELETE`, so a starter whose existence read resolved
+    /// *before* the delete and whose append lands *after* it meets no in-memory
+    /// guard at all — its read and the tombstone are both true statements about
+    /// moments that never overlapped. TLC produced that trace and then falsified
+    /// the in-memory remedy that had been proposed for it.
+    ///
+    /// The check lives **inside the write transaction** because that is the only
+    /// place where "does this conversation have rows" and "am I adding rows" are
+    /// answered together under SQLite's write lock, which makes the rule
+    /// interleaving-independent rather than dependent on a scheduler that
+    /// promises nothing. Two facts are what carried the damage past every
+    /// in-memory check and are worth knowing before relaxing this: `events` has
+    /// **no foreign key** to `conversations`, and the only other validation here
+    /// is that each record's own `conversationID` matches its target — never that
+    /// the conversation exists. So the artifact was `MAX(sequence)+1` restarting
+    /// at 1 and writing rows that reduce to nothing but `beforeGenesis` residue,
+    /// forever.
     ///
     /// **The index rides along.** Non-delta appends also update the
     /// conversation's `conversations` row in the same transaction — seeded by
