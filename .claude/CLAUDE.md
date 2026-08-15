@@ -45,6 +45,14 @@ swift test  --package-path Understudy
   This closed OQ3 and most of OQ5 at M3, seven more OQs at M4, and M6 Phase 0's session / error-constructibility / transcript questions. ⚠️ **The answers are tabulated — read `M4-PLAN.md` §2 and `M6-PLAN.md` §2a before re-reading the interface**, and re-read a citation before anything downstream depends on it (M4-PLAN §2 exists because one row was once wrong).
 - ⚠️ `ISO8601DateFormatter` **rounds** fractional seconds; `Date.ISO8601FormatStyle` **truncates**. Swapping to the (`Sendable`) format style shifts ~74% of timestamps 1 ms and breaks `WireDate.canonical`. The cached formatter's `nonisolated(unsafe)` is deliberate and measured (ADR-001 R-5, ~120 µs/construction) — don't "fix" it.
 - `LedgerKit.xcworkspace` ties together both packages, the `Projection` demo app, `Documentation/`, and a playground. Build the demo app from the workspace in Xcode (scheme `Projection`).
+- **TLA+ models live in `Formal/`** (M7, D45) — `ConversationStore`'s interleavings only; the reducer is deliberately *not* modelled (it is pure and already swept exhaustively in real code). The whole encoding is one rule: **a PlusCal label is an `await`**, so actor reentrancy transcribes rather than being interpreted. Needs `export PATH="/opt/homebrew/bin:$PATH"` (bare `java` is the macOS stub and errors) and `~/.tla/tla2tools.jar`.
+
+  ```bash
+  java -cp ~/.tla/tla2tools.jar pcal.trans Formal/LedgerStore.tla
+  java -cp ~/.tla/tla2tools.jar tlc2.TLC -config LedgerStore_none.cfg LedgerStore.tla
+  ```
+
+  ⚠️ **Translate before every check** — TLC runs the translation, not your PlusCal. ⚠️ `_none.cfg` and `_tombstone.cfg` are **expected to fail**; that is the model's calibration. All four variants passing means it stopped reproducing A3 and should be distrusted until it does again (`Formal/README.md`).
 
 ## Architecture
 
@@ -90,6 +98,7 @@ Three more shared test-side landmarks, all added at **M4 Phase 4** — reuse the
 - **`Wire` (in `WireFormatTests.swift`) is now `internal`, not file-private.** It is the module's *only* exhaustive inventory of the wire surface (`allKinds`, `allOutcomes`, `allErrors`, `allToolRecords`), and the registry test depends on that: because every case is named there, **deleting an enum case is a compile error**. Never fork a second inventory; extend this one.
 - **`Registry/tags.json` + `RegistryTests.swift`** — the discriminator registry (ADR-001 D-3, now closed). Every tag and field key at every level, plus the reserved table, checked against what the codecs encode in *both* directions. Adding a payload kind or a field key means editing this file, ADR-001's R-3 table, and landing a corpus fixture — in the same change. `Registry/` is a second test resource beside `Corpus/` (see `Package.swift`), hand-edited and never recorded.
 - **`ProjectionChecks.swift`** — P2's predicate plus `LiveSet` / `LiveOverlay` / `identityOverlay`. **The overlay is a parameter**, which is the whole of "P2 scaffolding": M7 passes in the real `overlay_live` and changes no assertion. `referenceOverlay` there is a *control* (it proves the predicate is satisfiable with a non-empty live set) — do not mistake it for the production overlay or promote it out of the test target.
+- **`LogGenerator.swift` + `GeneratedLogSweepTests.swift`** (added 2026-08-15) — bounded-exhaustive *generated* logs, the complement to `Corpus.swift`'s hand-written ones: every corpus input is a subsequence of ten fixtures (§10 permits mutation only to *remove or split*), so no existing sweep reaches an ordering nobody wrote. Add a shape to `LogGenerator.alphabet` and it inherits every oracle, exactly as `Corpus.all` works. The one new oracle is **containment** — refolding without the quarantined rows must reproduce the fold — which makes I2's "reduction continues as if the event were absent" executable for the first time. ⚠️ Its limit: the universal predicates check the resulting *state*, never *which* quarantine reason fired, so reason-selection stays the hostile fixtures' job.
 
 ## Design tenets (constrain every change — SPEC §3)
 
@@ -181,6 +190,7 @@ Three more shared test-side landmarks, all added at **M4 Phase 4** — reuse the
 - **Test rhythm**
   - Test Driven Development
   - Do not mark a milestone done without all tests passing
+  - ⚠️ **The suite runs in ~1.2 s and that is a budget, not a coincidence.** A single 25 s sweep is 96% of total runtime. Tier any high-volume loop behind an env gate (`LEDGERKIT_DEEP=1`, following `LEDGERKIT_DEVICE`/`LEDGERKIT_RECORD`), and gate it with `.enabled(if:)` so it reports *skipped* — never a bare `guard`. Also measured: **`uuid(_:)` in `ReducerFixtures.swift` dominates bulk log construction** (`String(format:)` + `UUID(uuidString:)` per event, above the fold's own cost) — share log prefixes rather than rebuilding each log from genesis.
   - Reducer/spec work goes: audit → propose SPEC amendment → get approval → implement. **Rev 8 ratified at the M5 boundary**; the next amendment opens **rev 9** with a new appendix. The drafting pattern that worked at rev 7: write the proposed edits to a scratch draft, get sign-off item by item, *then* touch `SPEC.md`.
   - **When a SPEC revision lands, sweep `Sources/**` for each amendment's *retired wording*, not just for stale markers.** An appendix item usually quotes the sentence it replaces ("only when the generation never started") — grep sources for those phrases verbatim, then check ⚠️ markers, OQ numbers, and quoted spec text. Checking citations alone ("does §9 say what this comment claims") misses docs that assert the old contract without citing anything: rev 7 left three stale comments and rev 8 left the `LedgerError`/verb docs stating the superseded throw contract, and both were found by the *next* boundary audit rather than the sweep that should have caught them. The spec-side self-contradiction sweep already exists (M4-PLAN Phase 5) — this is its code-side half.
 - **Learn-by-doing handoffs**
