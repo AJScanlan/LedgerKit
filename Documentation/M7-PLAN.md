@@ -10,7 +10,7 @@ hierarchy, one overlay), §10.6 (P2), §11 (isolation sketch) ·
 [M6-PLAN.md](./M6-PLAN.md) §7 (the four inherited handoffs) · the **M6 boundary
 audit** (2026-08-13), whose findings A1–A4 are Phase 0 and whose rev 10 items
 seed §6.
-**Baseline:** M0–M6 done and audited, **415 tests green** (392 `LedgerKit` + 23
+**Baseline:** M0–M6 done and audited, **420 tests green** (397 `LedgerKit` + 23
 `Understudy`, warning-free, both substrates), SPEC **rev 9 ratified 2026-08-02**.
 The M6 boundary audit (2026-08-13) found one contract gap (A1: failed tool
 invocations leave no ledger trace), one data-fidelity bug (A2: `argumentsJSON`
@@ -18,6 +18,14 @@ holds a debug description), one store race (A3: delete versus a *new* starter),
 and one speculative cancellation door (A4) — **all folded into Phase 0 below**,
 because M7 is the milestone where the projection reads the store's every
 surface, and it must read a store that is actually correct.
+
+⚠️ **A3's remedy changed before Phase 0 started.** A TLA+ model of the store's
+delete-versus-start interleavings (2026-08-15, [`Formal/`](../Formal/README.md))
+reproduced A3 and then **falsified the tombstone the audit had proposed** — it
+covers the wrong interval, and clearing it on completion re-opens the window.
+Two alternatives verify; the choice is **D44, open**, and it gates Phase 0's A3
+item. Rev 10 items 8–9 follow from it. The same date added bounded-exhaustive
+generated-log sweeps to the reducer suite (+5 tests, hence the baseline above).
 **Spec work:** amendments open **rev 10**, which ratifies at the M7 boundary.
 The inventory is §6 — seeded from the audit, including one item **already
 decided** (DoD-2's restatement, owner sign-off 2026-08-13). The standing
@@ -99,7 +107,7 @@ phase below acts on it.
 | `conversationSummaries()` exists on the seam; ADR-003 rule 4 *anticipated* GRDB `ValueObservation` joining "at M7 as an `AsyncSequence`" — anticipated, not decided | ADR-003; M6-PLAN handoff 2 | D41 decides — and proposes **not** doing it (the store is the only writer, so store-side notification suffices and the seam stays six verbs). A deviation from two documents' sketches; flagged for gate sign-off |
 | **Audit A1**: a failed tool invocation leaves no `toolInvocationRecorded` — `ToolObservation` emits only on `toolOutput` (always `.succeeded`), and the driver's catch normalizes `ToolCallError` away, discarding `tool.name`. §8's "two facts, two events" is unimplemented; `ToolRecord.Status.failed` is dead wire surface. **Owner decision 2026-08-13: fix the code, not the spec** | Audit; `GenerationDriver.swift`, `NormalizeAppleErrors.swift` | Phase 0. The peek lives in the driver's catch arm (normalize is pure and has no channel); `ToolCallError.tool` is public, so the name is available at the catch site |
 | **Audit A2**: `argumentsJSON` records `String(describing: call.arguments)`; `GeneratedContent.jsonString` exists | Audit; `GenerationDriver.swift` | Phase 0, one line |
-| **Audit A3**: `deleteConversation`'s cancel-and-wait is not atomic with its DELETE — a *new* starter interleaving at delete's awaits appends into an erased conversation (`MAX(sequence)+1` restarts at 1 → genesis-less rows). **Owner decision 2026-08-13: deletion tombstone** | Audit; `ConversationStore.swift`, `SQLitePersistenceStore.swift` | Phase 0. "An atomicity argument is only as good as its unit" (rev 9, batch A) — A1(M6) widened the wait's unit; the unit still too small is delete's own awaits versus everything the actor admits between them |
+| **Audit A3**: `deleteConversation`'s cancel-and-wait is not atomic with its DELETE — a *new* starter interleaving at delete's awaits appends into an erased conversation (`MAX(sequence)+1` restarts at 1 → genesis-less rows). Owner decision 2026-08-13 was a deletion tombstone; **superseded 2026-08-15 — TLC shows the tombstone insufficient** (`Formal/`, D44) | Audit; TLA+ model `Formal/LedgerStore.tla`; `ConversationStore.swift`, `SQLitePersistenceStore.swift` | Phase 0, remedy now an open choice. "An atomicity argument is only as good as its unit" (rev 9, batch A) — M6's A1 widened the wait's unit, A3 widened it again, and the model's answer is that **no in-memory flag is the right unit at all**: the only place that can decide is the write transaction |
 | **Audit A4** (speculative): a stop landing while a tool executes can plausibly surface as `ToolCallError(underlyingError: CancellationError)` → generic catch → normalize → **`.failed`** for a user's stop | Audit | Phase 0: `Task.isCancelled` check in the generic catch arm before normalizing. The cancelled side may be end-to-end unreachable (like §7.3's fail-loud path); test the reachable half, record the honest limit |
 | The Playground hand-builds a tree and needs `@testable`; rewrite to `Conversation(reducing:)` requires Xcode (playgrounds are invisible to `swift build`) | Inherited M4 → M5 → M6 → here | Phase 0 — M7 is the first milestone that is in Xcode anyway (previews, the demo app target) |
 | `Projection/` must never import FoundationModels; the boundary is enforced mechanically, imports *and* type names, with vacuity guards | `ImportBoundaryTests` (M6 Phase 1) | Zero beta risk in this milestone is a *tested* property, not an intention. Tier 1 throughout except the Phase 3 pipeline test |
@@ -297,21 +305,75 @@ them (the D30 pattern), plus the Playground rewrite. No projection code yet.
       `call.arguments.jsonString`, in `ToolObservation` and in A1's new path.
       Assert under `.full` that the recorded value parses as JSON — the test
       the field's name always implied.
-- [ ] **A3 — the deletion tombstone.** `deleting: Set<ConversationID>` on the
-      store actor: set synchronously at `deleteConversation`'s entry (before
-      its first await), cleared on completion *and* on failure. `reserve(_:)`
-      and `record(_:in:)` check it first and throw
-      `unknownConversation` — the answer the caller would have gotten a
-      moment later anyway. The cancel-and-wait sequence is unchanged; the
-      tombstone is what makes its awaits safe to interleave.
-      **Test:** `ParkingStore` parks the DELETE (the harness gains a
-      `.delete` parking point if it lacks one); a concurrent `send` runs;
-      assert the send throws `unknownConversation`, **no genesis-less row
-      exists**, and the tombstone clears (a follow-up `createConversation`
-      succeeds). A second test parks the *old generation's wind-down* and
-      interleaves the send there — the window the audit actually traced.
-      Mutation: remove the tombstone check from `reserve` — the test must
+- [ ] **A3 — the remedy is an open decision (D44), because the tombstone does
+      not hold.** Model-checked 2026-08-15; the model, its four variants and
+      the counterexample traces are in [`Formal/`](../Formal/README.md).
+
+      **What was proposed** (owner decision 2026-08-13): `deleting:
+      Set<ConversationID>` on the store actor, set synchronously at
+      `deleteConversation`'s entry before its first await, checked by
+      `reserve(_:)` / `record(_:in:)`, **cleared on completion and on
+      failure**.
+
+      **Why it fails.** The tombstone covers *[delete entry, delete
+      completion]*. The interval that needs covering is *[starter's existence
+      read, starter's append]*. `send` resolves `existingFold` **before** a
+      suspension and calls `reserve` **after** it, with no re-check — so a
+      starter that read while the conversation existed, and reserves after the
+      delete finished and cleared the flag, meets no guard at all. Its stale
+      read says the conversation exists; the tombstone says no deletion is in
+      progress; both are true about moments that never overlapped. TLC produces
+      the trace with `deleting = FALSE`, `convExists = FALSE`, deleter
+      terminated.
+
+      Two facts carry the damage past every in-memory check, both verified in
+      source rather than assumed: **`events` has no foreign key to
+      `conversations`**, and **`append` validates only that each record's own
+      `conversationID` matches its target** — never that the conversation
+      exists or has a genesis.
+
+      **Reachability, honestly.** The trace needs the starter's `existingFold`
+      to suspend (cold fold cache) and its continuation to be scheduled after
+      the deleter completes. Swift guarantees no FIFO across continuations
+      resumed from different sources — a GRDB callback versus an actor hop — so
+      this is *permitted*, not forced. The window is as wide as a
+      snapshot-plus-suffix load, comfortably wider than a single DELETE. And
+      the objection survives the caveat: under the tombstone the invariant
+      holds only when the scheduler cooperates, and nothing in the code
+      requires it to.
+
+      **Two remedies verify** (state space exhausted, both):
+      - **`guard`** — inside the same write transaction that computes
+        `MAX(sequence)+1`, refuse a batch that would be a conversation's first
+        row without being its genesis. Interleaving-independent, because the
+        write transaction is the one place where "does this conversation have
+        rows" and "am I adding rows" are answered together under SQLite's write
+        lock. Also makes §6.5's healthy-log property *enforced* rather than
+        *maintained* (rev 10 item 8).
+      - **`sticky`** — the tombstone, never cleared. Costs an unbounded set of
+        poisoned identifiers for the process's lifetime.
+
+      **Recommendation: `guard`**, with the tombstone retained only if it earns
+      its keep as an early, cheap `unknownConversation` for the common case —
+      as an *affordance*, never as the correctness argument. Owner decides
+      (D44).
+
+      **Test:** unchanged in shape and still wanted — `ParkingStore` parks the
+      DELETE (the harness gains a `.delete` parking point if it lacks one); a
+      concurrent `send` runs; assert the send throws, **no genesis-less row
+      exists**, and a follow-up `createConversation` succeeds. A second test
+      parks the *old generation's wind-down* and interleaves the send there.
+      **Add a third the model demands and the audit did not:** the starter's
+      existence read resolves *before* the delete and its `reserve` lands
+      *after* the delete completed — the interleaving that falsified the
+      tombstone. Mutation: remove whichever check is adopted; the tests must
       catch it as junk rows or a healthy-log violation.
+
+      ⚠️ **Do not treat the model as the verification.** It says the shipped
+      code is wrong and that two candidate remedies close *this* property under
+      *these* abstractions (one conversation, no fold cache, no persistence
+      failures — the head of `LedgerStore.tla` lists them). The Swift tests are
+      still the evidence that the chosen remedy is what got written.
 - [ ] **A4 — the wrapped-cancellation door.** In the same catch arm, before
       A1's peek and the normalize: `if Task.isCancelled { return .cancelled }`.
       Defensive, per §7.5's "never assume a stream reports its own
@@ -480,7 +542,9 @@ wrote.
       the header line checked explicitly** (the M5 and M6 audits both caught
       it stale; it is now a named checklist item, not a hope); CLAUDE.md
       status rewritten with the M7 landmarks (`Projection/` no longer empty,
-      the feed's existence, the two public types, new test counts); this
+      the feed's existence, the two public types, new test counts, **the
+      `Formal/` models and the two test-side landmarks `LogGenerator.swift`
+      / `GeneratedLogSweepTests.swift` with its `LEDGERKIT_DEEP` gate**); this
       plan's §8 filled; §9/§10 logs closed.
 - [ ] Handoffs to M8/M9 (§7) verified against what actually landed.
 
@@ -531,7 +595,38 @@ Item 4 is **already decided** and awaits only the wording pass.
    earned its §11 lines): the spec already says "fed by the store" and "deltas
    hop at display cadence"; if D38/D39 add anything a *consumer* can observe,
    say it — otherwise no text change, and the spec stays implementation-silent.
-8. Anything Phases 1–3 surface — logged here as discovered.
+8. **§6.5 / §9 — the healthy-log property needs a stated enforcement point.**
+   Rev 8 established "store-written logs never quarantine" and rev 9 left it a
+   claim about store *discipline*. A3 shows discipline is not enough: an
+   **interleaving**, not a coding slip, can make the store write a log that
+   quarantines under row 5 forever — and an app is invited by §6.5 to read
+   non-empty `diagnostics` as evidence of damage or of a newer writer, which is
+   only sound if the store genuinely cannot contribute noise. If D44 adopts
+   `guard`, §9 gains one sentence for the write-boundary rule (a batch that
+   would be a conversation's first row must *be* its genesis, refused inside
+   the append transaction) and §6.5's property cites it — turning a maintained
+   property into an enforced one, which is tenet 1 applied to the persistence
+   seam. If D44 adopts `sticky`, the amendment is smaller but still owed:
+   §6.5 should say **where** the property is enforced, because "the store is
+   careful" is precisely the argument A3 falsified.
+9. **§6.3 — the TLA+ aside points at the wrong layer, and there is now
+   evidence.** The section says I1–I7 "are a page of TLA+/PlusCal if you want
+   the formal version… model-checking I5 against random truncation is exactly
+   what TLC is for." Both halves were testable claims and both came out the
+   other way. The reducer is pure, total and single-threaded, and is already
+   swept exhaustively *in the real code* — every fixture, every truncation,
+   every interior gap, and since 2026-08-15 generated logs as well — so a model
+   of it would restate the reducer, add an abstraction gap, and buy only shape
+   diversity that bounded-exhaustive Swift generation buys without one. Where
+   TLC actually paid is the layer §6.3 does not mention: the store's
+   concurrency, where it reproduced A3 in ten states in under a second and then
+   **falsified the remedy the audit had proposed**. Reword to point at
+   §6.5/§9's interleavings rather than §6.3's invariants, and record the
+   encoding that makes it cheap — *a PlusCal label is an `await`*, so Swift
+   actor reentrancy transcribes into PlusCal rather than being interpreted into
+   it. Appendix A's "Model-checking a chat app" line gains a better subject at
+   the same time.
+10. Anything Phases 1–3 surface — logged here as discovered.
 
 ---
 
@@ -574,7 +669,9 @@ Item 4 is **already decided** and awaits only the wording pass.
 |---|---|---|
 | A1: failed tool invocation recorded (`.failed`, name, unwrapped terminal) | — | ⬜ |
 | A2: `argumentsJSON` parses as JSON under `.full` | — | ⬜ |
-| A3: delete vs new starter — tombstone; no genesis-less rows | — | ⬜ |
+| A3: delete vs new starter — no genesis-less rows, under the D44 remedy | — | ⬜ |
+| A3: the interleaving that falsified the tombstone — starter's existence read *before* the delete, its `reserve` *after* completion | — | ⬜ |
+| A3: TLC reproduces the shipped bug (`Fix = "none"` fails) — the model's calibration, re-run when the await structure changes | `Formal/LedgerStore.tla` | ✅ 2026-08-15 |
 | A4: wrapped cancellation not recorded as failure (reachable half) | — | ⬜ |
 | P2 over the real overlay, no assertion changed | — | ⬜ |
 | Display cadence independent of flush cadence | — | ⬜ |
@@ -600,9 +697,12 @@ Item 4 is **already decided** and awaits only the wording pass.
 | D41 | `conversationList` by store notification + `conversationSummaries()` re-pull; **GRDB `ValueObservation` deliberately not wired**; seam stays six verbs; ADR-003 amended to record the declined exception | **Proposed** 2026-08-13 — deviates from ADR-003 rule 4's and M6-PLAN handoff 2's sketches; explicit gate sign-off wanted |
 | D42 | Two public types (`ConversationProjection`, `ConversationListProjection`); mapping + display cadence as init parameters; no facade | **Proposed** 2026-08-13 |
 | D43 | The exit-criterion preview lives in the `Projection` app target as the demo's skeleton; the Playground stays a reducer example | **Proposed** 2026-08-13 |
+| D44 | **A3's remedy.** The 2026-08-13 tombstone is withdrawn as *the correctness argument* — TLC falsifies it (`Formal/`). Choose `guard` (refuse a non-genesis first row inside the append transaction) or `sticky` (tombstone never cleared). Recommendation: `guard`, keeping a tombstone only as a cheap early `unknownConversation` affordance | **Open** 2026-08-15 — owner choice; blocks Phase 0's A3 item |
+| D45 | `Formal/` is a repo artifact, not a scratch spike: TLA+/PlusCal models of the store's interleavings, calibrated by requiring TLC to reproduce a known-real bug before any of its other results are believed. Not wired into CI (no Java in the toolchain contract); re-run by hand when `ConversationStore`'s await structure changes | **Proposed** 2026-08-15 |
 
 ## 10. Status log
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
 | 2026-08-13 | **Plan drafted** at the M6 boundary | 415 (392 + 23) | Drafted from the M6 boundary audit. Phase 0 carries the audit's A1–A4 (A1/A3 owner-approved 2026-08-13); rev 10 inventory seeded with one item already decided (DoD-2 → PCC). Batch B's mechanical staleness fixes (ROADMAP header/banner/beta-track/cut-line, ADR index, two stale code comments) landed the same day, ahead of Phase 0 |
+| 2026-08-15 | Pre-Phase-0 spike: generated-log sweeps + `Formal/` | 420 (397 + 23) | **Two additions, neither on the critical path, one of which changed a decision.** (1) `LogGenerator.swift` / `GeneratedLogSweepTests.swift` — bounded-exhaustive generated logs over a 26-shape alphabet, closing the corpus's shape-diversity gap (every prior input was a subsequence of ten hand-written fixtures). Four oracles, one new: **containment**, which makes I2's "reduction continues as if the event were absent" executable for the first time. Tiered — length 3 (17,576 logs, ~1s) always, length 4 (456,976, ~25s) behind `LEDGERKIT_DEEP=1`, because the rest of the suite runs in ~1.2s. Found no bugs; mutation-tested to prove the containment oracle is not vacuous. (2) `Formal/LedgerStore.tla` — **TLC reproduced A3 in ten states and then falsified the proposed tombstone fix** (D44, rev 10 items 8–9) |
