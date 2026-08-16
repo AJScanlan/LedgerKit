@@ -208,8 +208,17 @@ private struct ChannelSink: ScriptSink {
         )
     }
 
+    /// ⚠️ **The box type is Apple's, and it moved at Xcode 27 Beta 5.** Channel
+    /// metadata was `[String: any Sendable & Codable & Equatable]` through Beta 4
+    /// and is `[String: any ConvertibleToGeneratedContent]` now — the write side of
+    /// a change whose read side is `[String: GeneratedContent]` (see
+    /// `GenerationDriver.stopInfo(from:)`, which the same drop broke *silently*).
+    ///
+    /// `String` conforms via `Generable`, so this package's public vocabulary —
+    /// `Script.Step.reportMetadata([String: String])` — is unchanged. That is the
+    /// seam working: an Apple type moved and no consumer of `Understudy` can tell.
     func reportMetadata(_ values: [String: String]) async {
-        let boxed = values.mapValues { $0 as any Sendable & Codable & Equatable }
+        let boxed = values.mapValues { $0 as any ConvertibleToGeneratedContent }
         await channel.send(.response(action: .updateMetadata(boxed)))
     }
 }

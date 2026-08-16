@@ -303,18 +303,44 @@ public actor GenerationDriver: GenerationDriving {
     /// anywhere in the 27 SDK; `resolvedModelID` has the same standing. Both are
     /// per-provider conventions read from the usage metadata where a provider
     /// follows one, and **a nil must never read as a failure**.
+    ///
+    /// ⚠️ **That last sentence is why Beta 5 nearly cost this method silently.**
+    /// Metadata values were `any Sendable & Codable & Equatable` through Beta 4 and
+    /// are `GeneratedContent` now, so the `as? String` these two lines used to
+    /// perform did not stop compiling — it started *always failing*, and a
+    /// permanent nil is indistinguishable from the expected on-device nil the
+    /// paragraph above describes. Nothing in the suite could have caught it: the
+    /// surface tripwires pin `Transcript.Entry`, `Transcript.Segment` and the
+    /// channel's actions, not `Usage.metadata`, and every assertion about these
+    /// two fields expects nil on this substrate. The compiler's unrelated-cast
+    /// warning was the only witness.
+    ///
+    /// Generalizable, and worth more than the fix: **a tripwire pins what someone
+    /// thought to pin, so the warning-free build is itself a tripwire.** A beta
+    /// that turns a cast into a no-op is a behaviour change wearing a warning's
+    /// clothes.
     private func stopInfo(from usage: LanguageModelSession.Usage?) -> StopInfo {
         guard let usage else { return StopInfo() }
         return StopInfo(
-            stopReason: usage.metadata["stopReason"] as? String,
+            stopReason: usage.metadata["stopReason"].flatMap(string(from:)),
             usage: TokenUsage(
                 inputTokens: usage.input.totalTokenCount,
                 outputTokens: usage.output.totalTokenCount,
                 cachedInputTokens: usage.input.cachedTokenCount,
                 reasoningTokens: usage.output.reasoningTokenCount
             ),
-            resolvedModelID: usage.metadata["modelID"] as? String
+            resolvedModelID: usage.metadata["modelID"].flatMap(string(from:))
         )
+    }
+
+    /// A metadata value as text, or nil where the provider did not report a string.
+    ///
+    /// `try?` rather than a propagated throw for the reason the whole of §7.8 rests
+    /// on: these fields are *conventions*, so a provider putting a number where this
+    /// one expects a string is not an error the ledger should record — it is an
+    /// absent convention, which is what nil already means here.
+    private func string(from content: GeneratedContent) -> String? {
+        try? String(content)
     }
 
     // MARK: - Rehydration (§7.1)
