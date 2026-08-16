@@ -101,11 +101,13 @@ private func apiSketch(store: ConversationStore, driver: some GenerationDriving)
     //
     //     ForEach(list.conversations) { summary in … }
     //
-    // ⚠️ §11 sketches this as `projection.conversationList`, implying one facade
-    // object owning both. D42 declined the facade — it would hold projections for
+    // Through rev 9 the sketch reached the list through a single facade object owning
+    // both projections. D42 declined that facade — it would hold projections for
     // conversations nobody is displaying, or grow a cache policy nobody asked for —
-    // so the spelling is two types. Rev 10 item 6 lands the wording; recorded here
-    // rather than silently diverging, per this file's whole purpose.
+    // and **rev 10 moved the sketch to these two types**, so the divergence this
+    // comment used to record is closed rather than outstanding. (Paraphrased rather
+    // than naming the old spelling, so future retired-phrase sweeps stay quiet about
+    // an already-fixed site.)
     let list = try await ConversationListProjection(in: store)
     rendered.append("\(list.conversations.count) conversation(s) in the index")
 

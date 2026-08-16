@@ -1,6 +1,6 @@
 # LedgerKit v0.1 — Build Roadmap
 
-**Companion to:** [SPEC.md](./SPEC.md) — **rev 9 ratified 2026-08-02** at the M6 boundary (Appendix G). Further amendments open **rev 10**, which is collected across the M6 boundary audit and M7 and ratifies at the M7 boundary. (Rev 8: M5 boundary, 2026-07-28; rev 7: M4 boundary, 2026-07-26; rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
+**Companion to:** [SPEC.md](./SPEC.md) — **rev 10 ratified 2026-08-16** at the M7 boundary (Appendix H, thirteen items in five batches; nothing touches the wire). Further amendments open **rev 11**, which ratifies at the M8 boundary. (Rev 9: M6 boundary, 2026-08-02; rev 8: M5 boundary, 2026-07-28; rev 7: M4 boundary, 2026-07-26; rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
 **Target:** tagged `0.1.0` before iOS 27 GA (~Sept 2026). Estimate from spec §12: **4–6 weeks part-time**, assuming the ⚠️ beta verifications hold.
 **Sequencing strategy:** *pure core first* — build and fully test everything platform-agnostic (§6) before touching the beta-coupled session seam (§7).
 
@@ -226,19 +226,30 @@ The one OS-coupled module (§7). Expect one verification evening per beta — bu
 >
 > **SPEC rev 9** (Appendix G, six batches) **ratified at this boundary, 2026-08-02**. **Nothing touches the wire.**
 
-### M7 — Observable projection + `overlay_live`
-The `@MainActor @Observable` read side (§6.2, §7.4, §11).
+### ~~M7 — Observable projection + `overlay_live`~~ ✅ **DONE 2026-08-16**
+The `@MainActor @Observable` read side (§6.2, §7.4, §11). **452 tests green** (429 `LedgerKit` + 23 `Understudy`, warning-free, both substrates), and the `Projection` app target builds and runs.
 
-**Build order, decision log (D38–D43) and phase gates: [M7-PLAN.md](./M7-PLAN.md)** (drafted 2026-08-13 from the M6 boundary audit; opens with a hygiene phase carrying the audit's four code findings, and seeds the rev 10 inventory — which ratifies at this milestone's boundary).
+**Build order, decision log (D38–D49) and phase gates: [M7-PLAN.md](./M7-PLAN.md)** (drafted 2026-08-13 from the M6 boundary audit; opened with a hygiene phase carrying the audit's four code findings, and seeded the rev 10 inventory — **ratified at this boundary**).
 
-- `projection = overlay_live(reduce(persistedLog ++ unflushedTail, mapping))`, where `overlay_live` maps `.interrupted → .streaming` for in-flight `GenerationID`s only, identity otherwise.
-- **P2** (overlay correctness, §10.6): live set ⊆ open generations; crash recovery is the degenerate empty-live-set case (overlay disappears → `.interrupted` shows through). **The harness already exists** — M4 Phase 4 shipped `ProjectionChecks.swift` with the predicate parameterized over the overlay (`LiveOverlay`), swept over every truncation of every fixture with an empty live set, and with the predicate itself tested against deliberately wrong projections. **M7 supplies the real `overlay_live` as an argument and should need to change no assertion**; if it does, that is a signal worth stopping on. `referenceOverlay` in the test target is a *control*, not a draft implementation — do not promote it.
-- `conversationList` on the projection (not the store actor, which exposes no synchronous reads).
-- Deltas hop to main actor at *display* cadence (~a frame), independent of disk flush.
+~~- `projection = overlay_live(reduce(persistedLog ++ unflushedTail, mapping))`, where `overlay_live` maps `.interrupted → .streaming` for in-flight `GenerationID`s only, identity otherwise.~~ Landed as `Projection/Overlay.swift`'s `overlay(_:live:)` — a free `nonisolated` function beside `fold` and `classify`, since it is the third seam of the same pipeline.
+
+~~- **P2** (overlay correctness, §10.6) … **M7 supplies the real `overlay_live` as an argument and should need to change no assertion**~~ **The criterion held, and was verified by diff rather than by memory:** `ProjectionCheckTests.swift` is untouched and the only edit to `ProjectionChecks.swift` deletes a `LiveSet` typealias that `Projection/` now ships. `referenceOverlay` was not promoted.
+
+~~- `conversationList` on the projection (not the store actor, which exposes no synchronous reads).~~ Landed — but as **its own type**, `ConversationListProjection`, not a property of a facade (M7-PLAN D42; rev 10 item 6 lands §11's wording). GRDB `ValueObservation` was **considered and declined** (D41, ADR-003 amended): the store actor is the only writer in the process.
+
+~~- Deltas hop to main actor at *display* cadence (~a frame), independent of disk flush.~~ Independent of disk, yes — but "~a frame" turned out to be `@Observable`'s guarantee rather than something the projection should implement, so the cadence knob defaults to **immediate** and is a work-reduction valve (D48; rev 10 item 10).
 
 **Satisfies:** G7.
-**Exit:** P2 green; streaming renders smoothly in a preview driven by `ScriptedLanguageModel`; recovery = overlay vanishing, no recovery pass.
-**Beta risk:** none (pure projection over reducer output).
+**Exit:** ✅ P2 green over the real overlay, no assertion changed; ✅ recovery = overlay vanishing, with no recovery pass anywhere to point at (`RecoveryTests`, tier 1 — a crash needs no real session); 🟨 streaming renders in a preview driven by `ScriptedLanguageModel` — the preview is built, links both packages, launches and renders the full pipeline in the simulator; **the "smoothly" half is a human's eyeball check** and is the one exit item still open.
+**Beta risk:** none, and it is a *tested* property — `ImportBoundaryTests` fails if `Projection/` ever imports Foundation Models.
+
+> ### The milestone's real output was two bugs the tests could not have found, and two the spec was wrong about
+>
+> **Found only by running the whole pipeline** (Phase 3's tier-2 test, on its first run): the projection read the store's live set at `init` alone, so between `generationStarted` and the first delta it rendered **`.interrupted` for a generation that was actively running** — a flash of the crash state at the start of every generation, for however long the provider takes to say its first word. **P2 could not have caught it:** the predicate checks a projection against the live set it was handed, and an empty live set is self-consistent. The fix then introduced a second bug — the store's view is read *now* while a queued `.delta` was enqueued *earlier*, so stale notifications walked the text **backwards** — caught by the parallel suite and closed by one rule: a shown partial never shortens (sound because §7.3 makes partials append-only).
+>
+> **Found by mutation testing**, and both are claims this document's companions made about their own coverage: `Corpus.all` contained **no failed generation at all** (8 `.completed`, 2 `.cancelled`, 0 `.failed`), so nothing anywhere had ever swept the most complex `MessageState` case — the same finding M3 Phase 1 made about healthy logs, repeating one milestone later. And **P2's clause 1 is tautological against a live store**, because the overlay builds the shown partial *from* the live set; §10.6's stronger wording is a *store* obligation needing an independent oracle (rev 10 item 13).
+>
+> **Also corrected by measurement:** A2 was not "the field held unparseable text" — Apple's `debugDescription` *is* JSON; the defect was **dictionary-order instability** (three processes, three orderings), the per-process hasher seed reaching a durable audit field. And A3's remedy changed twice — TLC falsified the proposed tombstone, and the adopted `guard` lives in the write transaction because the property is about **logs**, not about one process's memory (D44).
 
 ### M8 — `Projection` demo app (the hero)
 The [Projection](../Projection) Xcode app (built from `LedgerKit.xcworkspace`, scheme `Projection`; earlier drafts of this roadmap called it "Scroll"). DoD-1 and DoD-2.

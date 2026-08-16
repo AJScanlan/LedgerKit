@@ -175,11 +175,19 @@ extension LedgerEvent.Payload {
 /// GRDB store (`SQLitePersistenceStore`); conformances must be `Sendable`
 /// because the `ConversationStore` actor calls across its isolation boundary.
 ///
-/// Deliberately *not* here: value observation of the index (an M4/M7 concern
-/// — GRDB's `ValueObservation` will feed the projection's
-/// `conversationList`, surfaced as an `AsyncSequence` when the projection
-/// needs it), and any transaction-shaping API beyond what these verbs
+/// Deliberately *not* here: any transaction-shaping API beyond what these verbs
 /// promise — callers get atomicity guarantees, never transaction handles.
+///
+/// **And value observation, which was considered at M7 and declined** (M7-PLAN D41;
+/// ADR-003's rule 4 amended to record it). This doc used to say GRDB's
+/// `ValueObservation` *would* feed the projection's conversation list as an
+/// `AsyncSequence`; it does not, and the reason is that the `ConversationStore`
+/// actor is the only writer in the process — database-level observation would
+/// watch for changes that can only originate one actor-hop away, which is a
+/// second and heavier mechanism to learn what the store already knew at the
+/// moment it did the writing. The projection is fed by store-side notification
+/// instead, so the seam stays at six verbs. If v0.2+ admits a second writer
+/// (a widget, an extension, sync), that is when observation earns its way in.
 protocol PersistenceStore: Sendable {
 
     /// Appends `records` to `conversation`'s log in **one transaction**, and

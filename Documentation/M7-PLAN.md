@@ -1,9 +1,9 @@
 # M7 Implementation Plan — Observable projection + `overlay_live`
 
-**Status:** 🟩 **Phases 0–3 done (2026-08-15/16) — 452 tests green** (429
-`LedgerKit` + 23 `Understudy`, warning-free, both substrates), and the `Projection`
-app target builds and runs. **Phase 4 (rev 10 ratification + alignment) is all that
-remains.** D38–D49 are **Accepted**; **D44 resolved as `guard`, adopted alone**;
+**Status:** ☑ **M7 COMPLETE 2026-08-16 — 452 tests green** (429 `LedgerKit` + 23
+`Understudy`, warning-free, both substrates), the `Projection` app target builds and
+runs, and **SPEC rev 10 is ratified** (Appendix H, thirteen items, five batches,
+nothing touching the wire). All four phases done; D38–D49 Accepted. D38–D49 are **Accepted**; **D44 resolved as `guard`, adopted alone**;
 D46–D49 were taken at the Phase 0 gate and fix gaps in D39/D41/D42 rather than
 merely confirming them. `Projection/` is no longer empty: it holds
 `overlay(_:live:)`, `LiveSet`, and both public types. The store has its feed
@@ -969,14 +969,44 @@ deviations).
 
 ### Phase 4 — Wrap-up: rev 10 ratification + alignment
 
-**Status:** ⬜ not started
+**Status:** ✅ **done 2026-08-16 — rev 10 ratified.** The inventory is finalized at **13 items in
+five batches** and drafted to a scratch file; every retired sentence was
+**re-verified against `SPEC.md` before drafting** (the rule M4-PLAN §2 exists for),
+and all 13 citations were confirmed accurate. Awaiting item-by-item sign-off — nothing
+in `SPEC.md` is touched until then. ROADMAP alignment and the handoff verification are
+done; CLAUDE.md waits for ratification so it does not have to claim a rev that has not
+landed.
 
-- [ ] §6's inventory finalized; draft to a scratch file; item-by-item
+- [x] §6's inventory finalized; draft to a scratch file; item-by-item
       sign-off; land in batches with the per-batch `Sources/**` retired-phrase
-      sweep; **ratify rev 10 at the boundary**.
-- [ ] ADR-003's D41 amendment landed beside the spec batch (ADR edits are not
-      spec edits, but the same sweep discipline applies).
-- [ ] Alignment: ROADMAP M7 struck through against its exit criteria — **and
+      sweep; **rev 10 ratified 2026-08-16** (Appendix H).
+
+      **Batches:** A (§7.6's tool obligations — items 1, 11) · B (the read side —
+      6, 7, 10) · C (enforcement points and TLC's real layer — 8, 9) · D (P2's
+      clause 1 — 13) · E (housekeeping — 2, 3, 4, 5).
+
+      ⚠️ **Nothing in rev 10 touches the wire** — no event kind, payload shape or
+      discriminator — confirmed item by item.
+
+      **The code-side sweep was run *before* drafting**, which is the reverse of the
+      usual order and paid for itself: it says which batches drag code edits along,
+      and it found one item where the *code is already right and the spec is wrong*.
+      - `GenerationDriver.swift:32` already describes the session cache as headroom
+        rather than as shipped — so **item 2 aligns the spec to the code**, and no
+        code edit rides along. (A pleasant inversion of the usual failure, where prose
+        outlives the behaviour it described.)
+      - `Policies.swift:43` quotes §7.4's retired "renders smoothly" wording — rides
+        with batch B.
+      - `ProjectionChecks.swift:10` and `ProjectionCheckTests.swift:127` both quote
+        §10.6's "concatenated deltas" — ride with batch D. ⚠️ Both are **comments**;
+        the no-assertion-changed criterion is untouched.
+- [x] ADR-003's D41 amendment landed beside batch B (ADR edits are not spec edits,
+      but the same sweep discipline applies). It records the **trigger that would
+      reopen** the decision — a second writer — because "we declined it" and "we
+      declined it *given one writer*" are different decisions and only the second is
+      true.
+- [x] **Alignment (ROADMAP + handoffs done; CLAUDE.md waits for ratification).**
+      ROADMAP M7 struck through against its exit criteria — **and
       the header line checked explicitly** (the M5 and M6 audits both caught
       it stale; it is now a named checklist item, not a hope); CLAUDE.md
       status rewritten with the M7 landmarks (`Projection/` no longer empty,
@@ -984,7 +1014,15 @@ deviations).
       `Formal/` models and the two test-side landmarks `LogGenerator.swift`
       / `GeneratedLogSweepTests.swift` with its `LEDGERKIT_DEEP` gate**); this
       plan's §8 filled; §9/§10 logs closed.
-- [ ] Handoffs to M8/M9 (§7) verified against what actually landed.
+      ✅ **The header line was accurate this time** — it already said rev 10
+      "ratifies at the M7 boundary", which is still true. Named as a checklist item
+      because the M5 and M6 audits both caught it stale; this is the first boundary
+      where it needed nothing.
+- [x] Handoffs to M8/M9 (§7) verified against what actually landed — with four
+      corrections and three additions, including one instruction discharged: the
+      projection was asked to report whether it wanted whole-tree traversal, and it
+      **did not**, which is pricing evidence *against* ENHANCEMENTS entry 1 rather
+      than for it.
 
 ---
 
@@ -1106,34 +1144,60 @@ Item 4 is **already decided** and awaits only the wording pass.
 
 ## 7. Explicit handoffs (recorded so they aren't lost)
 
+*Verified against what actually landed, 2026-08-16.*
+
 **To M8 (the demo):**
-1. The preview view in the `Projection` app target is the demo's skeleton
-   (D43) — the exhaustive-switch showpiece exists; M8 styles it and adds the
-   branch switcher and kill/relaunch flow.
+1. ✅ **The skeleton exists and runs:** `Projection/Projection/StreamingPreview.swift`
+   — the exhaustive `switch message.state` showpiece over a `ConversationProjection`,
+   driven by `GenerationDriver` + `ScriptedLanguageModel`. M8 styles it and adds the
+   branch switcher and kill/relaunch flow. Two things M8 inherits that are *not*
+   obvious: the app target's project file was patched by hand to link both packages
+   (it had no dependency at all), and the preview's script needs its **pacing** —
+   without the `.wait` steps the framework coalesces everything into one snapshot and
+   nothing appears to stream.
 2. **DoD-2 runs against PCC** (decided 2026-08-13; rev 10 item 4): the
    one-line swap is `GenerationDriver(model:descriptor:)` with
    `PrivateCloudComputeLanguageModel` and an explicit descriptor. Claude
-   package if a later ring carries it.
+   package if a later ring carries it. The preview's `driver()` method is
+   deliberately the only line in that file which names a provider.
 3. ⚠️ **The demo script must respect the 4096-token budget** (rev 9): two ~2k
    turns exhaust it, so the demo either keeps turns short or wires
    `.reduceContext` into its error affordance — decide at M8 planning, not
    after the demo hits it live.
-4. The kill-shaped test (Phase 3) is DoD-1's automated sibling; the GIF is the
-   same flow with a hand on the camera.
+4. ✅ **The kill-shaped test is DoD-1's automated sibling** (`RecoveryTests`), and it
+   covers *both* halves: `.interrupted` with the flushed partial, and the partial
+   surviving as a sibling with Regenerate working over it. The GIF is the same flow
+   with a hand on the camera. ⚠️ One thing the demo needs that the test fakes: the
+   preview is `.inMemory`, so **it cannot show recovery** — swapping that one line to
+   `.sqlite(at:)` is what makes DoD-1 demonstrable.
+5. **New:** the projection's `isDeleted` is the signal a demo needs to navigate away
+   from a deleted conversation. It exists because inferring a lifecycle fact from a
+   thrown read is the pattern tenet 1 replaces.
 
 **To M9 (tag `0.1.0`):**
 1. The packaging question (root `Package.swift` vs split repos) — inherited,
-   now with the path dependency *and* the app target both leaning on it.
+   and now with **three** things leaning on it: the path dependency, the app target,
+   and (new at M7) the app's hand-patched `packageProductDependencies`, which a split
+   would have to re-point.
 2. `GenerationID` collides with `FoundationModels.GenerationID` inside
    `@Generable` expansions — naming review (ADR-002 territory, not a passing
    decision).
 3. ADR-001 ratifies at M9; ADR-003's file-protection revisit; the
-   ENHANCEMENTS backlog (whole-tree traversal — check at Phase 2 whether the
-   projection wanted it; if it did and worked around it, that is pricing
-   evidence for entry 1).
+   ENHANCEMENTS backlog. ✅ **Checked at Phase 2 as instructed: the projection did
+   *not* want whole-tree traversal.** It needs keyed lookup (`generationID` →
+   message) and the active path, both of which exist. That is pricing evidence
+   *against* entry 1 rather than for it — the one consumer most likely to need a
+   traversal did not.
 4. DocC (ENHANCEMENTS entry 2) — the recovery-story article's spine is §6.3's
    three-name table, which Phase 3's kill-shaped test now executes; write the
-   article against the test.
+   article against the test. Its best single figure is the unflushed-tail
+   arithmetic: what streaming showed *minus* what recovery shows *is* the flush
+   policy, asserted in `killMidStreamRecoversAsInterrupted`.
+5. **New:** `MessageTree.updateStates` and `Message.visibleText` are both internal
+   and both live in slightly odd places — the first in `Core/` (forced: `nodes` is
+   private), the second in `Session/` despite having nothing to do with Foundation
+   Models. Worth one look during M9's API review; neither is public, so neither is
+   urgent.
 
 ---
 
@@ -1175,7 +1239,7 @@ Item 4 is **already decided** and awaits only the wording pass.
 | §11 sketch incl. projection lines runs against the real driver | `APISketchTests` (tier 1) + `DriverPipelineTests.sketchRunsAgainstTheRealDriver` (tier 2) | ✅ 2026-08-16 |
 | The exit-criterion preview exists, builds and runs | `Projection/Projection/StreamingPreview.swift`; app target links both packages | ✅ 2026-08-16 (mid-stream smoothness pending a human) |
 | Healthy-log property over every M7-written log, **including crashed ones** | `RecoveryTests`, `DriverPipelineTests`, `APISketchTests` | ✅ 2026-08-16 |
-| Rev 10 amendments carried into code (per-batch retired-phrase sweep) | — | ⬜ |
+| Rev 10 amendments carried into code (per-batch retired-phrase sweep) | 5 batches, 5 sweeps; 4 code/test sites updated (`Policies.swift`, `Persistence.swift`, `ProjectionChecks.swift`, `ProjectionCheckTests.swift`) + 1 forward-pointer in `NormalizeAppleErrors.swift`; final sweep clean on all 9 retired phrases | ✅ 2026-08-16 |
 
 ---
 

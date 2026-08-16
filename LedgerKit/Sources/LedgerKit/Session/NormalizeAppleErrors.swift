@@ -294,6 +294,14 @@ func normalize(_ error: LanguageModelSession.GenerationError) -> GenerationError
         // retrying the same request. Apple's `Context.debugDescription` is
         // deliberately *not* carried into `message` — §8 declines to project
         // debug detail, and the ledger outlives the session that produced it.
+        //
+        // ⚠️ **Whoever adds guided generation reads §8's rev-10 watch-note first.**
+        // Apple's deprecation chain names `GeneratedContent.ParsingError` as *this*
+        // case's replacement, and this file lands the two on different codes —
+        // `emptyResponse` above, `decodingFailure` here. That split is correct only
+        // while v0.1 requests plain `String`, which makes a 27 `ParsingError`
+        // necessarily an empty response. Request a schema (N8) and `ParsingError`
+        // starts carrying both conditions under a code naming one.
         .providerFailure(status: nil, code: "decodingFailure", message: nil)
     case .rateLimited:
         // The 26 enum reports no duration at all; nil says "not reported".

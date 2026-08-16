@@ -124,9 +124,11 @@ struct ProjectionCheckTests {
 
     @Test("a live projection showing the wrong partial is caught")
     func wrongPartial() {
-        // §10.6 says the partial equals *the concatenated deltas*, so an overlay
-        // that streams stale or truncated text is a P2 violation rather than a
-        // cosmetic one — it is the difference between the screen and the log.
+        // §10.6's clause 1 (as rev 10 scopes it) says the shown partial equals *the
+        // live set's value*, so an overlay that streams stale or truncated text is a
+        // P2 violation rather than a cosmetic one — it is the difference between the
+        // screen and what the store said to show. Whether the *live set* matches the
+        // log is the store's obligation and a different test's subject.
         let (folded, classified, ids) = fixture
         let live: LiveSet = [Fix.genA: "A valley fol"]
         let projected = mappingStates(of: classified, ids: ids) { message in

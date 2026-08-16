@@ -40,9 +40,11 @@ import Foundation
 ///
 /// **This is the *disk* cadence, not the display cadence.** The observable
 /// projection applies deltas in memory as they arrive, ahead of disk, so
-/// streaming renders smoothly while the log fills at durability cadence — two
-/// cadences, one truth hierarchy (§7.4). The main-actor hop is M7's own knob and
-/// has nothing to do with this one.
+/// streaming renders at display cadence while the log fills at durability cadence
+/// — two cadences, one truth hierarchy (§7.4). The main-actor side is M7's own
+/// knob and has nothing to do with this one; note it defaults to *immediate*,
+/// because `@Observable` already coalesces to about a frame and the knob buys
+/// less work rather than more smoothness (rev 10).
 public struct DeltaFlushPolicy: Sendable, Equatable {
 
     /// §7.4's default: every ~250 ms or 512 characters, whichever comes first,

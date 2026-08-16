@@ -115,8 +115,33 @@ rules; M4 ratifies it by wiring.
   people to buy us nothing, since `Package.resolved` already pins the exact version for
   our own CI. (Resolved: 7.11.1.)
 
-**Rule 4 held.** The protocol is still six verbs. Value observation did not join, and will
-not until M7's projection actually needs it.
+**Rule 4 held.** The protocol is still six verbs. Value observation did not join at M4.
+
+## Settled at M7 (2026-08-16): value observation was considered and **declined**
+
+Rule 4 anticipated `ValueObservation` joining "at M4/M7 as an `AsyncSequence` when the
+projection needs it". M7 built the projection, so the question came due — and the answer is
+no. Recorded here because a rule that *anticipated* an exception should say when the
+exception was examined and turned down, or the next reader will assume it is still pending.
+
+**The reasoning.** The `ConversationStore` actor is the **only writer in the process**. So
+database-level observation would watch for changes that can only ever originate one actor
+hop away — a second, heavier mechanism to learn what the store already knew at the instant
+it did the writing. The projection is fed by store-side notification instead: the store
+publishes when it commits, and the read side re-reads.
+
+**What declining buys.** The seam stays at **six verbs**, so rule 4's "anything else must
+argue its way in" is intact and nothing argued its way in. The in-memory test double stays
+trivial — it needs no observation machinery to be a faithful stand-in. And a GRDB feature
+stays out of the dependency surface, which keeps the §12 cut line to raw sqlite3 priced in
+days rather than in weeks.
+
+**What it costs, honestly.** Nothing today, and something the moment there is a **second
+writer** — a widget, an app extension, or sync. A store-side feed cannot see writes made by
+another process, so that is the change that reopens this: at that point `ValueObservation`
+(or a cross-process equivalent) earns its way in with the argument rule 4 always asked for.
+Noting the trigger explicitly, because "we declined it" and "we declined it *given one
+writer*" are different decisions and only the second is true.
 
 ## Owned limitation: file protection
 

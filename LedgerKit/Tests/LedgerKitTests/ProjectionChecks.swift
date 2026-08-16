@@ -7,7 +7,7 @@ import Foundation
 // P2 has three clauses, and the spec states them together:
 //
 //   1. for every live `GenerationID`, the projection shows `.streaming` with
-//      partial equal to the concatenated deltas;
+//      partial equal to **the live set's value** for that generation;
 //   2. for everything else the projection equals the fold;
 //   3. the live set is always a subset of *open* (started, un-terminated)
 //      generations.
@@ -19,6 +19,20 @@ import Foundation
 // *mutation-tested* now, and M7 arrives to a suite that already knows what
 // correct looks like. The scaffolding is the parameterization: the overlay is an
 // argument, so M7 changes what is passed in, never what is asserted.
+//
+// ⚠️ **Clause 1's scope, and rev 10 exists because this file was ahead of the spec
+// on it.** The predicate compares the shown partial against the **live set** — which
+// is the only thing available when the live set is synthetic, and is *tautological*
+// against a live store, since the overlay constructs what it shows from the live set.
+// Through rev 9, §10.6 phrased clause 1 against the *log* rather than against the
+// live set; that stronger property is the **store's** obligation and needs a source
+// neither layer computed (the script the provider was driven by). Paraphrased rather
+// than quoted, deliberately — quoting the retired sentence would make every future
+// retired-phrase sweep re-report this already-fixed site (M6-PLAN Phase 0's finding).
+// Discovered by a mutation that
+// survived this predicate and was caught only by a script-comparing test; rev 10
+// splits the two. So a green P2 means the overlay is faithful to its input — not that
+// the input is faithful to the log.
 //
 // Predicates return `[String]` rather than recording issues, matching
 // `InvariantChecks.swift` — the caller attaches the context ("hostile at split
