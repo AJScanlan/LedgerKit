@@ -254,6 +254,8 @@ The `@MainActor @Observable` read side (§6.2, §7.4, §11). **452 tests green**
 ### M8 — `Projection` demo app (the hero)
 The [Projection](../Projection) Xcode app (built from `LedgerKit.xcworkspace`, scheme `Projection`; earlier drafts of this roadmap called it "Scroll"). DoD-1 and DoD-2.
 
+**Build order, decision log (D50–D55) and phase gates: [M8-PLAN.md](./M8-PLAN.md)** (drafted 2026-08-16 from the M7 boundary audit; opens with the **Xcode 27 Beta 5** verification — zero repo changes, so every failure is the beta's — then a hygiene phase carrying the audit's findings, the sharpest being F1: an abandoned generation stuck `.streaming` on an attached projection, the seam between rev 8's "couldn't record" channel and rev 10's read side that neither milestone owned. Amendments open **rev 11**, ratifying at this boundary; M7's one open exit item — the streaming-smoothness eyeball — closes in its Phase 0.)
+
 > Not to be confused with [LedgerKit/Sources/LedgerKit/Projection/](../LedgerKit/Sources/LedgerKit/Projection/) — the library's internal observable-projection layer, which is M7.
 
 - Chat UI driving the exhaustive `switch message.state` (§11) — the code-aesthetics showpiece.
@@ -313,7 +315,7 @@ GA is ~Sept 2026. Treat this as a recurring per-beta checklist, not a one-time g
 
 Cut from the *top* first; never cross the "never cut" line.
 
-1. Branch-switcher UX in the demo (keep the events, hide the UI).
+1. ~~Branch-switcher UX in the demo (keep the events, hide the UI).~~ **Retired 2026-08-16 (M7 boundary audit; owner sign-off; rev 11 item 2 lands the §12 edit).** Invoking it would falsify DoD-1 as written — the hero GIF requires the interrupted partial "reachable via the branch switcher" — and the price that justified the line expired when M7 landed `siblings(of:)`/`switchBranch` tested (`RecoveryTests.interruptedPartialSurvivesRegeneration` already automates the flow). A cut line whose invocation would gut the hero is not a real cut line.
 2. GRDB polish → naive SQLite.
 3. Tool-invocation recording → v0.2.
 4. ~~Provider-mapping breadth → ship on-device + Claude-package only; Chat-Completions → v0.2.~~ **Invoked at M6, with a different outcome than the line priced:** the Claude package is not in this beta ring (a remote dependency is a person's decision), and what shipped is *wider* on the Apple side — on-device + three further Apple families + the deprecated 26 family + `URLError` + the generic `ProviderFault` lift rules (§8's second table). What is missing is a third-party family, and the generic path is what one would use. DoD-2 is restated against this reality (see M8).
