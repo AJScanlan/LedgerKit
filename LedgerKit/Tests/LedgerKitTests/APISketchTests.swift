@@ -27,6 +27,12 @@ import Testing
 // MARK: - The sketch, executed
 
 /// SPEC §11's lifecycle, tree and generation lines, in order.
+///
+/// `@MainActor` since M7 Phase 3, because the sketch now includes the observable
+/// read side and both projections are main-actor-isolated — which is §11's own
+/// isolation sketch, so the annotation is the sketch rather than an accommodation
+/// of it.
+@MainActor
 private func apiSketch(store: ConversationStore, driver: some GenerationDriving) async throws -> [String] {
     // Lifecycle & metadata
     let convo = try await store.createConversation()                      // optional title:
@@ -67,8 +73,41 @@ private func apiSketch(store: ConversationStore, driver: some GenerationDriving)
         // but the assistant-to-parent lookup. Sibling response falls out.
     rendered.append(render(outcome3))
 
-    // SwiftUI — message states drive UI directly:
+    // Reading — the store's ONE read verb. Reduction on demand (§6.3), from the
+    // snapshot checkpoint forward; the store actor exposes no synchronous reads,
+    // so continuous UI reads the projection below rather than calling this per frame.
     rendered.append(contentsOf: (try await store.conversation(convo.id)).activeMessages.map(bubble))
+
+    // **The observable read side (M7).** §11's isolation sketch: a `@MainActor`
+    // `@Observable` projection fed by the store, with deltas arriving at display
+    // cadence independent of the disk flush (§7.4).
+    let projection = try await ConversationProjection(of: convo.id, in: store)
+
+    // SwiftUI — message states drive UI directly, and the compiler forces every
+    // state to be handled. `.streaming` can only ever appear *here* (§6.2): no fold
+    // of any log yields it.
+    rendered.append(contentsOf: projection.conversation.activeMessages.map(bubble))
+
+    // An app overriding §8's affordance table does it **on the projection**, not on
+    // the store: `Recoverability` is never persisted, so the override applies at
+    // classification time and retroactively upgrades historical failures.
+    var lenient = RecoverabilityMapping.default
+    lenient.guardrailViolation = .retryable(after: .seconds(5))
+    _ = try await ConversationProjection(of: convo.id, in: store, mapping: lenient)
+
+    // Conversation list — the index projection, not N reductions. Lives on a
+    // `@MainActor` observable projection, not the store actor, which exposes no
+    // synchronous reads:
+    //
+    //     ForEach(list.conversations) { summary in … }
+    //
+    // ⚠️ §11 sketches this as `projection.conversationList`, implying one facade
+    // object owning both. D42 declined the facade — it would hold projections for
+    // conversations nobody is displaying, or grow a cache policy nobody asked for —
+    // so the spelling is two types. Rev 10 item 6 lands the wording; recorded here
+    // rather than silently diverging, per this file's whole purpose.
+    let list = try await ConversationListProjection(in: store)
+    rendered.append("\(list.conversations.count) conversation(s) in the index")
 
     // Branching
     try await store.switchBranch(to: replacement, in: convo.id)           // bare activePathChanged

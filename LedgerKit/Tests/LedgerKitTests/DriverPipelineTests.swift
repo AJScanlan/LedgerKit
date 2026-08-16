@@ -274,6 +274,104 @@ struct DriverPipelineTests {
         #expect(problems.isEmpty, "\(problems)")
     }
 
+    // MARK: - The projection, over a real stream (M7 Phase 3)
+
+    /// **The pipeline with the read side on the end of it** — one layer above M6's
+    /// round trip, and the first test in which every part of LedgerKit is present at
+    /// once:
+    ///
+    ///     script → ScriptedLanguageModel → real session → ResponseStream
+    ///         → GenerationDriver's differ → GenerationChannel
+    ///         → ConversationStore's flush loop → the store feed
+    ///         → ConversationProjection → overlay_live
+    ///
+    /// Parked mid-stream with a `Cue`, so "the projection shows `.streaming`" is
+    /// asserted at a point the *test* chose rather than one it hoped for.
+    ///
+    /// **What is asserted, and what deliberately is not.** The text is asserted
+    /// exactly — that is the ledger's promise and it survives (§7.3). The number of
+    /// deltas, the number of overlay applications, and where the fragment seams fall
+    /// are **not**: the framework coalesces on its own cadence, so all three vary
+    /// between runs. Pinning any of them would be pinning Apple's scheduler.
+    @Test("the projection follows a real stream and settles on the terminal")
+    func projectionFollowsARealStream() async throws {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+        let cue = Cue()
+        let fixture = try StoreUnderTest(deltaFlush: Self.oneRow)
+        let convo = try await fixture.store.createConversation()
+        let projection = try await ConversationProjection(of: convo.id, in: fixture.store)
+
+        let script: Script = ["A valley fold ", .wait(until: cue), "brings the paper down."]
+        let running = Task { [store = fixture.store] in
+            try await store.send("Explain valley folds", in: convo.id, using: driver(script))
+        }
+
+        // Provably mid-flight: the provider has emitted its first fragment and is
+        // stopped inside the session.
+        await cue.reached()
+
+        // ⚠️ **What the projection shows here is `.streaming` with *whatever* text has
+        // arrived — possibly none.** Measured: at a parked provider the framework has
+        // often vended no snapshot at all, so no delta has crossed the seam and the
+        // partial is empty. That is not a defect; it is §6.2's deliberate absence of a
+        // `.pending` state distinct from `.streaming(partial: "")`, arriving for real.
+        //
+        // The demand is therefore that it is **`.streaming` and a prefix**, not that
+        // it is any particular text. Asserting exact mid-stream text would be
+        // asserting Apple's snapshot cadence, which Phase 2 measured as varying run
+        // to run — the same reason §7.3 asserts concatenation rather than boundaries.
+        // Exact text is asserted at tier 1, where `ScriptedDriver` hands the store its
+        // deltas directly and the cadence is the test's to choose.
+        try await spin(until: { await projection.live.count == 1 })
+        let full = "A valley fold brings the paper down."
+        guard case .streaming(let shown) = await projection.conversation.activeMessages.last?.state else {
+            Issue.record("a running generation must project as .streaming")
+            return
+        }
+        #expect(full.hasPrefix(shown), "shown \(shown.debugDescription) is not a prefix of the script")
+
+        // P2 against the real thing, with the store's own live set — and note the
+        // flush policy is `oneRow`, so **nothing has reached disk yet**. What the
+        // screen shows came through the feed, not through the log (§7.4).
+        //
+        // Read in **one** `MainActor.run`, deliberately: four separate `await`s would
+        // each be their own hop, and the projection could advance between them — so
+        // the predicate would be handed a fold from one instant and a live set from
+        // another, and could fail for a reason that is purely the test's.
+        var problems = await MainActor.run {
+            projectionProblems(
+                in: projection.conversation,
+                overlaying: projection.classified,
+                foldedFrom: projection.folded,
+                live: projection.live
+            )
+        }
+        #expect(problems.isEmpty, "mid-stream: \(problems)")
+
+        await cue.signal()
+        _ = try await running.value
+
+        // The terminal settles it: `.complete` with the whole text, and the live set
+        // pruned by the re-pull rather than by any notification saying so.
+        try await spin(until: { await projection.live.isEmpty })
+        #expect(
+            await projection.conversation.activeMessages.last?.state
+                == .complete(MessageContent(text: "A valley fold brings the paper down."))
+        )
+        problems = await MainActor.run {
+            projectionProblems(
+                in: projection.conversation,
+                overlaying: projection.classified,
+                foldedFrom: projection.folded,
+                live: projection.live
+            )
+        }
+        #expect(problems.isEmpty, "settled: \(problems)")
+
+        let logProblems = try await healthyLogProblems(convo.id, in: fixture.store, backedBy: fixture.backing)
+        #expect(logProblems.isEmpty, "\(logProblems)")
+    }
+
     // MARK: - §11's sketch, against the real driver
 
     /// **DoD-2's groundwork.** The any-Mac sketch runs against a store double;
@@ -297,6 +395,15 @@ struct DriverPipelineTests {
         let assistant = try #require(try await fixture.store.conversation(convo.id).activeMessages.last)
         _ = try await fixture.store.regenerate(assistant.id, in: convo.id, using: driver)
         try await fixture.store.switchBranch(to: replacement, in: convo.id)
+
+        // **The read side, against the real driver** (M7 Phase 3). The projection
+        // lines of §11's sketch run here for the same reason the write verbs do: a
+        // signature that only ever compiles against a test double is a signature
+        // nobody has actually used.
+        let projection = try await ConversationProjection(of: convo.id, in: fixture.store)
+        #expect(await projection.conversation.activeMessages.isEmpty == false)
+        let list = try await ConversationListProjection(in: fixture.store)
+        #expect(await list.conversations.map(\.id).contains(convo.id))
 
         let problems = try await healthyLogProblems(convo.id, in: fixture.store, backedBy: fixture.backing)
         #expect(problems.isEmpty, "\(problems)")

@@ -182,7 +182,7 @@ public final class ConversationProjection {
             // the whole partial, so there is no accumulator to keep and nothing to
             // reconcile against the base. Applying the same notification twice is a
             // no-op, which is why P2's clause 1 cannot be broken from here.
-            live[generation] = partial
+            record(partial, for: generation)
             scheduleApply()
         case .changed:
             await repull()
@@ -214,16 +214,66 @@ public final class ConversationProjection {
             return
         }
 
+        // **The store's live set is authoritative here, not the accumulated one**
+        // (M7 Phase 3, found by the tier-2 pipeline test). `.delta` notifications are
+        // a low-latency *update* between re-pulls; they are not the only way a
+        // generation becomes live. A generation that has started and produced no text
+        // yet has no delta to announce it — so a projection relying on deltas alone
+        // rendered `.interrupted` for something actively running, for the whole
+        // window between the start append and the first snapshot. Against a real
+        // model that window is however long the provider takes to say its first
+        // word, so every generation began with a visible flash of "interrupted" —
+        // the one state whose entire job is to mean *this is not running*.
+        //
+        // Re-reading closes it, and costs one actor read on a notification that is
+        // rare by construction (§9's index argument: non-delta events are the
+        // once-per-turn ones).
+        let storeLive = await store.liveSet(of: id)
+
         folded = state
         classified = classify(state, mapping: mapping)
         messageForGeneration = Self.routing(in: state)
+        // **Merged, not assigned** — see ``record(_:for:)``. Either side can be the
+        // newer one: the store's view is read *now*, while a queued `.delta` was
+        // enqueued earlier and is still waiting to be processed.
+        for (generation, partial) in storeLive { record(partial, for: generation) }
         pruneLiveSet()
         apply()
+    }
+
+    /// Records a generation's shown partial, **never shortening it**.
+    ///
+    /// The one ordering rule the projection needs, and it is needed because the live
+    /// set has two sources that can disagree about *when*. A `.delta` notification is
+    /// enqueued at the instant the store received it; `store.liveSet(of:)` is read at
+    /// the instant the re-pull asks. So a re-pull that suspends while deltas pile up
+    /// behind it returns a **newer** partial than the notifications still queued —
+    /// and applying those afterwards would walk the text backwards on screen.
+    ///
+    /// Measured, not anticipated: the tier-2 pipeline fix introduced exactly this, and
+    /// it showed up as the parallel suite failing a test that passed in isolation
+    /// every time. The window is a suspended re-pull, so it needs load to open.
+    ///
+    /// Comparing lengths is sound rather than a heuristic: a generation's partial is
+    /// **append-only** (§7.3 — `deltaAppended` cannot express anything else), so of
+    /// two values for one generation the longer is always the later. UTF-8 count
+    /// rather than `Character` count, matching `SnapshotDiff`'s rule one seam over.
+    private func record(_ partial: String, for generation: GenerationID) {
+        guard partial.utf8.count >= (live[generation]?.utf8.count ?? 0) else { return }
+        live[generation] = partial
     }
 
     /// Drops live entries the log says are finished — which is what keeps P2's
     /// clause 3 (live ⊆ open) true **by construction** rather than by the store and
     /// the projection agreeing.
+    ///
+    /// Still needed after the re-pull above takes the store's view, and the two split
+    /// the work at the generation's two ends: the store's view is what makes a
+    /// *just-started* generation live before any delta exists, and this is what
+    /// retires a *just-finished* one. The store cannot help with the second, because
+    /// it still holds the slot `.running` between appending the terminal and releasing
+    /// it — so for that instant its live set names a generation the log has already
+    /// ended, and the log is the one to believe.
     ///
     /// Derived from the base on every re-pull, so the live set is *self-correcting*:
     /// it cannot drift, because it is re-checked against the log every time the log

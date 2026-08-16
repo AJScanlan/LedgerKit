@@ -1,8 +1,9 @@
 # M7 Implementation Plan — Observable projection + `overlay_live`
 
-**Status:** 🟩 **Phases 0–2 done (2026-08-15/16) — 447 tests green** (424
-`LedgerKit` + 23 `Understudy`, warning-free, both substrates). Phases 3–4 not
-started. D38–D49 are **Accepted**; **D44 resolved as `guard`, adopted alone**;
+**Status:** 🟩 **Phases 0–3 done (2026-08-15/16) — 452 tests green** (429
+`LedgerKit` + 23 `Understudy`, warning-free, both substrates), and the `Projection`
+app target builds and runs. **Phase 4 (rev 10 ratification + alignment) is all that
+remains.** D38–D49 are **Accepted**; **D44 resolved as `guard`, adopted alone**;
 D46–D49 were taken at the Phase 0 gate and fix gaps in D39/D41/D42 rather than
 merely confirming them. `Projection/` is no longer empty: it holds
 `overlay(_:live:)`, `LiveSet`, and both public types. The store has its feed
@@ -834,17 +835,67 @@ three `ConversationProjection` API deviations listed above (`async throws` init,
 
 ### Phase 3 — End-to-end, the kill-shaped test, and the preview (tier 2 + app)
 
-**Status:** ⬜ not started
+**Status:** ✅ **done 2026-08-16 — 452 tests green** (429 `LedgerKit` + 23
+`Understudy`, warning-free, both substrates) **plus the app target building and
+running**. The tier-2 pipeline test found a **real projection bug on its first run**
+— see the A-note.
 
 **Goal:** the full pipeline under the projection, recovery demonstrated as the
 overlay vanishing, and the exit-criterion preview.
 
-- [ ] **Pipeline test** (the `DriverPipelineTests` pattern, one layer up):
+- [x] **Pipeline test** (the `DriverPipelineTests` pattern, one layer up):
       script → `ScriptedLanguageModel` → real session → `GenerationDriver` →
       store → **projection** — `.streaming` grows with the script's text,
       terminal lands, `P2` predicate green throughout. 27-gated, executes on
       host and simulator.
-- [ ] **The kill-shaped test (the roadmap's "recovery = overlay vanishing"):**
+
+      Landed as `projectionFollowsARealStream`, parked with a `Cue` so the
+      mid-stream assertion happens at a point the test chose.
+
+      ⚠️ **What it asserts mid-stream had to be weakened, and the measurement is the
+      reason.** At a parked provider the framework has often vended **no snapshot at
+      all**, so no delta has crossed the seam and the partial is empty. The demand is
+      therefore "`.streaming`, carrying a **prefix**" rather than any particular text
+      — the same posture §7.3 already takes for fragment boundaries, for the same
+      reason: exact mid-stream text would be asserting Apple's snapshot cadence.
+      Exact text is asserted at tier 1, where `ScriptedDriver` hands the store its
+      deltas directly. Also: P2's four inputs are read in **one** `MainActor.run`,
+      because four separate `await`s are four hops and the predicate would otherwise
+      be handed a fold from one instant and a live set from another.
+- [x] **A-note (Phase 3): the projection flashed `.interrupted` at the start of
+      every generation.** Found by the test above on its first run: at the parked
+      point the projection reported `.interrupted(partial: "")` for a generation that
+      was *actively running*.
+
+      The cause: the projection read the store's live set **only at init** and
+      populated it from `.delta` notifications thereafter — and a generation that has
+      started but produced no text yet has no delta to announce it. So for the whole
+      window between the start append and the first snapshot, the read side showed
+      the one state whose entire job is to mean *this is not running*. Against a real
+      model that window is however long the provider takes to say its first word.
+      **P2 could not have caught it**: the predicate checks the projection against
+      the live set it was handed, and an empty live set is self-consistent.
+
+      Fixed by having a re-pull take the **store's** live set rather than only pruning
+      the accumulated one, which splits the work at the generation's two ends: the
+      store's view makes a *just-started* generation live before any delta exists, and
+      the prune retires a *just-finished* one (the store cannot help there — it still
+      holds the slot `.running` between appending the terminal and releasing it).
+      What it renders is `.streaming(partial: "")`, which is §6.2's deliberate refusal
+      to have a `.pending` state distinct from an empty `.streaming` — that sentence's
+      case, finally reachable. Regression test at tier 1
+      (`startedButSilentGenerationIsStreaming`), mutation-verified.
+
+      ⚠️ **And the fix introduced a second bug, which the parallel suite caught.**
+      Reading the store's live set on re-pull means two sources disagree about *when*:
+      the store's view is read **now**, while a queued `.delta` was enqueued
+      **earlier**. A re-pull that suspends while deltas pile up behind it returns a
+      newer partial than the notifications still waiting — so applying those
+      afterwards walked the text **backwards** on screen. Fixed with one rule,
+      `record(_:for:)`: a shown partial never shortens. Sound rather than heuristic,
+      because a generation's partial is append-only (§7.3), so of two values the
+      longer is always the later.
+- [x] **The kill-shaped test (the roadmap's "recovery = overlay vanishing"):**
       mid-generation, tear down the projection; rebuild a fresh projection
       (and a fresh store over the same database — the D29-style honest cold
       open); assert the same message now reads `.interrupted` with the
@@ -852,20 +903,67 @@ overlay vanishing, and the exit-criterion preview.
       recovery pass anywhere to point at. The delta between what streaming
       showed and what recovery shows is exactly the unflushed tail — §7.4's
       documented recovery granularity, now asserted rather than described.
-- [ ] **The preview (D43):** the debug view in the `Projection` app target —
+
+      Landed as `RecoveryTests`, **tier 1 rather than tier 2** — a crash is modelled
+      by dropping a projection and reopening a store over the same database, and
+      neither needs a real session, so it is worth strictly more on any Mac. Three
+      tests: the recovery itself (with the unflushed-tail delta asserted as
+      arithmetic), P2's degenerate case as **value equality** (`projection ==
+      classified`), and **DoD-1's second half** — the interrupted partial survives as a
+      sibling and Regenerate works over it.
+
+      Two harness findings, both recorded in `reopened`'s doc:
+      **`reopened()` restarted the identifier stream**, which is right for a read-only
+      reopen and wrong the moment the reopened store *writes* — it re-mints
+      identifiers the first store used, and the new events quarantine. ⚠️ The failure
+      did **not** look like a collision: the regeneration's `generationStarted`
+      quarantined while its paired `activePathChanged` survived, naming an endpoint
+      that happened to be the *user* message, so the active path silently got
+      **shorter** instead of growing. It now takes identifier seeds.
+      Separately, the flush-bound arithmetic was misread as cumulative: the buffer
+      **resets after every flush**, so the bound applies per accumulation, not per
+      generation. The fixture spells the split out rather than assuming it.
+- [x] **The preview (D43):** the debug view in the `Projection` app target —
       the exhaustive `switch message.state` showpiece over a
       `ConversationProjection`, driven by `GenerationDriver` +
       `ScriptedLanguageModel`. Built from the workspace; a human confirms
       "renders smoothly" at the gate (the cadence *tests* are Phase 2's; the
       preview is the eyeball check the roadmap asked for).
-- [ ] **§11 sketch extended and its 27-gated sibling updated** — the projection
+
+      Landed as `Projection/Projection/StreamingPreview.swift`. **The app target had
+      no dependency on either package** — Xcode's default template, empty
+      `packageProductDependencies` — so the project file was patched to link
+      `LedgerKit` and `Understudy` from the workspace. Verified by building
+      (`** BUILD SUCCEEDED **`, warning-free) rather than by inspection.
+      **Launched in the iOS 27 simulator and driven**: the full pipeline renders —
+      user message, assistant response, the exact scripted text. Script pacing raised
+      to 900 ms per fragment because at 400 ms the whole generation finished inside
+      one screenshot round trip, which is a fair proxy for "too quick for a human to
+      watch".
+      ⚠️ **The mid-stream frame is the human's check, not mine**: screenshot latency
+      (~2–3 s) outruns the script, so the settled frame is what a screenshot catches.
+      The panel is open and `Send` is bottom-left. Streaming itself is asserted by
+      tests at both tiers.
+- [x] **§11 sketch extended and its 27-gated sibling updated** — the projection
       lines run against the real driver, completing the sketch-as-acceptance-
       test through the read side.
 
-**Review gate:** tier-2 suite green on both substrates; the kill-shaped test
-reviewed against DoD-1's demo shape (M8 inherits it directly); preview
-demonstrated; healthy-log property still green over every log this phase
-wrote.
+      `apiSketch` is now `@MainActor` (which *is* §11's isolation sketch, not an
+      accommodation of it) and constructs both projections, the mapping override, and
+      the exhaustive switch over `projection.conversation`. The 27-gated sibling in
+      `DriverPipelineTests` gained the same lines.
+      ⚠️ **One divergence recorded rather than glossed:** §11 sketches the list as
+      `projection.conversationList`, implying one facade owning both. D42 declined the
+      facade, so the spelling is two types. Rev 10 item 6 lands the wording.
+
+**Review gate:** ✅ **passed 2026-08-16.** Tier-2 suite green on both substrates
+(429 + 23, warning-free); the app target builds and runs. The kill-shaped test is
+DoD-1's automated sibling and M8 inherits it directly. Healthy-log property green
+over every log this phase wrote, including the crashed ones — an interrupted
+generation is a *well-formed* log, which is why recovery needs no repair.
+**Still owed at review:** the preview's mid-stream smoothness (a human tapping
+Send), and Phase 2's outstanding items (D41's ADR-003 amendment, the three D42
+deviations).
 
 ---
 
@@ -1069,10 +1167,14 @@ Item 4 is **already decided** and awaits only the wording pass.
 | List tracks the index, no delta-cadence churn (bounded both sides) | `ConversationListProjectionTests.listTracksTheIndex` / `.deltaFlushesDoNotChurnTheList` | ✅ 2026-08-16 |
 | Deletion surfaced coherently; the last view frozen | `ConversationProjectionTests.deletionIsSurfaced` | ✅ 2026-08-16 |
 | P2 against a live store mid-generation (clauses 2–3 on real inputs) | `ConversationProjectionTests.p2AgainstALiveStore` | ✅ 2026-08-16 |
-| Kill-shaped recovery: overlay vanishes, `.interrupted` shows through | — | ⬜ |
-| Pipeline through real session under the projection (tier 2) | — | ⬜ |
-| §11 sketch incl. projection lines runs against the real driver | — | ⬜ |
-| Healthy-log property over every M7-written log | — | ⬜ |
+| Kill-shaped recovery: overlay vanishes, `.interrupted` shows through | `RecoveryTests.killMidStreamRecoversAsInterrupted` — with the unflushed-tail delta asserted as arithmetic | ✅ 2026-08-16 |
+| P2's degenerate case after a crash, as **value equality** | `RecoveryTests.recoveredProjectionEqualsTheFold` | ✅ 2026-08-16 |
+| DoD-1's second half: the interrupted partial survives as a sibling, Regenerate works | `RecoveryTests.interruptedPartialSurvivesRegeneration` | ✅ 2026-08-16 |
+| A started-but-silent generation renders `.streaming`, never `.interrupted` | `ConversationProjectionTests.startedButSilentGenerationIsStreaming` — the Phase 3 A-note's regression test | ✅ 2026-08-16 |
+| Pipeline through real session under the projection (tier 2) | `DriverPipelineTests.projectionFollowsARealStream` | ✅ 2026-08-16 |
+| §11 sketch incl. projection lines runs against the real driver | `APISketchTests` (tier 1) + `DriverPipelineTests.sketchRunsAgainstTheRealDriver` (tier 2) | ✅ 2026-08-16 |
+| The exit-criterion preview exists, builds and runs | `Projection/Projection/StreamingPreview.swift`; app target links both packages | ✅ 2026-08-16 (mid-stream smoothness pending a human) |
+| Healthy-log property over every M7-written log, **including crashed ones** | `RecoveryTests`, `DriverPipelineTests`, `APISketchTests` | ✅ 2026-08-16 |
 | Rev 10 amendments carried into code (per-batch retired-phrase sweep) | — | ⬜ |
 
 ---
@@ -1099,6 +1201,7 @@ Item 4 is **already decided** and awaits only the wording pass.
 | Date | Phase | Tests | Note |
 |---|---|---|---|
 | 2026-08-13 | **Plan drafted** at the M6 boundary | 415 (392 + 23) | Drafted from the M6 boundary audit. Phase 0 carries the audit's A1–A4 (A1/A3 owner-approved 2026-08-13); rev 10 inventory seeded with one item already decided (DoD-2 → PCC). Batch B's mechanical staleness fixes (ROADMAP header/banner/beta-track/cut-line, ADR index, two stale code comments) landed the same day, ahead of Phase 0 |
+| 2026-08-16 | **Phase 3 done** — tier-2 pipeline, the kill-shaped test, the preview | **452 (429 + 23)** | Both substrates green; the `Projection` app target builds, links both packages, and runs in the simulator. **The tier-2 test found a real bug on its first run:** the projection read the store's live set only at *init*, so between `generationStarted` and the first delta it rendered `.interrupted` for a generation that was actively running — a visible flash of the crash state at the start of every generation, and **P2 could not have caught it** because an empty live set is self-consistent. The fix (a re-pull takes the store's live set) then introduced a *second* bug the parallel suite caught: the store's view is read now while a queued `.delta` was enqueued earlier, so applying stale notifications walked the text **backwards**; closed by one rule — a shown partial never shortens, which is sound because §7.3 makes partials append-only. Two harness findings: `reopened()` restarted the identifier stream (right for a read-only reopen, wrong once it writes — and the collision surfaced as the active path getting *shorter*, not as a collision), and the flush bound is per-accumulation, not cumulative. The kill-shaped test landed **tier 1** rather than tier 2, since a crash needs no real session. §11's sketch gained its projection lines at both tiers, with the `projection.conversationList` spelling recorded as a divergence for rev 10 item 6 |
 | 2026-08-16 | **Phase 2 done** — the store feed, `ConversationProjection`, `ConversationListProjection` | **447 (424 + 23)** | Both substrates green; the parallel suite run three times to confirm no flakes. `.changed` publishes from **one** place (`foldForward`, where all five write paths converge); `shownPartials` becomes actor state so the store can state the whole partial (D47); D46's summaries verb lands under the list. **Three `ConversationProjection` API deviations from D42, all owed sign-off:** `async throws` init (so `conversation` can be non-optional without `nil` conflating loading/deleted/failed), a second published `isDeleted`, and a new `store.liveSet(of:)` read at attach — without which a projection created mid-generation renders `.interrupted` over a running stream, **which P2 would not have flagged** because an empty live set is self-consistent. **Two of three planned mutations were unfalsifiable, and chasing why produced the phase's best test.** "Notify before the cache advances" cannot be caught: `yield` runs no subscriber inline and a reader must hop to the actor to read, so the two statements' order is unobservable — D38's constraint holds by *absence of a suspension point*, not by ordering. Re-derived the reorder that would genuinely break (a `.delta` after its terminal's `.changed`, which sticks `.streaming` forever) and pinned the feed's whole sequence in `feedOrderingIsCausal`, which **does** catch the detached hop. Also found: **P2's clause 1 is tautological against a live store** — the overlay builds `shown` from `live[generation]`, so they agree even when the live set is wrong; the fix is an independent oracle (the script's text), and the suffix-accumulation mutation went from 1 catcher to 3. And **three tests were flaky as written**, spinning on `live.count == 1` before asserting the complete text; the parallel suite caught what every filtered run had passed |
 | 2026-08-15 | **Phase 1 done** — `overlay_live`, P2 completed, D49 landed | **435 (412 + 23)** | Both substrates green plus `LEDGERKIT_DEEP=1`. **The no-assertion-changed criterion held, verified by diff**: `ProjectionCheckTests.swift` untouched; the only edit to `ProjectionChecks.swift` deletes a typealias that `Projection/` now ships. P2 sweeps 132 projections over every fixture × truncation × subset of open generations, 38 of them live, reaching 2 concurrent live generations. **Three mutations run; the one that was *not* caught was the finding of the phase:** flipping every `.failed` message to `.streaming` passed the entire suite, because `Corpus.all` contained **no failed generation at all** — 8 `.completed`, 2 `.cancelled`, 0 `.failed` — so nothing anywhere in the package had ever swept the most complex `MessageState` case, the only one carrying `Recoverability` and the whole subject of §8. Fixed with a `failedGenerations` golden fixture (a failure with a partial, and §7.2's zero-token 401), which inherits every sweep for free. **This is M3 Phase 1's healthy-log finding repeating one milestone later by the same route**, which promotes that note from history to standing instruction: ask what the corpus *cannot* express. Also: the `terminalTimestamp` mutation could not be typed without first widening `MessageTree` past D49's narrow API — the strongest evidence available that D49 was worth taking |
 | 2026-08-15 | **Phase 0 done** — the audit's A1–A4, D44 resolved, Playground rewritten | **429 (406 + 23)** | Both substrates green (macOS 27 host + iOS 27 simulator). Five mutations run, five caught. D38–D43 promoted to Accepted; D44 resolved as **`guard` alone**; **D46–D49 taken**, three of which fix gaps rather than confirm the plan: D41 named a store verb that did not exist (D46), D39's suffix-accumulation double-counts and cannot handle a projection created mid-generation (D47), and D42's ~16 ms cadence default duplicates work SwiftUI already does (D48). **Two audit characterisations were corrected by measurement.** A2 is not "the field held unparseable text" — Apple's `debugDescription` *is* JSON, so the test this plan specified passes against the bug; the real defect is **dictionary-order instability** (three processes, three orderings), the per-process hasher seed reaching a durable audit field. And A1's duration is attributable only when a snapshot preceded the throw, which for a tool called as the model's first action never happens. The recurring lesson, now from the other direction: **an audit finding is an empirical claim too** |

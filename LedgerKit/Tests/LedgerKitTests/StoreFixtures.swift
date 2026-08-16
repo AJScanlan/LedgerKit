@@ -241,10 +241,32 @@ struct StoreUnderTest {
 
     /// A second store over the same database, with an empty cache — the "cold
     /// reopen" half of fold-forward ≡ re-read.
-    func reopened() -> ConversationStore {
+    /// - Parameters:
+    ///   - eventsFrom, messagesFrom, generationsFrom: Seeds for the reopened store's
+    ///     identifier stream.
+    ///
+    ///     ⚠️ **The defaults restart it, which is right for a read-only reopen and
+    ///     wrong the moment the reopened store *writes*** (found at M7 Phase 3). A
+    ///     restarted stream re-mints identifiers the first store already used, so the
+    ///     new events quarantine under §6.6 rows 6/8 — and the failure does not look
+    ///     like a collision. In the case that found this, a regeneration's
+    ///     `generationStarted` quarantined while its paired `activePathChanged`
+    ///     survived, naming an endpoint that happened to be the *user* message, so
+    ///     the active path silently shortened instead of growing. Same reasoning as
+    ///     ``continuing(_:over:messagesFrom:generationsFrom:deltaFlush:)``: only the
+    ///     caller knows which identifiers the first store consumed.
+    func reopened(
+        eventsFrom events: Int = 0x100,
+        messagesFrom messages: Int = 0x0F,
+        generationsFrom generations: Int = 0x2F
+    ) -> ConversationStore {
         ConversationStore(
             persistence: backing,
-            identifiers: ScriptedIdentifiers(),
+            identifiers: ScriptedIdentifiers(
+                eventsFrom: events,
+                messagesFrom: messages,
+                generationsFrom: generations
+            ),
             now: SteppingClock().now
         )
     }

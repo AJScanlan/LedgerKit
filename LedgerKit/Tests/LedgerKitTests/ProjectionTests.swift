@@ -19,6 +19,30 @@ import Testing
 //    question with a real answer — polled with cancellation checks, because a bare
 //    `Task.yield()` spin defeats `.timeLimit` (measured at M6 Phase 0).
 
+/// Waits until the projection's last active message reaches a state satisfying
+/// `predicate`.
+///
+/// ⚠️ **Exists because the obvious spin conditions are all proxies, and every one of
+/// them produced a flake.** `activeMessages.count == 2` goes true when the assistant
+/// message is *created* — long before it is `.failed`. `live.isEmpty` is true both
+/// after a generation finishes *and* before the projection has processed anything at
+/// all. `live.count == 1` is true after the **first** delta, not the last. Each of
+/// those passed in a filtered run every time and failed under the parallel suite,
+/// which is the only place the windows are wide enough to lose.
+///
+/// The rule this encodes: **spin on the assertion's actual precondition.** If the
+/// test is about a state, wait for that state — never for something that merely
+/// tends to precede it.
+@MainActor
+private func waitForLastMessage(
+    of projection: ConversationProjection,
+    toReach predicate: @escaping @MainActor (MessageState) -> Bool
+) async throws {
+    try await spin(until: { @MainActor in
+        projection.conversation.activeMessages.last.map { predicate($0.state) } ?? false
+    })
+}
+
 /// A store, a projection over it, and the conversation they share.
 @MainActor
 private func attach(
@@ -90,7 +114,7 @@ struct ConversationProjectionTests {
         let (fixture, id, projection) = try await attach()
 
         _ = try await fixture.store.send("q", in: id, using: ScriptedDriver(saying: "Dublin"))
-        try await spin(until: { @MainActor in projection.live.isEmpty })
+        try await waitForLastMessage(of: projection, toReach: { $0 == .complete(MessageContent(text: "Dublin")) })
 
         let assistant = try #require(projection.conversation.activeMessages.last)
         #expect(assistant.state == .complete(MessageContent(text: "Dublin")))
@@ -124,6 +148,43 @@ struct ConversationProjectionTests {
 
         let assistant = try #require(projection.conversation.activeMessages.last)
         #expect(assistant.state == .streaming(partial: "half an ans"))
+
+        await paused.release()
+        _ = try await running.value
+    }
+
+    /// **A generation that has produced no text yet is still `.streaming`** — the
+    /// regression test for the flash M7 Phase 3's tier-2 pipeline test found.
+    ///
+    /// A projection populating its live set from `.delta` notifications alone has
+    /// nothing to go on between the start append and the first delta, so it rendered
+    /// `.interrupted` — the one state whose entire job is to mean *this is not
+    /// running* — for a generation that was actively running. Against a real model
+    /// that window is however long the provider takes to say its first word, so
+    /// every single generation began with a visible flash of the crash state.
+    ///
+    /// The fix is that a re-pull takes the **store's** live set rather than only
+    /// pruning the accumulated one. What it renders is `.streaming(partial: "")`,
+    /// which is §6.2's deliberate refusal to have a `.pending` state distinct from
+    /// an empty `.streaming` — the case that spec sentence was written for, finally
+    /// reachable.
+    @Test("a started generation with no text yet is .streaming, never .interrupted")
+    func startedButSilentGenerationIsStreaming() async throws {
+        let (fixture, id, projection) = try await attach()
+
+        let paused = Latch()
+        let running = Task {
+            try await fixture.store.send(
+                "q",
+                in: id,
+                using: ScriptedDriver([.pause(paused), .delta("eventually")])
+            )
+        }
+        await paused.waitForArrival()
+        try await waitForLastMessage(of: projection, toReach: { $0 == .streaming(partial: "") })
+
+        #expect(projection.conversation.activeMessages.last?.state == .streaming(partial: ""),
+                "a running generation must never render as the crash state")
 
         await paused.release()
         _ = try await running.value
@@ -182,7 +243,7 @@ struct ConversationProjectionTests {
             in: convo.id,
             using: ScriptedDriver([.delta("partial")], ending: .failed(.guardrailViolation))
         )
-        try await spin(until: { @MainActor in projection.conversation.activeMessages.count == 2 })
+        try await waitForLastMessage(of: projection, toReach: { if case .failed = $0 { true } else { false } })
 
         guard case .failed(_, _, let recoverability) = projection.conversation.activeMessages.last?.state else {
             Issue.record("expected a failed message")
@@ -269,7 +330,7 @@ struct ConversationProjectionTests {
     func deletionIsSurfaced() async throws {
         let (fixture, id, projection) = try await attach()
         _ = try await fixture.store.send("q", in: id, using: ScriptedDriver(saying: "Dublin"))
-        try await spin(until: { @MainActor in projection.conversation.activeMessages.count == 2 })
+        try await waitForLastMessage(of: projection, toReach: { $0 == .complete(MessageContent(text: "Dublin")) })
         let lastView = projection.conversation
 
         try await fixture.store.deleteConversation(id)
@@ -295,16 +356,16 @@ struct ConversationProjectionTests {
         let deltas: [ScriptedDriver.Step] = (0..<8).map { .delta("chunk\($0) ") }
 
         let immediate = try await attach(displayCadence: .zero)
+        let text = "chunk0 chunk1 chunk2 chunk3 chunk4 chunk5 chunk6 chunk7 "
         _ = try await immediate.fixture.store.send("q", in: immediate.id, using: ScriptedDriver(deltas))
-        try await spin(until: { @MainActor in immediate.projection.live.isEmpty })
+        try await waitForLastMessage(of: immediate.projection, toReach: { $0 == .complete(MessageContent(text: text)) })
 
         let coalesced = try await attach(displayCadence: .milliseconds(200))
         _ = try await coalesced.fixture.store.send("q", in: coalesced.id, using: ScriptedDriver(deltas))
-        try await spin(until: { @MainActor in coalesced.projection.live.isEmpty })
+        try await waitForLastMessage(of: coalesced.projection, toReach: { $0 == .complete(MessageContent(text: text)) })
 
         // Both settle on the same text — the knob trades latency for work, never
         // content.
-        let text = "chunk0 chunk1 chunk2 chunk3 chunk4 chunk5 chunk6 chunk7 "
         #expect(immediate.projection.conversation.activeMessages.last?.state == .complete(MessageContent(text: text)))
         #expect(coalesced.projection.conversation.activeMessages.last?.state == .complete(MessageContent(text: text)))
 

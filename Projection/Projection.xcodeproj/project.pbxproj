@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		7A1100000000000000000101 /* LedgerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1100000000000000000201 /* LedgerKit */; };
+		7A1100000000000000000102 /* Understudy in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1100000000000000000202 /* Understudy */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		2159E40F3006CC1800BF78C1 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +57,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7A1100000000000000000101 /* LedgerKit in Frameworks */,
+				7A1100000000000000000102 /* Understudy in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +119,8 @@
 			);
 			name = Projection;
 			packageProductDependencies = (
+				7A1100000000000000000201 /* LedgerKit */,
+				7A1100000000000000000202 /* Understudy */,
 			);
 			productName = Projection;
 			productReference = 2159E4013006CC1600BF78C1 /* Projection.app */;
@@ -627,6 +636,17 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7A1100000000000000000201 /* LedgerKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LedgerKit;
+		};
+		7A1100000000000000000202 /* Understudy */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Understudy;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 2159E3F93006CC1600BF78C1 /* Project object */;
 }
