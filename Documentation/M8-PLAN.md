@@ -1,7 +1,11 @@
 # M8 Implementation Plan — the `Projection` demo app (the hero)
 
-**Status:** ☐ **DRAFTED 2026-08-16** at the M7 boundary, from the M7 boundary
-audit (same date). No phase started.
+**Status:** 🟨 **PHASE 0 COMPLETE 2026-08-16 — 452 green on Xcode 27 Beta 5**
+(429 `LedgerKit` + 23 `Understudy`, warning-free, host + iOS 27 simulator; device
+and deep tiers green too). Toolchain of record: Xcode `27A5237l`, macOS SDK
+`26A5406c`, host OS `26A5406e`, iOS runtime `24A5408d`; Beta 4 deleted, one Xcode
+installed. **M7's last open exit item (the streaming eyeball) is closed**, so M7
+is now unconditionally complete. Phase 1 next.
 
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M8 section) · [SPEC.md](./SPEC.md)
 §11 (the sketch and the showpiece switch), §13 DoD-1/DoD-2, §12 (cut lines),
@@ -84,8 +88,8 @@ rather than discovered later.
 
 | Fact | Source | Consequence for M8 |
 |---|---|---|
-| **The SDK build pin is `26A5388f` (Beta 4)** and `sdkBuildIsPinned` fails on any other toolchain — *by design*; the fix is one line **after** the surface manifests re-verify | `AppleErrorSurfaceTests.swift:434`; CLAUDE.md | Phase 0. Expect exactly this failure on Beta 5; **every additional failure is a finding to disposition, not noise** |
-| ⚠️ **CI's Xcode selection compares SDK *major* only, with strict `-gt`** — two 27-family Xcodes tie, the tie keeps the first glob match, and `Beta.4` sorts before `Beta.5`. Side-by-side installs mean CI silently keeps testing Beta 4 | M7 audit F3; `.github/workflows/ci.yml` | Phase 0 **deletes Beta 4 once Beta 5 is green** (owner-agreed 2026-08-16: one toolchain, no ambiguity, and the loop is fine for the next major) |
+| **The SDK build pin is `26A5406c` (Beta 5)** and `sdkBuildIsPinned` fails on any other toolchain — *by design*; the fix is one line **after** the surface manifests re-verify | `AppleErrorSurfaceTests.swift`; CLAUDE.md | ☑ Moved at Phase 0 (was `26A5388f`). **The bundling earned its keep on its first real firing:** re-verification found two removed members, a retyped metadata dictionary, and a new `variant` — none of which anyone would have gone looking for |
+| ⚠️ ~~**CI's Xcode selection compares SDK *major* only, with strict `-gt`**~~ — two 27-family Xcodes tie and the tie keeps the first glob match | M7 audit F3; `.github/workflows/ci.yml` | ☑ **Moot as of Phase 0**: Beta 4 is deleted, one Xcode is installed, and the loop is correct again without being touched. ⚠️ **Live again the moment a second 27-family Xcode is installed** — which is every future beta's first hour, so install-then-delete rather than install-and-keep |
 | **F1 mechanism:** on rev 8's "couldn't record" path the store throws with no terminal, `release` runs, and **no notification is sent** — `.changed` publishes only from `foldForward`, which a failed append never reaches. The projection's `pruneLiveSet` keeps any entry whose classified state is `.interrupted`, which an abandoned generation is *forever* — so an attached projection shows `.streaming` for a dead generation until its view is torn down, while a fresh attach correctly shows `.interrupted`. D39's own text names the gap: `.changed` fires when "the live set moved", and the release-without-terminal move is unnotified. Riders: `shownPartials` leaks on the same path, and two comments justify the absence wrongly | M7 audit F1; `ConversationStore.swift:1167,1212`, `ConversationProjection.swift:287` | Phase 1, D50. **Fix before the demo is built on it** — the demo's whole pitch is that the state machine never lies |
 | **Feed causality is the licence for D50's prune:** a generation's `.delta`s all precede the `.changed` that retires it (FIFO per subscriber, notify synchronous with the state change) — so an entry dropped at a `.changed` cannot be re-added by a stale queued delta | `StoreFeedTests.feedOrderingIsCausal`; M7-PLAN Phase 2 | The abandon `.changed` inherits the same argument; the mutation that matters is dropping the notify, not reordering it |
 | **DoD-2's provider is PCC** (rev 10, §13) — and its demonstrability is an **unprobed empirical claim**. Availability is advisory (§14): `.available` does not promise generation works, and the ledger's own history says affordance claims must be measured | SPEC §13, §14; M7 audit F5.2 | Phase 1 spikes it (~10 lines) **before** any GIF planning. If PCC declines, the fallback is Alexander's call at the gate (D53) |
@@ -266,24 +270,36 @@ milestone and ratifies rev 11.
 
 ### Phase 0 — Toolchain: Xcode 27 Beta 5 (zero repo changes, one exception)
 
-**Status:** 🟨 **AT THE GATE, 2026-08-16** — every tier runs and the only failures
-are the three recorded findings, all of which are §7 sign-offs rather than
-toolchain problems. Blocker resolved by the owner updating macOS to `26A5406e`
-(D56d).
+**Status:** ☑ **PHASE 0 COMPLETE 2026-08-16 — 452 green on Xcode 27 Beta 5**
+(429 `LedgerKit` + 23 `Understudy`, warning-free, both substrates). Every gate
+condition met.
 
 | Tier | Result |
 |---|---|
-| `LedgerKit` host | 429 tests, **3 issues** — `sdkBuildIsPinned` + `consumedSurface` ×2, all recorded in §6 item 3 |
+| `LedgerKit` host | **429/429 green** |
 | `Understudy` | **23/23 green** |
 | Device (`LEDGERKIT_DEVICE=1`) | **all four §14 residues re-confirmed**, no code change |
 | Deep (`LEDGERKIT_DEEP=1`) | **green** (four-event generated sweep, 22.9 s) |
 | iOS 27 simulator (`24A5408d`) | **429/429 green** |
-| `Projection` app target | **BUILD SUCCEEDED** |
+| `Projection` app target | **BUILD SUCCEEDED**; preview eyeballed and accepted |
 
-**Outstanding to close the phase:** the two §7 sign-offs (§6 item 3.1's lost
-`.custom`; item 3.3's `SystemLanguageModel.variant` reopening OQ8), then the pin
-and both manifests move together; the owner's eyeball check; Beta 4's deletion
-and CLAUDE.md's two toolchain lines.
+**Toolchain of record:** Xcode 27 Beta 5 (`27A5237l`), macOS SDK `26A5406c`, host
+OS `26A5406e`, iOS runtime `24A5408d`. One Xcode installed; Beta 4 deleted.
+
+**The phase's real output was not a green suite — it was four findings nobody
+would have gone looking for**, and the honest tally is that the tripwires caught
+two of them, the compiler caught one, and a crash caught the fourth:
+
+| Found by | What |
+|---|---|
+| `consumedSurface` | `Transcript.Segment` lost `.custom`; `Response.Action` lost `updateCustomSegment` |
+| **The warning-free-build rule** | metadata retyped to `GeneratedContent`, silently turning §7.7/§7.8's two reads into permanent nils |
+| Reading the interface diff | `SystemLanguageModel.variant`, which narrows OQ8's claim |
+| A SIGSEGV | the SDK/OS train mismatch — which **no test could have caught**, because it kills the process rather than failing an expectation |
+
+⚠️ **The generalizable pair, both now in CLAUDE.md:** a tripwire pins what someone
+thought to pin, so *the warning-free build is itself a tripwire*; and a surface
+can **shrink**, so a manifest that only anticipates additions is half a manifest.
 
 > **The pin's new value is already known and does not depend on the OS.**
 > `sdkBuildIsPinned` reads `xcrun --show-sdk-build-version --sdk macosx`, which
@@ -328,15 +344,15 @@ is the run the weekly CI schedule exists to simulate; this time it is real.
       **Owner decision required** (D56): update macOS to the Beta 5-era build,
       or hold on Beta 4. Nothing below this line can complete on the host until
       it is taken.
-- [ ] Re-verify the two manifests against the Beta 5 `.swiftinterface` (the
+- [x] Re-verify the two manifests against the Beta 5 `.swiftinterface` (the
       tests do this mechanically — read their output, then re-read any M4-PLAN
       §2 citation a change touches, per the standing re-read rule), then move
       the pin: `sdkBuildIsPinned`'s one line, with the new build string.
-      **Verified by reading; deliberately NOT edited** — both drifts are §7
-      decisions (§6 item 3.1) and the gate below says they are signed off here,
-      not embedded in a manifest. The pin moves *after* that sign-off, per the
-      test's own doc: the update is one line, the re-verification is not, and
-      the two are bundled so the second cannot be skipped.
+      ✅ **Signed off 2026-08-16 (owner), then landed together.** Three one-line
+      edits: `Transcript.Segment` 4 → 3 members, `Response.Action` 7 → 6, and
+      the pin `26A5388f` → `26A5406c`. Each manifest entry carries a comment
+      saying *why* it moved, so the next reader finds a §7 decision rather than
+      a mystery diff. **Host suite is now 429/429.**
 - [x] `LEDGERKIT_DEVICE=1 swift test --package-path LedgerKit` — the residue
       suite re-asks its four behavioural questions on the new beta. Also run
       `LEDGERKIT_DEEP=1` once.
@@ -376,23 +392,31 @@ is the run the weekly CI schedule exists to simulate; this time it is real.
       Beta 5 (the hand-patched `project.pbxproj` survives the toolchain move).
       ✅ **BUILD SUCCEEDED.** The hand-patched `packageProductDependencies`
       survived, so M8's Phase 2 starts from a working target.
-- [ ] **The carried M7 eyeball check (owner):** launch the preview in the
+- [x] **The carried M7 eyeball check (owner):** launch the preview in the
       simulator, tap Send, watch the scripted stream arrive over ~4 s.
       "Streaming renders smoothly" closes here — M7's last open exit item.
-      *(Unblocked by the simulator result — this can proceed regardless of D56.)*
-- [ ] **Delete Beta 4** — deferred 2026-08-16, then **re-unblocked the same day**
-      when the OS update made the host tier green. D56(b)'s condition ("retained
-      until the host tier is genuinely green") is now satisfied: every tier runs,
-      and the only three failures are the recorded §7 sign-off items, which no
-      toolchain change can fix. **Held for the gate rather than done silently**,
-      because the deletion is irreversible-in-practice (a large re-download) and
-      this plan already reversed it once.
-      ⚠️ Until it happens, CI's major-version tiebreak (audit F3) is live: **do
-      not trust a local CI run** while two 27-family Xcodes are installed.
-- [ ] The one repo exception: update CLAUDE.md's **two toolchain lines** (the
+      ✅ **Closed 2026-08-16 (owner): "looks good for now."** M7's last open exit
+      item is done, so **M7 is now unconditionally complete** — ROADMAP's 🟨 on
+      the M7 exit line becomes ✅ at Phase 4's alignment pass. Polish is
+      explicitly deferred to Phase 2 *if* the GIF wants it, which is the right
+      order: style the thing once it is the real app, not twice.
+- [x] **Delete Beta 4** — deferred when the host was blocked, re-unblocked when
+      the OS update made it green, and **done by the owner 2026-08-16.**
+      `/Applications` now holds exactly one Xcode (`27.0.0-Beta.5`), so audit
+      F3's major-version tiebreak has nothing to tie against and CI's selection
+      loop is correct again without being touched. Verified: `xcode-select`
+      resolves to Beta 5, SDK build `26A5406c`, and the `.swiftinterface` the
+      tripwires read exists at the Beta 5 path.
+- [x] The one repo exception: update CLAUDE.md's **two toolchain lines** (the
       Beta 4 `.swiftinterface` path and the Xcode build string), which dangle
       the moment Beta 4 is gone. The full CLAUDE.md status rewrite still waits
-      for ratification, as every milestone's has. **Deferred with the deletion.**
+      for ratification, as every milestone's has.
+      ✅ Both moved to Beta 5. The toolchain line also gained the **train-match
+      warning** — same-train OS and Xcode, and the SIGSEGV-in-dyld signature to
+      recognize — because that cost this phase a day and the next beta will
+      present it identically. CLAUDE.md's `26A5388f` pin reference is deliberately
+      **left alone**: it is still accurate until the pin moves, and it moves with
+      the manifests after sign-off.
 
 **Review gate:** both suites green on Beta 5 (host + simulator + device tier +
 deep tier), pin moved, any surface/behaviour drift written into §6 item 3 with
@@ -600,10 +624,33 @@ Item 2 is **already decided** and awaits only the wording pass.
    (the cut-line list's own precedent: line 4's invoked-with-outcome).
    ROADMAP's copy follows.
 3. **Beta 5 fallout — filled 2026-08-16, and it is not empty.** Four items, two
-   of which are §7 decisions needing sign-off before any manifest is touched.
+   of which were §7 decisions needing sign-off before any manifest was touched.
+   **Both signed off by the owner 2026-08-16** (drafted to
+   `scratchpad/rev11-draft.md` per the standing pattern; the code-side manifests
+   moved on the sign-off, the SPEC edits land at Phase 4 with the rest of rev 11).
    §8 is **untouched**: the error-conforming declarations are identical between
    Beta 4 and Beta 5, so `appleErrorSurface` passes and the coverage tables
    stand.
+
+   **Dispositions, as signed off:**
+   - **3.1 — ACCEPTED.** Amend §5, §7.3, §14 OQ9 and §12's v0.2 line to drop
+     `custom`; drop it from `GenerationDriver.swift:283`'s comment too.
+     **Appendix E is deliberately left alone** — it records what *rev 7 said*,
+     and rewriting an appendix makes the change log lie about the change (the
+     same convention §10.1 applies to `LedgerKitTestSupport`'s old name).
+     Appendix I carries the forward pointer. OQ9's *answer* is unchanged:
+     reasoning survives, so v0.1's silence is still an owned choice.
+   - **3.3 — ACCEPTED, scoping only; nothing is wired.** §7.8 and OQ8 narrow
+     "no model-identity key anywhere in the framework" to "…**on the protocol**",
+     with a ⚠️ recording what Beta 5 added and why the design conclusion is
+     unchanged (`variant` is on the concrete type; `any LanguageModel` still has
+     two requirements). **`ModelDescriptor.version` stays nil** — the only public
+     payload is a `displayName`, and §8's standing rule refuses human-readable
+     detail as durable data; deriving a stable token ourselves would be a closed
+     map over an open set, which is the `unrecognized`-floor problem written into
+     the wire. Recorded instead as a rev 11 **watch-note**: if `Variant` ever
+     gains a stable identifier, `StopInfo.resolvedModelID` is its home — the
+     *resolved* slot, not the *requested* one.
 
    1. **`Transcript.Segment` lost `.custom`, and `Transcript.CustomSegment` is
       gone entirely** — the protocol, its extensions, and the channel's
@@ -679,8 +726,9 @@ Item 2 is **already decided** and awaits only the wording pass.
 
 | Obligation | Suite / evidence | Status |
 |---|---|---|
-| Beta 5: suite green, pin moved, drift dispositioned | full run + `AppleErrorSurfaceTests` | ☐ |
-| Residues re-asked on Beta 5 | `ResidueTests` under `LEDGERKIT_DEVICE=1` | ☐ |
+| Beta 5: suite green, pin moved, drift dispositioned | full run + `AppleErrorSurfaceTests` | ☑ 452 green both substrates; pin `26A5406c`; four findings dispositioned, two signed off |
+| Residues re-asked on Beta 5 | `ResidueTests` under `LEDGERKIT_DEVICE=1` | ☑ all four re-confirmed, no code change |
+| M7 eyeball item closed | Phase 0, owner | ☑ 2026-08-16 — polish deferred to Phase 2 if the GIF wants it |
 | F1: abandoned generation converges to `.interrupted` on an attached projection (flush-failure and terminal-failure doors) | new Phase 1 tests | ☐ |
 | F1: the store's abandon notify — mutation caught | Phase 1 mutation log | ☐ |
 | F1: prune conjunction — mutation caught | Phase 1 mutation log | ☐ |
@@ -694,7 +742,6 @@ Item 2 is **already decided** and awaits only the wording pass.
 | Exhaustive switch keeps no `default` | guardrail 2 review | ☐ |
 | One provider-construction line in the app | guardrail 3 grep | ☐ |
 | Healthy-log property over every demo-written log, killed runs included | existing property suites | ☐ |
-| M7 eyeball item closed | Phase 0, owner | ☐ |
 | Rev 11 carried into code (per-batch sweep + the two new greps) | Phase 4 sweep log | ☐ |
 
 ---
@@ -723,6 +770,7 @@ no rollback. Deletion is rescheduled to after the host tier is genuinely green.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-16 | **Phase 0 ☑ COMPLETE** | **452** (429 + 23), both substrates | Owner signed off both §7 items (§6 item 3.1 and 3.3), drafted to `scratchpad/rev11-draft.md` per the standing pattern. Three one-line code edits landed together: `Transcript.Segment` 4 → 3, `Response.Action` 7 → 6, pin `26A5388f` → `26A5406c`; each manifest entry carries the *why*. **3.3 is scoping only — nothing wired**: `ModelDescriptor.version` stays nil (a `displayName` is display data, and a closed map over an open set of `Variant`s is the `unrecognized`-floor problem on the wire); `StopInfo.resolvedModelID` recorded as the home *if* Apple ever ships a stable identifier. Eyeball closed (owner) → **M7 unconditionally complete**; Beta 4 deleted → audit F3 moot; CLAUDE.md's two toolchain lines and the pin reference updated, with the SDK/OS train-match warning added. SPEC untouched — rev 11 lands at Phase 4 |
 | 2026-08-16 | **Phase 0 — Beta 5, at the gate** | host 429 (3 known issues); `Understudy` 23/23; device + deep green; sim 429/429; app builds | macOS updated to `26A5406e` (D56d) and the blocker below dissolved exactly as diagnosed: repro resolves, no SIGSEGV, host suite runs to completion. **The four §14 residues re-confirmed with no code change** — N3 refused after two ~2k turns (`contextSize=4096, tokenCount=4252`); §7.7 `input.total=221 cached=0 output.total=7`, sum 228, and 221 is the *same* figure rev 9 measured against `cached=209`, so the inclusive-accounting invariance reproduces; §7.3 `4 generations, 199 snapshots, 0 revisions`; §7.2 thrown-not-trapped. Only remaining failures are the three recorded §7 items. Beta 4 deletion re-unblocked, held for the gate |
 | 2026-08-16 | **Phase 0 — Beta 5, blocked** | sim 429/429; `Understudy` 23/23; host blocked | Xcode `27A5237l` / SDK `26A5406c` / iOS runtime `24A5408d`. **Findings (§6 item 3):** `Transcript.Segment` lost `.custom` and `CustomSegment` is gone (falsifies rev 7 §5, §7.3's N11 framing, OQ9's closure); metadata dictionaries retyped to `ConvertibleToGeneratedContent`/`GeneratedContent` (broke `Understudy`'s build, and turned §7.7/§7.8's two metadata reads into permanent nils *silently*); **`SystemLanguageModel.variant` reopens OQ8**; `history` → `HistoryView`, `supportedLanguages`/`supportsLocale` → `async throws`, `LanguageModelCapabilities.init(capabilities:)` removed — none consumed. §8 untouched: error surface identical. **Blocker:** SDK ahead of OS — host macOS `26A5388g` lacks the new `Transcript.Response.init` symbol, so the host suite SIGSEGVs in `rehydrate`; proven with a ten-line repro outside the repo. Beta 4 retained (D56b); pin and manifests verified but unmoved pending §7 sign-off, which the owner scheduled for the Phase 0 gate. **Owner decision (D56d): update macOS to the Beta 5 train rather than reverting the toolchain** — the only route that closes Phase 0, since the device tier, residues, PCC spike and both tripwires are host-only. Plan edits: D50 gains part 3 (attach-path prune, F6), guardrail 3's grep corrected to `GenerationDriver(`, PCC's API half closed by reading (bare `init()`, so the spike is purely empirical) |
 | 2026-08-16 | **Plan drafted** at the M7 boundary | 452 (429 + 23) | Drafted from the M7 boundary audit (same date). Phase 0 carries Beta 5 + the M7 eyeball item; Phase 1 carries audit findings F1 (D50), F2, F4 and the PCC spike (D53); rev 11 inventory seeded with one item already decided (cut line 1 retired, owner 2026-08-16). Owner sign-offs recorded: Beta 4 deletion post-verification, cut line 1 retirement, PCC spike, eyeball → Phase 0, short-turns budget posture (D54), throw-channel rendering (D55) |

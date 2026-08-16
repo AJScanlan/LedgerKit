@@ -174,14 +174,27 @@ let consumedSurface: [PinnedDeclaration] = [
         type: "Transcript.Entry",
         members: ["instructions", "prompt", "toolCalls", "toolOutput", "response", "reasoning"]
     ),
+    // ⚠️ **`custom` was here until Xcode 27 Beta 5, and its removal is a §7
+    // decision, not a manifest edit** (signed off 2026-08-16; rev 11 item 3.1).
+    // Beta 5 deleted the `Transcript.CustomSegment` protocol outright, taking
+    // this case and `Response.Action.updateCustomSegment` with it. Nothing in
+    // LedgerKit's *behaviour* changes — v0.1 records text deltas only, so
+    // ignoring a kind that no longer exists is the same code — but three live
+    // spec passages cited `custom` as evidence and are amended at rev 11: §5's
+    // "grew to four", §7.3's non-text list, and OQ9's closure. OQ9's *answer* is
+    // unchanged: reasoning survives, so v0.1's silence is still an owned choice.
+    //
+    // Worth recording that this pin did its job in the direction nobody plans
+    // for — a surface can **shrink** mid-beta, and a manifest that only caught
+    // additions would have missed it.
     .init(
         type: "Transcript.Segment",
-        members: ["text", "structure", "attachment", "custom"]
+        members: ["text", "structure", "attachment"]
     ),
     .init(
         type: "LanguageModelExecutorGenerationChannel.Response.Action",
         members: ["addAttachmentSegment", "appendText", "removeAttachmentSegment",
-                  "replaceTextSegment", "updateCustomSegment", "updateMetadata", "updateUsage"]
+                  "replaceTextSegment", "updateMetadata", "updateUsage"]
     ),
 ]
 
@@ -429,9 +442,24 @@ struct AppleErrorSurfaceTests {
     /// whole point: the update is trivial, the re-verification is not, and the
     /// two are deliberately bundled so the second cannot be skipped while the
     /// first is done.
+    ///
+    /// **Moved once, 2026-08-16: `26A5388f` → `26A5406c` (Xcode 27 Beta 5).** The
+    /// bundling worked exactly as this doc intends — the re-verification found a
+    /// removed `Transcript.Segment` case, a removed channel action, a retyped
+    /// metadata dictionary that had silently turned two §7.7/§7.8 reads into
+    /// permanent nils, and a new `SystemLanguageModel.variant` that narrowed
+    /// OQ8's claim. None of that would have been looked for if this line were
+    /// cheap to change alone.
+    ///
+    /// ⚠️ **One thing this test cannot see, learned the same day:** it pins the
+    /// *SDK*, and the SDK can be ahead of the **OS**. Beta 5's SDK declared a
+    /// `Transcript.Response.init` the Beta 4-era runtime did not export, which
+    /// crashes the test process in dyld rather than failing anything here. If a
+    /// toolchain bump produces a SIGSEGV instead of a red test, check
+    /// `sw_vers` against the SDK build before suspecting this repo.
     @Test("the SDK this manifest was verified against is the SDK installed")
     func sdkBuildIsPinned() throws {
-        let verified = "26A5388f"
+        let verified = "26A5406c"
         let installed = try #require(sdkBuildVersion)
 
         #expect(
