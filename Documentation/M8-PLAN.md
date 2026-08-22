@@ -1,11 +1,13 @@
 # M8 Implementation Plan — the `Projection` demo app (the hero)
 
-**Status:** 🟨 **PHASE 0 COMPLETE 2026-08-16 — 452 green on Xcode 27 Beta 5**
-(429 `LedgerKit` + 23 `Understudy`, warning-free, host + iOS 27 simulator; device
-and deep tiers green too). Toolchain of record: Xcode `27A5237l`, macOS SDK
-`26A5406c`, host OS `26A5406e`, iOS runtime `24A5408d`; Beta 4 deleted, one Xcode
-installed. **M7's last open exit item (the streaming eyeball) is closed**, so M7
-is now unconditionally complete. Phase 1 next.
+**Status:** 🟨 **PHASES 0 AND 1 COMPLETE 2026-08-16 — 457 green on Xcode 27
+Beta 5** (434 `LedgerKit` + 23 `Understudy`, warning-free, across host, device,
+deep and iOS 27 simulator tiers). Toolchain of record: Xcode `27A5237l`, macOS
+SDK `26A5406c`, host OS `26A5406e`, iOS runtime `24A5408d`; Beta 4 deleted, one
+Xcode installed. **M7's last open exit item (the streaming eyeball) is closed**,
+so M7 is now unconditionally complete. **Phase 2 next — the demo app**, which
+needs no provider decision: it runs on `ScriptedLanguageModel` (D53 deferred to
+Phase 3).
 
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M8 section) · [SPEC.md](./SPEC.md)
 §11 (the sketch and the showpiece switch), §13 DoD-1/DoD-2, §12 (cut lines),
@@ -432,11 +434,18 @@ design; Beta 4 retained by design.
 
 ### Phase 1 — Hygiene: the M7 audit's findings + the PCC spike (tier 1)
 
-**Status:** 🟨 **AT THE GATE 2026-08-16 — 456 green** (433 `LedgerKit` + 23
+**Status:** ☑ **PHASE 1 COMPLETE 2026-08-16 — 457 green** (434 `LedgerKit` + 23
 `Understudy`, warning-free; host, device, deep and simulator tiers). Every code
 item landed with the tests that would have caught it and the mutations that prove
-them. **One decision is outstanding and it is Alexander's: D53 — the PCC spike
-came back negative.**
+them. **D53 resolved by the owner: defer** — neither provider is usable *today*
+(PCC entitlement-gated; Claude's tagged releases broken by Beta 5's
+`Transcript.CustomSegment` removal), both are expected to become usable, and
+Phase 2 needs neither. Revisit at Phase 3.
+
+**The read side can no longer stick**, which was the phase's whole point: an
+abandoned generation converges to `.interrupted` on an attached projection, and a
+projection attaching in the wind-down window shows the terminal rather than an
+empty streaming bubble. The demo can now be built on it.
 
 **Two findings this phase added to the plan, neither in it when it was drafted:**
 
@@ -596,6 +605,40 @@ top.
          off it by any amount of normalization code**. That is the strongest
          evidence yet for §8's claim that the floor is *"a working part of the
          design rather than a rarely-taken floor."*
+      6. ✅ **A live turn ran** (owner's key, owner's terminal — the key never
+         entered the repo, a file, or a transcript). Claude Sonnet 5, streaming
+         through `streamResponse`, which is the path `GenerationDriver` uses:
+
+         ```
+         → ✅ "**Valley fold** — one of the most basic origami folds, …"
+         snapshots=4 prefixViolations=0
+         usage: input.total=18 cached=0 output.total=58
+         aggregate=76 vs input+output=76
+         ```
+
+         Three readings, and the third is the one to be careful about:
+
+         - **§7.3's prefix property holds on a non-Apple provider — the first
+           third-party evidence there has ever been.** Rev 9's "0 non-prefix
+           across 412 snapshots" was *entirely* Apple's on-device model, and
+           §7.3 is deliberately careful that prefix stability is **provider
+           behaviour, not an API guarantee**. A provider with a completely
+           different architecture underneath (HTTP SSE, translated into the
+           channel) also produced none. ⚠️ **Sample size is 4 snapshots of 1
+           generation** against 412 of 12 — a *data point*, not a measurement,
+           and it must not be written into the spec as though it were one. What
+           it does is widen the claim's base from one vendor to two.
+         - **Coalescing behaves as §7.3 describes**: 58 output tokens arrived in
+           **4** snapshots, so "assert text, never fragment boundaries" holds on
+           this provider too.
+         - ⚠️ **§7.7's *inclusivity* was NOT tested here, and saying otherwise
+           would be the mistake rev 9 warned about.** `cached=0` on a first call,
+           and with a cold cache inclusive and exclusive accounting are
+           **indistinguishable** — which is precisely why rev 9's evidence was an
+           *invariance* across two cache states rather than a single reading.
+           What this run does confirm is the weaker, still-useful half: the
+           aggregate does not double-count (`76 == 18 + 58`), off-device, on a
+           provider whose numbers originate outside Apple's framework.
 
 - [x] **F7 — the §7.7 residue's floor was a remembered constant** (found by this
       phase's device run; not in the plan). `#expect(input.total > 100)` was
@@ -633,6 +676,14 @@ three tests of three properties from three tests of one.
 recorded; **D53 resolved** — PCC confirmed, or the fallback decision made by
 Alexander on the spike's evidence. D50's remedy confirmed against the audit's
 race table.
+
+**Gate met 2026-08-16.** ☑ 457 green across host, device, deep and simulator.
+☑ Five mutations logged, including one that had to be *made* catchable. ☑ D53
+resolved (defer, owner). ☑ D50's remedy checked against every window in the
+audit's race table, and the table itself now lives in `reconciled(_:with:…)`'s
+doc where the code can be read against it. Two findings arrived that the plan did
+not anticipate — F6 at plan review, F7 from the phase's own device run — and both
+are recorded as such rather than folded in silently.
 
 ---
 
@@ -864,13 +915,13 @@ Item 2 is **already decided** and awaits only the wording pass.
 | Beta 5: suite green, pin moved, drift dispositioned | full run + `AppleErrorSurfaceTests` | ☑ 452 green both substrates; pin `26A5406c`; four findings dispositioned, two signed off |
 | Residues re-asked on Beta 5 | `ResidueTests` under `LEDGERKIT_DEVICE=1` | ☑ all four re-confirmed, no code change |
 | M7 eyeball item closed | Phase 0, owner | ☑ 2026-08-16 — polish deferred to Phase 2 if the GIF wants it |
-| F1: abandoned generation converges to `.interrupted` on an attached projection (flush-failure and terminal-failure doors) | new Phase 1 tests | ☐ |
-| F1: the store's abandon notify — mutation caught | Phase 1 mutation log | ☐ |
-| F1: prune conjunction — mutation caught | Phase 1 mutation log | ☐ |
-| F6: attaching between a terminal's append and its release shows the completed message, not an empty streaming bubble (D50.3) | new Phase 1 test | ☐ |
-| F6: init-side prune — mutation caught | Phase 1 mutation log | ☐ |
-| F2/F4 comment corrections | diff | ☐ |
-| D53: PCC generates (or fallback decided on evidence) | spike record in §10 | ☐ |
+| F1: abandoned generation converges to `.interrupted` on an attached projection (flush-failure and terminal-failure doors) | `AbandonedGenerationTests` (both doors, red-first) | ☑ |
+| F1: the store's abandon notify — mutation caught | Phase 1 mutation log, row 1 | ☑ |
+| F1: prune conjunction — mutation caught | Phase 1 mutation log, row 2 | ☑ |
+| F6: attaching between a terminal's append and its release shows the completed message, not an empty streaming bubble (D50.3) | `attachingDuringWindDownShowsTheTerminal` | ☑ |
+| F6: init-side prune — mutation caught | Phase 1 mutation log, row 3 | ☑ |
+| F2/F4 comment corrections | diff | ☑ |
+| D53: PCC generates (or fallback decided on evidence) | two spikes recorded in Phase 1; owner deferred to Phase 3 | ☑ |
 | DoD-1: kill/relaunch flow live over sqlite; GIF recorded | Phase 3; `RecoveryTests` as the automated sibling | ☐ |
 | DoD-2: one-line swap runs against the D53 provider | Phase 3 | ☐ |
 | Throw channel rendered (D55) | Phase 2 UI + drive-through | ☐ |
@@ -888,7 +939,7 @@ Item 2 is **already decided** and awaits only the wording pass.
 | D50 | **The abandoned-generation remedy**: the store clears `shownPartials` and publishes `.changed` on any throw out of `drive` (D39's "live set moved" half, previously unimplemented); the projection's prune keeps an entry iff classified `.interrupted` **and** present in the store's live set. Shown text visibly shrinks to the durable prefix — owned, and stated in rev 11 item 1 | **Proposed** 2026-08-16 (audit F1); Phase 1 confirms |
 | D51 | Demo architecture: one app model owns the store + the single provider-naming `driver()` line; screens own their projections; `isDeleted` drives navigation | **Proposed** 2026-08-16 |
 | D52 | Database at `Application Support/LedgerKit/demo.sqlite`; the library's protection floor is the demo's whole answer | **Proposed** 2026-08-16 |
-| D53 | DoD-2's provider is PCC, **pending the Phase 1 spike**; on a negative result the fallback (Claude-package ring check, or restate DoD-2) is Alexander's call on the evidence | ⛔️ **Spike ran 2026-08-16 and came back NEGATIVE** — PCC reports `.available` and fails deterministically (`ModelManagerError#1046`), while the on-device control generates on the same host. Evidence is in Phase 1's checklist. **Awaiting Alexander's fallback decision**; Phase 3 cannot demonstrate DoD-2 until it is taken |
+| D53 | DoD-2's provider is PCC, **pending the Phase 1 spike**; on a negative result the fallback (Claude-package ring check, or restate DoD-2) is Alexander's call on the evidence. **Both branches now have evidence.** PCC: entitlement-gated (Apple Small Business Program, applied, no response yet) and failing `ModelManagerError#1046` meanwhile. Claude: **works end to end** — real streamed generation, prefix-stable, correct usage accounting — but its **tagged** releases do not build on Beta 5 (they use the removed `Transcript.CustomSegment`); only the untagged default branch does. So the choice is *when*, not *whether*: wait for either Anthropic's next tag or Apple's entitlement, or pin the demo to a revision. Recommendation: **wait** — Phase 2 needs neither. ☑ **Resolved 2026-08-16 (owner): defer to Phase 3.** No demo pin to an unreleased vendor revision; Phase 2 proceeds on `ScriptedLanguageModel`. If both land by Phase 3 the demo shows **scripted → on-device → Claude → PCC** at one line each, which *demonstrates* DoD-2's claim rather than asserting it; if neither has, pinning a revision for a demo — not a shipped library dependency — is the fallback-to-the-fallback | ⛔️ **Spike ran 2026-08-16 and came back NEGATIVE** — PCC reports `.available` and fails deterministically (`ModelManagerError#1046`), while the on-device control generates on the same host. Evidence is in Phase 1's checklist. **Awaiting Alexander's fallback decision**; Phase 3 cannot demonstrate DoD-2 until it is taken |
 | D54 | 4096 budget: short turns for the GIF; `.reduceContext` bubble kept; no compaction wiring — hitting the window renders the bubble, which is correct | **Accepted** 2026-08-16 (owner) |
 | D55 | The throw channel is rendered, not swallowed: alert for `persistenceFailure`, prevented-state for `generationInFlight`, ignore `CancellationError`, render-if-ever-reached for the target errors | **Accepted** 2026-08-16 (owner) |
 | D56 | **The Beta 5 posture.** (a) Two build repairs land as Phase 0's owned exception to "zero repo changes", because no failure inventory exists until the build compiles: `Understudy`'s metadata box → `any ConvertibleToGeneratedContent` (public `Script` vocabulary unchanged), and `GenerationDriver.stopInfo(from:)` reading `GeneratedContent` via `try? String(_:)` instead of a cast that had become a permanent nil. (b) **Beta 4 is retained** until the host tier is genuinely green — the deletion was priced against a condition this host could not yet reach. (c) The manifests and the SDK pin are **verified but not edited**, pending the two §7 sign-offs in §6 item 3.1/3.3, which the owner scheduled for the Phase 0 gate alongside rev 11's drafting. (d) **The OS moves to the Beta 5 train** (owner, 2026-08-16) rather than the toolchain moving back — the only option that lets Phase 0 close, since the device tier, the residue suite, the PCC spike and both surface tripwires are all host-only | **Accepted** 2026-08-16 — (a) landed; (b)(c) in force; (d) owner action pending |
@@ -907,6 +958,7 @@ no rollback. Deletion is rescheduled to after the host tier is genuinely green.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-16 | **Phase 1 ☑ COMPLETE** | **457** (434 + 23), host + device + deep + simulator | Gate met. **D53 resolved (owner): defer to Phase 3** — neither provider usable today, both expected to become so, and Phase 2 needs neither. **D57 accepted and landed** (zero-count context overflow → nil), found by spiking `ClaudeForFoundationModels`: Anthropic maps request-too-large onto `LanguageModelError.contextSizeExceeded` with `0`/`0`, which LedgerKit would have recorded as a measured zero-token window in an append-only log. The spike also produced §7.3's **first third-party prefix-stability evidence** (0 violations — a data point, not a measurement: 4 snapshots vs rev 9's 412) and independently confirmed Phase 0's `Transcript.CustomSegment` finding, since the package's *tagged* releases break on the same removal |
 | 2026-08-16 | **Phase 1 — at the gate** | **456** (433 + 23), host + device + deep + simulator | F1 landed in three parts (D50.1 store notify, D50.2 prune conjunction, D50.3 attach-path reconciliation) behind four new tests written red-first: all four failed before the fix, three by *hanging* until `.timeLimit`, which is F1 itself. `drive` split into slot-lifecycle + `runToTerminal` so abandonment has one catch rather than one per door. Five mutations, five resolved — row 4 was **initially uncatchable** (a leaked `shownPartials` entry is unreachable through `liveSet`), answered by deriving the invariant *nothing running ⇒ nothing held* and exposing `generationsWithShownPartials` to assert it. F2/F4 comment corrections landed (three "proposed for rev 9" → "landed"; the session-cache prose reworded to allowance-plus-reality, public symbol first). **F7 found and fixed**: the §7.7 residue's `> 100` floor was calibrated on model verbosity and flaked at 74/81 — repaired to a two-measured-value comparison; the residue's *answer* never moved. ⛔️ **D53 negative**: PCC is `.available` and fails deterministically (`ModelManagerError#1046`) while on-device generates on the same host — awaiting the owner's fallback decision |
 | 2026-08-16 | **Phase 0 ☑ COMPLETE** | **452** (429 + 23), both substrates | Owner signed off both §7 items (§6 item 3.1 and 3.3), drafted to `scratchpad/rev11-draft.md` per the standing pattern. Three one-line code edits landed together: `Transcript.Segment` 4 → 3, `Response.Action` 7 → 6, pin `26A5388f` → `26A5406c`; each manifest entry carries the *why*. **3.3 is scoping only — nothing wired**: `ModelDescriptor.version` stays nil (a `displayName` is display data, and a closed map over an open set of `Variant`s is the `unrecognized`-floor problem on the wire); `StopInfo.resolvedModelID` recorded as the home *if* Apple ever ships a stable identifier. Eyeball closed (owner) → **M7 unconditionally complete**; Beta 4 deleted → audit F3 moot; CLAUDE.md's two toolchain lines and the pin reference updated, with the SDK/OS train-match warning added. SPEC untouched — rev 11 lands at Phase 4 |
 | 2026-08-16 | **Phase 0 — Beta 5, at the gate** | host 429 (3 known issues); `Understudy` 23/23; device + deep green; sim 429/429; app builds | macOS updated to `26A5406e` (D56d) and the blocker below dissolved exactly as diagnosed: repro resolves, no SIGSEGV, host suite runs to completion. **The four §14 residues re-confirmed with no code change** — N3 refused after two ~2k turns (`contextSize=4096, tokenCount=4252`); §7.7 `input.total=221 cached=0 output.total=7`, sum 228, and 221 is the *same* figure rev 9 measured against `cached=209`, so the inclusive-accounting invariance reproduces; §7.3 `4 generations, 199 snapshots, 0 revisions`; §7.2 thrown-not-trapped. Only remaining failures are the three recorded §7 items. Beta 4 deletion re-unblocked, held for the gate |
