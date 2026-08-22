@@ -432,7 +432,20 @@ design; Beta 4 retained by design.
 
 ### Phase 1 — Hygiene: the M7 audit's findings + the PCC spike (tier 1)
 
-**Status:** ☐ not started
+**Status:** 🟨 **AT THE GATE 2026-08-16 — 456 green** (433 `LedgerKit` + 23
+`Understudy`, warning-free; host, device, deep and simulator tiers). Every code
+item landed with the tests that would have caught it and the mutations that prove
+them. **One decision is outstanding and it is Alexander's: D53 — the PCC spike
+came back negative.**
+
+**Two findings this phase added to the plan, neither in it when it was drafted:**
+
+- **F6/D50.3** (found at plan review) — the attach path never reconciled. Landed
+  with F1.
+- **F7** (found by this phase's own device run) — the §7.7 residue's floor was
+  calibrated on the model's *verbosity* and flaked. See the item below; it is a
+  test defect, not a library one, and it is the CLAUDE.md rule it cites being
+  broken by the test that cites it.
 
 **Goal:** the read side cannot stick (F1/D50), the two comment findings are
 fixed, and D53's empirical question is answered — before any UI is built on
@@ -491,8 +504,73 @@ top.
       entitlement — plus `availability`, `isAvailable`, `quotaUsage`, and the
       three-case `Error` §8 already maps. So D53's swap line is literally
       `PrivateCloudComputeLanguageModel()` and **the spike is purely
-      empirical**: does it generate here. ⚠️ Host-only, so it is blocked behind
-      D56 along with the device tier.
+      empirical**: does it generate here.
+      ⛔️ **RAN 2026-08-16 — PCC does NOT generate on this host.** Verbatim:
+
+      ```
+      PCC availability: available / isAvailable=true
+      quotaUsage      : belowLimit(isApproachingLimit: false)
+      capabilities    : [toolCalling, guidedGeneration, vision, reasoning]
+      respond #1..#3  : ❌ untyped NSError(FoundationModels.LanguageModelError, -1)
+                           → FoundationModels.LanguageModelError#-1
+                           → ModelManagerServices.ModelManagerError#1046
+      streamResponse  : ❌ (identical — the driver's own path fails the same way)
+      on-device control: ✅ "Crane fold."
+      ```
+
+      **Deterministic, not transient** — 4/4 attempts across both the `respond`
+      and `streamResponse` paths, identical error each time. **And it is
+      PCC-specific**: the on-device control generated on the same host in the
+      same process, so Apple Intelligence here is fine.
+
+      Three things follow, and only the third needs a decision:
+      1. **§14's "availability is advisory" gets a second, independent
+         confirmation — on a different provider.** Rev 9 recorded it for the
+         on-device model; PCC reports `.available`, `isAvailable == true`, and
+         quota below limit, and then fails every time. This strengthens an
+         existing finding rather than opening a new question.
+      2. **§8 is unmoved, and the PCC rows stay unreached.** The failure is an
+         *untyped* `NSError` in Foundation Models' own domain — the first of the
+         two shapes §8's "what total claims, precisely" paragraph already names —
+         so it lands on the `unrecognized` floor by rule 5. The typed PCC rows
+         (`networkFailure`, `quotaLimitReached`, `serviceUnavailable`) receive
+         nothing through this door. Rule 5 doing its job, loudly.
+      3. **DoD-2 cannot be demonstrated with PCC as things stand** (D53).
+      Deliberately **not** promoted to a device-gated test yet: a probe for a
+      provider we may not use would be vestigial, and pinning a *broken* state
+      would fail the day it starts working. Promote after D53 resolves.
+
+- [x] **F7 — the §7.7 residue's floor was a remembered constant** (found by this
+      phase's device run; not in the plan). `#expect(input.total > 100)` was
+      calibrated against the 221 the answering run happened to report — but the
+      second turn's input includes **turn 1's reply**, whose length the model
+      chooses. Measured on one machine and one beta: `"Hello!"` → 74, `"Hello!
+      How can I assist you today?"` → 81, and turn *one*'s input is stable at 58.
+      So the constant failed for the **test author's** reason rather than the
+      code's, which is precisely the defect CLAUDE.md's "bound non-vacuity
+      assertions on measured values, not guesses" rule names — committed inside a
+      test that cites the rule. Repaired by comparing **two measured values**:
+      turn 2's input must exceed turn 1's, which is what inclusive accounting
+      means and the opposite of what exclusive would produce (turn 2 would be the
+      uncached remainder, smaller than turn 1). Robust to verbosity *and* cache
+      warmth, no constants. Verified green across repeated runs on both verbosity
+      outcomes. ⚠️ **The residue's answer never moved** — every reading satisfied
+      `usage.total == input.total + output.total` and `cached <= total`; only the
+      magic number was wrong.
+
+**Mutation log (five run, five resolved):**
+
+| # | Mutation | Result |
+|---|---|---|
+| 1 | `abandon` no longer notifies | ☑ caught — the three F1 tests hit the time limit; F6 unaffected |
+| 2 | prune drops the `storeLive` conjunction | ☑ caught — same three; F6 unaffected |
+| 3 | attach path skips the reconciliation | ☑ caught — F6 only; the F1 three unaffected |
+| 4 | `abandon` notifies but leaks `shownPartials` | ⚠️ **initially uncatchable** — the whole suite stayed green, because a partial is only ever *read* through `liveSet(of:)`, which is gated on the slot, so a leak is unreachable rather than wrong. Per the standing rule the response was to derive the property that *would* break and test it: `generationsWithShownPartials` is now internal-observable and the F1 tests assert **nothing running ⇒ nothing held**. Re-run: ☑ caught |
+| 5 | — | (the clear-vs-notify *order* remains genuinely unobservable: nothing suspends between them, so no subscriber can interleave. Claimed nothing for it) |
+
+**The partition in rows 1–3 is itself evidence:** each mutation is caught by
+exactly the tests that should catch it and no others, which is what distinguishes
+three tests of three properties from three tests of one.
 
 **Review gate:** suites green with the new tests, both substrates; mutations
 recorded; **D53 resolved** — PCC confirmed, or the fallback decision made by
@@ -753,7 +831,7 @@ Item 2 is **already decided** and awaits only the wording pass.
 | D50 | **The abandoned-generation remedy**: the store clears `shownPartials` and publishes `.changed` on any throw out of `drive` (D39's "live set moved" half, previously unimplemented); the projection's prune keeps an entry iff classified `.interrupted` **and** present in the store's live set. Shown text visibly shrinks to the durable prefix — owned, and stated in rev 11 item 1 | **Proposed** 2026-08-16 (audit F1); Phase 1 confirms |
 | D51 | Demo architecture: one app model owns the store + the single provider-naming `driver()` line; screens own their projections; `isDeleted` drives navigation | **Proposed** 2026-08-16 |
 | D52 | Database at `Application Support/LedgerKit/demo.sqlite`; the library's protection floor is the demo's whole answer | **Proposed** 2026-08-16 |
-| D53 | DoD-2's provider is PCC, **pending the Phase 1 spike**; on a negative result the fallback (Claude-package ring check, or restate DoD-2) is Alexander's call on the evidence | **Open** — spike scheduled Phase 1 |
+| D53 | DoD-2's provider is PCC, **pending the Phase 1 spike**; on a negative result the fallback (Claude-package ring check, or restate DoD-2) is Alexander's call on the evidence | ⛔️ **Spike ran 2026-08-16 and came back NEGATIVE** — PCC reports `.available` and fails deterministically (`ModelManagerError#1046`), while the on-device control generates on the same host. Evidence is in Phase 1's checklist. **Awaiting Alexander's fallback decision**; Phase 3 cannot demonstrate DoD-2 until it is taken |
 | D54 | 4096 budget: short turns for the GIF; `.reduceContext` bubble kept; no compaction wiring — hitting the window renders the bubble, which is correct | **Accepted** 2026-08-16 (owner) |
 | D55 | The throw channel is rendered, not swallowed: alert for `persistenceFailure`, prevented-state for `generationInFlight`, ignore `CancellationError`, render-if-ever-reached for the target errors | **Accepted** 2026-08-16 (owner) |
 | D56 | **The Beta 5 posture.** (a) Two build repairs land as Phase 0's owned exception to "zero repo changes", because no failure inventory exists until the build compiles: `Understudy`'s metadata box → `any ConvertibleToGeneratedContent` (public `Script` vocabulary unchanged), and `GenerationDriver.stopInfo(from:)` reading `GeneratedContent` via `try? String(_:)` instead of a cast that had become a permanent nil. (b) **Beta 4 is retained** until the host tier is genuinely green — the deletion was priced against a condition this host could not yet reach. (c) The manifests and the SDK pin are **verified but not edited**, pending the two §7 sign-offs in §6 item 3.1/3.3, which the owner scheduled for the Phase 0 gate alongside rev 11's drafting. (d) **The OS moves to the Beta 5 train** (owner, 2026-08-16) rather than the toolchain moving back — the only option that lets Phase 0 close, since the device tier, the residue suite, the PCC spike and both surface tripwires are all host-only | **Accepted** 2026-08-16 — (a) landed; (b)(c) in force; (d) owner action pending |
@@ -770,6 +848,7 @@ no rollback. Deletion is rescheduled to after the host tier is genuinely green.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-16 | **Phase 1 — at the gate** | **456** (433 + 23), host + device + deep + simulator | F1 landed in three parts (D50.1 store notify, D50.2 prune conjunction, D50.3 attach-path reconciliation) behind four new tests written red-first: all four failed before the fix, three by *hanging* until `.timeLimit`, which is F1 itself. `drive` split into slot-lifecycle + `runToTerminal` so abandonment has one catch rather than one per door. Five mutations, five resolved — row 4 was **initially uncatchable** (a leaked `shownPartials` entry is unreachable through `liveSet`), answered by deriving the invariant *nothing running ⇒ nothing held* and exposing `generationsWithShownPartials` to assert it. F2/F4 comment corrections landed (three "proposed for rev 9" → "landed"; the session-cache prose reworded to allowance-plus-reality, public symbol first). **F7 found and fixed**: the §7.7 residue's `> 100` floor was calibrated on model verbosity and flaked at 74/81 — repaired to a two-measured-value comparison; the residue's *answer* never moved. ⛔️ **D53 negative**: PCC is `.available` and fails deterministically (`ModelManagerError#1046`) while on-device generates on the same host — awaiting the owner's fallback decision |
 | 2026-08-16 | **Phase 0 ☑ COMPLETE** | **452** (429 + 23), both substrates | Owner signed off both §7 items (§6 item 3.1 and 3.3), drafted to `scratchpad/rev11-draft.md` per the standing pattern. Three one-line code edits landed together: `Transcript.Segment` 4 → 3, `Response.Action` 7 → 6, pin `26A5388f` → `26A5406c`; each manifest entry carries the *why*. **3.3 is scoping only — nothing wired**: `ModelDescriptor.version` stays nil (a `displayName` is display data, and a closed map over an open set of `Variant`s is the `unrecognized`-floor problem on the wire); `StopInfo.resolvedModelID` recorded as the home *if* Apple ever ships a stable identifier. Eyeball closed (owner) → **M7 unconditionally complete**; Beta 4 deleted → audit F3 moot; CLAUDE.md's two toolchain lines and the pin reference updated, with the SDK/OS train-match warning added. SPEC untouched — rev 11 lands at Phase 4 |
 | 2026-08-16 | **Phase 0 — Beta 5, at the gate** | host 429 (3 known issues); `Understudy` 23/23; device + deep green; sim 429/429; app builds | macOS updated to `26A5406e` (D56d) and the blocker below dissolved exactly as diagnosed: repro resolves, no SIGSEGV, host suite runs to completion. **The four §14 residues re-confirmed with no code change** — N3 refused after two ~2k turns (`contextSize=4096, tokenCount=4252`); §7.7 `input.total=221 cached=0 output.total=7`, sum 228, and 221 is the *same* figure rev 9 measured against `cached=209`, so the inclusive-accounting invariance reproduces; §7.3 `4 generations, 199 snapshots, 0 revisions`; §7.2 thrown-not-trapped. Only remaining failures are the three recorded §7 items. Beta 4 deletion re-unblocked, held for the gate |
 | 2026-08-16 | **Phase 0 — Beta 5, blocked** | sim 429/429; `Understudy` 23/23; host blocked | Xcode `27A5237l` / SDK `26A5406c` / iOS runtime `24A5408d`. **Findings (§6 item 3):** `Transcript.Segment` lost `.custom` and `CustomSegment` is gone (falsifies rev 7 §5, §7.3's N11 framing, OQ9's closure); metadata dictionaries retyped to `ConvertibleToGeneratedContent`/`GeneratedContent` (broke `Understudy`'s build, and turned §7.7/§7.8's two metadata reads into permanent nils *silently*); **`SystemLanguageModel.variant` reopens OQ8**; `history` → `HistoryView`, `supportedLanguages`/`supportsLocale` → `async throws`, `LanguageModelCapabilities.init(capabilities:)` removed — none consumed. §8 untouched: error surface identical. **Blocker:** SDK ahead of OS — host macOS `26A5388g` lacks the new `Transcript.Response.init` symbol, so the host suite SIGSEGVs in `rehydrate`; proven with a ten-line repro outside the repo. Beta 4 retained (D56b); pin and manifests verified but unmoved pending §7 sign-off, which the owner scheduled for the Phase 0 gate. **Owner decision (D56d): update macOS to the Beta 5 train rather than reverting the toolchain** — the only route that closes Phase 0, since the device tier, residues, PCC spike and both tripwires are host-only. Plan edits: D50 gains part 3 (attach-path prune, F6), guardrail 3's grep corrected to `GenerationDriver(`, PCC's API half closed by reading (bare `init()`, so the spike is purely empirical) |

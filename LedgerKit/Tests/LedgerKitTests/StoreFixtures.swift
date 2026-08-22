@@ -444,6 +444,20 @@ final class ParkingStore: PersistenceStore {
         /// starter interleaving here holds a cached fold that says the
         /// conversation exists and is about to append into nothing.
         case delete
+        /// Parks inside the snapshot refresh, which — with the default policy —
+        /// runs **inside the terminal's own `append`** (§9's after-each-generation
+        /// cadence, sequenced within the verb rather than detached, rev 8).
+        ///
+        /// That lands a test in the one window F6/D50.3 is about: the terminal is
+        /// committed and its `.changed` published, so the *log* says the message
+        /// is finished — while `drive`'s `defer { release }` has not run, so the
+        /// store's live set still names the generation. A projection attaching
+        /// here reads a terminal fold and a running live set, which is precisely
+        /// the disagreement the prune exists to settle.
+        ///
+        /// The first `save` *is* the terminal's for any conversation short of the
+        /// 500-event floor, so "park the first" needs no counting.
+        case snapshotSave
     }
 
     private let wrapped: any PersistenceStore
@@ -475,6 +489,7 @@ final class ParkingStore: PersistenceStore {
 
     func save(_ snapshot: Snapshot) async throws {
         try await wrapped.save(snapshot)
+        if verb == .snapshotSave { await parkIfFirst() }
     }
 
     func deleteConversation(_ conversation: ConversationID) async throws {

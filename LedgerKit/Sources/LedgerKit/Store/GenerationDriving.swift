@@ -28,7 +28,8 @@ import Foundation
 //    store copies into `generationStarted`. The store never invents one.
 // 4. **The store hands over reduction output, not the log** — rehydration
 //    material (§7.1), already folded and classified. What a driver does with it
-//    (build a `Transcript`, hit a per-conversation session cache, §7.8) is M6's
+//    (build a `Transcript`, and — if it ever wants one — a per-conversation
+//    session cache, which v0.1 deliberately does not have, §7.8) is M6's
 //    business and invisible here.
 // 5. **Cancellation is bridged to the driver, never inherited by the
 //    recording.** The store runs the driver in an *unstructured* task and
@@ -113,9 +114,16 @@ public struct GenerationRequest: Sendable {
     /// The conversation this generation belongs to.
     ///
     /// Present because §7.8's cardinality rule needs it: one driver may serve
-    /// many conversations, and its session cache is keyed by exactly this — one
-    /// session per conversation, never one shared across them, because Apple's
-    /// sessions are single-flight (§6.5, §7.2).
+    /// many conversations, and a session must never be shared across them,
+    /// because Apple's sessions are single-flight (§6.5, §7.2).
+    ///
+    /// **v0.1 rebuilds a session per generation and caches nothing** (rev 10,
+    /// D33) — which is why there is nothing for `deleteConversation` to leave
+    /// stale, and why the cardinality ceiling is satisfied by construction rather
+    /// than by policy. A per-conversation reuse cache keyed by this identifier
+    /// remains legal headroom (§7.1's KV-cache optimization) and would have to
+    /// carry its own validity rule; correctness never depends on one, since
+    /// discard-and-rebuild is always allowed by the ownership rule.
     public var conversation: ConversationID
 
     /// The current instructions (latest `instructionsChanged`; nil ⇒ none).

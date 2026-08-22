@@ -200,27 +200,57 @@ struct DeviceResidueTests {
     /// is environmental — another test, or another process, decides it — and an
     /// assertion on state the test does not control is a flake wearing a
     /// guard's clothes. That mistake was made and caught here on 2026-08-02.
+    /// ⚠️ **The floor this test used to assert was calibrated on the model's
+    /// verbosity, and it flaked (M8 Phase 1, F7).**
+    ///
+    /// The original assertion was `input.total > 100`, chosen because the run
+    /// that answered the residue reported 221. But the second turn's input is
+    /// *instructions + turn 1's prompt + **turn 1's reply** + turn 2's prompt*,
+    /// and the reply to "Say hello." is not a fixed length: measured across runs
+    /// on one machine and one beta, `"Hello!"` gives 74 and `"Hello! How can I
+    /// assist you today?"` gives 81, while the chatty run that produced 221 is
+    /// simply rarer. Turn **one**'s input is stable at 58; turn two's is not.
+    ///
+    /// So the constant failed for the *test author's* reason rather than the
+    /// code's — the exact defect CLAUDE.md's "bound non-vacuity assertions on
+    /// measured values" rule names, committed in a test that cites the rule.
+    /// The repair is to compare **two measured values** instead of one measured
+    /// value against a remembered one, which is robust to verbosity *and* to
+    /// cache warmth, and states the same logical argument:
+    ///
+    /// - **Inclusive** ⇒ turn 2's input contains all of turn 1's input plus the
+    ///   reply plus the new prompt, so it is strictly larger.
+    /// - **Exclusive** ⇒ turn 2's input is the *uncached* remainder — the new
+    ///   turn alone, a handful of tokens — so it is strictly *smaller* than turn
+    ///   1's, which had nothing cached ahead of it.
+    ///
+    /// One comparison, no constants, and the two hypotheses land on opposite
+    /// sides of it.
     @Test("usage: the input total is inclusive of the cached count")
     func usageInclusivity() async throws {
         guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
         let session = session()
 
-        var last: LanguageModelSession.Usage?
+        var perTurn: [LanguageModelSession.Usage] = []
         for turn in ["Say hello.", "Say hello again."] {
+            var last: LanguageModelSession.Usage?
             for try await snapshot in session.streamResponse(to: turn) { last = snapshot.usage }
+            perTurn.append(try #require(last))
         }
 
-        let usage = try #require(last)
-        print("§7.7 — input.total=\(usage.input.totalTokenCount) cached=\(usage.input.cachedTokenCount) output.total=\(usage.output.totalTokenCount) reasoning=\(usage.output.reasoningTokenCount) usage.total=\(usage.totalTokenCount)")
+        let first = try #require(perTurn.first)
+        let usage = try #require(perTurn.last)
+        print("§7.7 — turn1.input.total=\(first.input.totalTokenCount) | input.total=\(usage.input.totalTokenCount) cached=\(usage.input.cachedTokenCount) output.total=\(usage.output.totalTokenCount) reasoning=\(usage.output.reasoningTokenCount) usage.total=\(usage.totalTokenCount)")
 
-        // The inclusivity signature, and the one assertion that survives either
-        // cache state: this is the *second* turn, whose new content is four
-        // words. A total that still counts the hundreds of tokens behind it is
-        // counting the whole input. An exclusive total would read ~12 here, so
-        // the floor separates the two answers with room for tokenizer drift.
+        // The inclusivity signature, anchored to a value this run measured rather
+        // than to one a previous run remembered — see the note above.
         #expect(
-            usage.input.totalTokenCount > 100,
-            "an input total this small would mean it counts only the new turn — i.e. exclusive of the cache"
+            usage.input.totalTokenCount > first.input.totalTokenCount,
+            """
+            the second turn's input must contain the first's. Reading \
+            \(usage.input.totalTokenCount) against \(first.input.totalTokenCount) \
+            would mean the total counts only the new turn — i.e. exclusive of the cache
+            """
         )
         #expect(
             usage.input.cachedTokenCount <= usage.input.totalTokenCount,

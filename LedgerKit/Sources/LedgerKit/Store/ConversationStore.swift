@@ -178,8 +178,12 @@ public actor ConversationStore {
     /// feed the milestone's one genuinely new architectural surface: nothing outside
     /// that function could see what the user was looking at.
     ///
-    /// Cleared when the generation winds down — the entry's whole purpose is to
-    /// describe something still running.
+    /// Cleared when the generation stops running, by **either** of its two exits:
+    /// the wind-down clears it after the terminal is durable, and ``abandon(_:in:)``
+    /// clears it on the couldn't-record path, where no terminal is ever written
+    /// (D50.1). The entry's whole purpose is to describe something still running,
+    /// so an exit that left one behind would leak a partial for a dead generation —
+    /// which is what the abandon path did until M8 Phase 1.
     private var shownPartials: [GenerationID: String] = [:]
     /// Live notification sinks, keyed by subscription token (D38).
     ///
@@ -946,6 +950,24 @@ public actor ConversationStore {
     /// (§10.4) applied to a wait instead of to a stream.
     var conversationsAwaitingStart: Set<ConversationID> { Set(startWaiters.keys) }
 
+    /// The generations still holding a shown partial (M8 Phase 1).
+    ///
+    /// Internal for ``liveGenerations``' reason — **it exists to be observed.**
+    /// ``shownPartials``' own doc claims an entry describes something still
+    /// running, and until this existed that claim had no witness: dropping the
+    /// clear from ``abandon(_:in:)`` left the whole suite green, because a partial
+    /// is only ever *read* through ``liveSet(of:)``, which is gated on the slot —
+    /// so a leaked entry is unreachable rather than wrong. Unreachable is not the
+    /// same as absent, and an append-only store that accumulates one dictionary
+    /// entry per failed generation for the life of the process is a real defect
+    /// with no behavioural symptom.
+    ///
+    /// So the property is asserted directly instead: **nothing running ⇒ nothing
+    /// held.** That is the mutation-response rule — when a mutation cannot be
+    /// caught, re-derive the property that would break and test *that*, rather
+    /// than weakening the claim.
+    var generationsWithShownPartials: Set<GenerationID> { Set(shownPartials.keys) }
+
     /// The generations currently in flight — **M7's `overlay_live` input**, and
     /// P2's third clause: the live set is always a subset of *open* (started,
     /// un-terminated) generations.
@@ -1104,6 +1126,64 @@ public actor ConversationStore {
     ) async throws -> Outcome {
         defer { release(conversation) }
 
+        // **Every throw out of this body is an abandonment, and the read side has
+        // to be told** (M8-PLAN D50.1, from the M7 boundary audit's F1). Wrapping
+        // the whole body rather than each door is deliberate: there are three ways
+        // out — a failed delta flush, a failed terminal in `windDown`, and a
+        // persistence failure in the rehydration read below — and a per-door catch
+        // would be three chances for a fourth to forget, which is exactly the
+        // argument that put `.changed` in `foldForward` alone (D38).
+        do {
+            return try await runToTerminal(generation, from: parent, in: conversation, using: driver)
+        } catch {
+            abandon(generation, in: conversation)
+            throw error
+        }
+    }
+
+    /// The couldn't-record path's other half: **say that the live set moved**
+    /// (M8-PLAN D50.1).
+    ///
+    /// Rev 8 defined the throw channel and rev 10 defined the attached read side;
+    /// neither owned their composition, and the seam was this: `.changed`
+    /// publishes only from ``foldForward(_:in:)``, which a *failed* append never
+    /// reaches. So an abandoned generation released its slot and told nobody, and
+    /// an attached projection went on showing `.streaming` for a dead generation
+    /// until its view was torn down — while a fresh attach correctly showed
+    /// `.interrupted`. Two derived views of one store, permanently disagreeing.
+    ///
+    /// **Ordering invariant this relies on, stated because it is not obvious:**
+    /// this runs before ``drive(_:from:in:using:)``'s `defer { release }`, and
+    /// nothing suspends between them — `notify` is a `yield`, which never
+    /// suspends. A subscriber therefore cannot be serviced until the slot is
+    /// already released, so the re-pull it performs reads a live set with this
+    /// generation gone. That is D38's absence-of-a-suspension argument, third
+    /// appearance.
+    ///
+    /// Reusing `.changed` rather than minting a case: `StoreNotification`'s
+    /// "derive it from the base" rule extends here. The base alone cannot say
+    /// *abandoned* — an abandoned generation and a running one both reduce
+    /// `.interrupted` (I5) — but base **plus live set** can, and that conjunction
+    /// is exactly what the re-pull reads.
+    private func abandon(_ generation: GenerationID, in conversation: ConversationID) {
+        shownPartials[generation] = nil
+        notify(.changed(conversation))
+    }
+
+    /// The generation itself: rehydrate, consume, persist on cadence, record one
+    /// terminal (D25, §7.4).
+    ///
+    /// Split out of ``drive(_:from:in:using:)`` at M8 Phase 1 so that method is
+    /// only the slot's lifecycle — release on every path, and tell the read side
+    /// when a path ended without a terminal (D50.1). Every `throw` from here is a
+    /// couldn't-record; every `return` is the one terminal §7.9 makes the type's
+    /// grammar.
+    private func runToTerminal(
+        _ generation: GenerationID,
+        from parent: MessageID,
+        in conversation: ConversationID,
+        using driver: some GenerationDriving
+    ) async throws -> Outcome {
         // **The rehydration read belongs inside this guard** (M6-PLAN A2, from
         // the M5 boundary audit). It used to sit in `run`, between `generate`'s
         // rollback and the `defer` above — covered by neither. It reads from the
@@ -1125,7 +1205,8 @@ public actor ConversationStore {
         // A persistence failure falls through as `persistenceFailure` with the
         // generation left **open** — rev 8's "couldn't record" clause, which is
         // already the contract: `.interrupted` on reload says something went
-        // wrong, where a terminal claiming success would lie.
+        // wrong, where a terminal claiming success would lie. The caller's catch
+        // publishes the `.changed` that tells the read side so (D50.1).
 
         let (signals, channel) = GenerationChannel.makeStream()
         let driving = Task { await Self.produce(request, from: driver, into: channel) }
@@ -1206,9 +1287,16 @@ public actor ConversationStore {
             // told about, and the terminal's own `.changed` is what tells every
             // subscriber to stop treating it as live (D47).
             //
-            // Not in `drive`'s `defer` beside `release`, deliberately — that runs on
-            // the throwing path too, where no terminal was written and the partial
-            // is still the truest account of what the user saw.
+            // ⚠️ **Ordering is the reason it lives here rather than in `drive`'s
+            // `defer`** (corrected M8 Phase 1). The retired justification said the
+            // throwing path should keep its partial because it was "the truest
+            // account of what the user saw" — which was wrong twice: the partial
+            // outlived the generation that owned it, and it described text the log
+            // does not contain, so a re-pull would have disagreed with it anyway.
+            // The abandon path now has its own clear (D50.1). What is genuinely
+            // position-dependent is only this: the clear must follow the terminal's
+            // append, or a subscriber woken by that append would re-read a live set
+            // whose partial had already vanished.
             shownPartials[generation] = nil
         }.value
         return outcome

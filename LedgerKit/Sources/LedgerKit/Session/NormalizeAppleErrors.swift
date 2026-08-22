@@ -206,7 +206,7 @@ func normalize(_ error: LanguageModelSession.Error) -> GenerationError {
 /// the modern spelling of a condition §8 *does* already have a home for: model
 /// assets not on the device is `modelNotReady`, which classifies
 /// `recoverableUpstream(.awaitModelDownload)` — exactly the affordance a user
-/// waiting on a download needs. **Proposed for rev 9**, since §8 claims totality.
+/// waiting on a download needs. **Landed rev 9**, since §8 claims totality.
 @available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
 func normalize(_ error: SystemLanguageModel.Error) -> GenerationError {
     switch error {
@@ -221,8 +221,7 @@ func normalize(_ error: SystemLanguageModel.Error) -> GenerationError {
 // the one genuinely non-on-device Apple provider
 
 /// Private Cloud Compute's error family. §8 mentions PCC only for its smaller
-/// *availability* reason set and not for this enum at all — **proposed for
-/// rev 9**.
+/// *availability* reason set and not for this enum at all — **landed rev 9**.
 ///
 /// The mappings follow §8's existing rules rather than inventing new ones, and
 /// the third is the interesting one: §8 already anticipated it in prose.
@@ -265,7 +264,7 @@ func normalize(_ error: PrivateCloudComputeLanguageModel.Error, since now: Date)
 /// It carries **two cases §8's coverage table does not account for**, and both
 /// are decided here rather than left to fall through the floor by accident —
 /// which is the defect rev 6 fixed for the four `unsupported*` cases, arriving
-/// by a different door. Both are **proposed for rev 9**.
+/// by a different door. Both **landed rev 9**.
 func normalize(_ error: LanguageModelSession.GenerationError) -> GenerationError {
     switch error {
     case .exceededContextWindowSize:

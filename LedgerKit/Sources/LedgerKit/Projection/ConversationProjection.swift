@@ -147,11 +147,21 @@ public final class ConversationProjection {
         // Attaching **mid-generation** is an ordinary case (list → detail
         // navigation), and without this the first render would show `.interrupted`
         // for something still streaming — right up until the next delta.
-        let live = await store.liveSet(of: conversation)
+        let storeLive = await store.liveSet(of: conversation)
+
+        // **Reconciled here too, not only on re-pull** (D50.3). Attaching is a
+        // read of both layers at slightly different instants, so it can land in
+        // the same window a re-pull can — between a terminal's append and its
+        // slot's release — where the store still names a generation the log has
+        // finished. Without this the overlay flipped a `.complete` message to
+        // `.streaming` and, because that terminal's `.changed` was published
+        // before this subscription existed, nothing ever arrived to correct it.
+        let routing = Self.routing(in: state)
+        let live = Self.reconciled(storeLive, with: storeLive, routing: routing, against: dead)
 
         self.folded = state
         self.classified = dead
-        self.messageForGeneration = Self.routing(in: state)
+        self.messageForGeneration = routing
         self.live = live
         self.conversation = overlay(dead, live: live)
         self.overlayApplications = 1
@@ -237,7 +247,7 @@ public final class ConversationProjection {
         // newer one: the store's view is read *now*, while a queued `.delta` was
         // enqueued earlier and is still waiting to be processed.
         for (generation, partial) in storeLive { record(partial, for: generation) }
-        pruneLiveSet()
+        live = Self.reconciled(live, with: storeLive, routing: messageForGeneration, against: classified)
         apply()
     }
 
@@ -263,30 +273,62 @@ public final class ConversationProjection {
         live[generation] = partial
     }
 
-    /// Drops live entries the log says are finished — which is what keeps P2's
-    /// clause 3 (live ⊆ open) true **by construction** rather than by the store and
-    /// the projection agreeing.
+    /// Keeps only the generations **both layers still agree are running** — the
+    /// projection's one reconciliation point (M8-PLAN D50.2/D50.3).
     ///
-    /// Still needed after the re-pull above takes the store's view, and the two split
-    /// the work at the generation's two ends: the store's view is what makes a
-    /// *just-started* generation live before any delta exists, and this is what
-    /// retires a *just-finished* one. The store cannot help with the second, because
-    /// it still holds the slot `.running` between appending the terminal and releasing
-    /// it — so for that instant its live set names a generation the log has already
-    /// ended, and the log is the one to believe.
+    /// Liveness has two sources that disagree about *when*, and each is right about
+    /// one end of a generation:
     ///
-    /// Derived from the base on every re-pull, so the live set is *self-correcting*:
-    /// it cannot drift, because it is re-checked against the log every time the log
-    /// is read. That is why the feed needs no "generation ended" notification — a
-    /// terminal is an append, the append sends `.changed`, and this runs.
+    /// - **The store's live set adds the just-started one.** A generation that has
+    ///   begun and produced no text has no delta to announce it, so without this the
+    ///   projection rendered `.interrupted` — the crash state — for something
+    ///   actively running, for as long as the provider took to say its first word.
+    /// - **The log retires the just-finished one.** The store still holds the slot
+    ///   `.running` between appending a terminal and releasing it, so for that
+    ///   instant its live set names a generation the log has already ended.
     ///
-    /// The test is `.interrupted`: a generation still open classifies to
-    /// `.interrupted` (I5), and any terminal state means the store has finished with
-    /// it. A generation with no message at all — a live set outliving its
-    /// conversation — is dropped by the same predicate.
-    private func pruneLiveSet() {
-        live = live.filter { generation, _ in
-            guard let message = messageForGeneration[generation],
+    /// Hence a **conjunction**, and both halves are load-bearing. Checked against
+    /// every window the audit enumerated:
+    ///
+    /// | Window | store live set | classified state | kept? |
+    /// |---|---|---|---|
+    /// | just started | present | `.interrupted` | **yes** — the case the store's view exists for |
+    /// | finished, slot not yet released | present | terminal | no — the log wins |
+    /// | finished, slot released | absent | terminal | no |
+    /// | **abandoned** (D50.1) | absent | `.interrupted` | **no** — the case F1 got wrong |
+    ///
+    /// The last row is the whole of F1 on this side: an abandoned generation is
+    /// `.interrupted` *forever*, so a state-only test keeps it forever. Adding the
+    /// store's view is what distinguishes "no terminal because it is still running"
+    /// from "no terminal because nobody could write one".
+    ///
+    /// **`static` so the initializer can use it too** (D50.3, F6). The attach path
+    /// had no prune at all, which stuck a *successfully completed* generation as
+    /// `.streaming` when a projection attached inside the wind-down window — and
+    /// worse, never healed, because that terminal's `.changed` was published before
+    /// the projection subscribed and `release` publishes nothing. Attach and re-pull
+    /// now reconcile through this one function rather than one of them remembering
+    /// to.
+    ///
+    /// A stale queued `.delta` cannot resurrect a dropped entry: a generation's
+    /// deltas all precede the `.changed` that retires it (FIFO per subscriber,
+    /// `notify` synchronous with the state change), so by the time this drops an
+    /// entry there is nothing behind it.
+    ///
+    /// - Parameters:
+    ///   - live: The shown live set — at attach this *is* `storeLive`, since nothing
+    ///     has been shown yet; on a re-pull it is the merge of queued deltas and the
+    ///     store's view (see ``record(_:for:)``).
+    ///   - storeLive: What the store says is running, read now.
+    private static func reconciled(
+        _ live: LiveSet,
+        with storeLive: LiveSet,
+        routing: [GenerationID: MessageID],
+        against classified: Conversation
+    ) -> LiveSet {
+        live.filter { generation, _ in
+            guard storeLive[generation] != nil,
+                  let message = routing[generation],
                   case .interrupted = classified.messages[message]?.state
             else { return false }
             return true
