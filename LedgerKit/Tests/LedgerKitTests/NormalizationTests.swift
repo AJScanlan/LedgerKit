@@ -391,6 +391,39 @@ struct AppleErrorNormalizationTests {
         #expect(mapping.recoverability(for: error) == .recoverableUpstream(.reduceContext))
     }
 
+    /// **D57: a provider that reports no numbers must not have zeros recorded as
+    /// if it had.**
+    ///
+    /// Apple's fields are non-optional `Int` and LedgerKit's are `Int?` precisely
+    /// so nil can mean *not reported* (D17) — a distinction that could not bite
+    /// while the only provider anyone had run reported real numbers. Found at M8
+    /// Phase 1 by spiking `ClaudeForFoundationModels`, which maps a
+    /// request-too-large failure onto this very case with `0`/`0`, because the
+    /// Messages API reports neither. Forwarded unchanged, an append-only ledger
+    /// would durably claim a context window of zero tokens.
+    ///
+    /// The affordance is identical either way — §8 maps the case and ignores the
+    /// payload — so the assertion below pairs the *value* with the unchanged
+    /// classification, to say that this fixes what the ledger records and moves
+    /// nothing a user sees.
+    @available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)
+    @Test("context overflow reporting no numbers records nil, not zero")
+    func contextSizeUnreported() {
+        let error = normalize(
+            LanguageModelError.contextSizeExceeded(.init(contextSize: 0, tokenCount: 0, debugDescription: "x")),
+            since: normalizationNow
+        )
+
+        #expect(
+            error == .contextSizeExceeded(contextSize: nil, tokenCount: nil),
+            "zero is a sentinel for 'not reported', not a measurement: no model has a zero-token window, and an overflow of zero tokens contradicts itself"
+        )
+        #expect(
+            mapping.recoverability(for: error) == .recoverableUpstream(.reduceContext),
+            "the affordance must not depend on the payload (§8)"
+        )
+    }
+
     /// Apple's third `Retry-After` form, converted against a supplied clock so
     /// the persisted value stays clock-independent (§8, rev 7).
     @available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *)

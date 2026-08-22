@@ -539,6 +539,63 @@ top.
       Deliberately **not** promoted to a device-gated test yet: a probe for a
       provider we may not use would be vestigial, and pinning a *broken* state
       would fail the day it starts working. Promote after D53 resolves.
+- [x] **The Claude-package spike (D53 fallback; owner-authorized 2026-08-16).**
+      Cut line 4's premise — "the Claude package is not in this ring" — **has
+      expired**: `github.com/anthropics/ClaudeForFoundationModels` is Apache-2.0,
+      resolves, and has **zero transitive dependencies**. Spiked in a throwaway
+      package outside the repo. Five findings, in descending order of how much
+      they change:
+
+      1. ✅ **DoD-2's one-line claim is now type-checked rather than asserted.**
+         `ClaudeLanguageModel` binds to `any LanguageModel`, which is exactly
+         what `GenerationDriver(model:descriptor:)` takes — so the swap really is
+         the driver line and nothing else in `Session/` moves.
+      2. ⚠️ **The tagged releases do not build on Beta 5 — and for *our* reason.**
+         v0.1.4 (latest tag, 2026-07-24) implements
+         `ClaudeServerToolSegment: Transcript.CustomSegment`, and Beta 5 **deleted
+         `Transcript.CustomSegment`** — the same removal that moved our
+         `consumedSurface` manifest hours earlier (§6 item 3.1). **A third party
+         broke on the identical change**, which is independent confirmation of
+         that finding and a neat demonstration of why the tripwire exists: this
+         repo absorbed it in a day. The default branch carries
+         `feat!: adopt Xcode 27 beta 5` (`bd45913`, plus a redirect-security fix
+         `fd965bf`) and **builds clean**, but is **untagged**. So the blocker is
+         *dated*, not structural.
+      3. ✅ **§8's central design bet is vindicated by a real third-party vendor.**
+         §8 has said since rev 1: *"Anchor on Apple's enum, not per-provider
+         empirics. Apple steers providers toward the built-in `LanguageModelError`
+         cases."* Anthropic's `ErrorMapper` does precisely that — rate-limit and
+         overload → `.rateLimited`, request-too-large and context overflow →
+         `.contextSizeExceeded`, timeout → `.timeout`, image problems →
+         `.unsupportedTranscriptContent`, bad guide → `.unsupportedGenerationGuide`.
+         **All five are already normalized by LedgerKit with zero new code.** The
+         "missing third-party family" cut line 4 left open is far smaller than it
+         looked, because the vendor met Apple's taxonomy rather than inventing one.
+      4. ⚠️ **A real LedgerKit defect, found by the spike** (see D57):
+         `NormalizeAppleErrors.swift:146` forwards Apple's non-optional
+         `contextSize`/`tokenCount` straight through, and Claude sends **`0`/`0`**
+         because the Messages API reports neither. The ledger would durably record
+         *"the context window is 0 tokens"* — a fabricated measurement in an
+         append-only log. The same file already knows better at line 274, on the
+         deprecated-26 path: *"nil says 'not reported' where 0 would claim a
+         measurement."* Two paths, opposite semantics, and the wrong one is what a
+         third-party provider hits.
+      5. ⚠️ **`ClaudeError` is unmapped, and `APIError` is *unnameable*.**
+         `ClaudeError` has three cases — `missingCredential`,
+         `attestationUnsupported`, `attestationFailed` — all credential/setup
+         conditions, none a generation failure, and confirmed reachable
+         (`.apiKey("")` yields `ClaudeError.missingCredential` with no network and
+         no billing). Two of the three are textbook
+         `recoverableUpstream(.reauthenticate)` — **an affordance §8 ships and
+         nothing on-device can ever reach**, which §7.2's whole outcome-boundary
+         design exists to make renderable. Meanwhile the residual API conditions
+         (`permission`, `api`, `invalidRequest`, `notFound`, `other`) surface as
+         the package's `APIError`, which is `package`-scoped inside a target that
+         is **not an exported product** — so a consumer cannot name or match it at
+         all, only `catch {}`. Those land on `unrecognized` and **cannot be lifted
+         off it by any amount of normalization code**. That is the strongest
+         evidence yet for §8's claim that the floor is *"a working part of the
+         design rather than a rarely-taken floor."*
 
 - [x] **F7 — the §7.7 residue's floor was a remembered constant** (found by this
       phase's device run; not in the plan). `#expect(input.total > 100)` was
@@ -836,7 +893,9 @@ Item 2 is **already decided** and awaits only the wording pass.
 | D55 | The throw channel is rendered, not swallowed: alert for `persistenceFailure`, prevented-state for `generationInFlight`, ignore `CancellationError`, render-if-ever-reached for the target errors | **Accepted** 2026-08-16 (owner) |
 | D56 | **The Beta 5 posture.** (a) Two build repairs land as Phase 0's owned exception to "zero repo changes", because no failure inventory exists until the build compiles: `Understudy`'s metadata box → `any ConvertibleToGeneratedContent` (public `Script` vocabulary unchanged), and `GenerationDriver.stopInfo(from:)` reading `GeneratedContent` via `try? String(_:)` instead of a cast that had become a permanent nil. (b) **Beta 4 is retained** until the host tier is genuinely green — the deletion was priced against a condition this host could not yet reach. (c) The manifests and the SDK pin are **verified but not edited**, pending the two §7 sign-offs in §6 item 3.1/3.3, which the owner scheduled for the Phase 0 gate alongside rev 11's drafting. (d) **The OS moves to the Beta 5 train** (owner, 2026-08-16) rather than the toolchain moving back — the only option that lets Phase 0 close, since the device tier, the residue suite, the PCC spike and both surface tripwires are all host-only | **Accepted** 2026-08-16 — (a) landed; (b)(c) in force; (d) owner action pending |
 
-~~Owner-agreed procedure (not a numbered decision): **Beta 4 is deleted once
+~~| D57 | **`contextSizeExceeded` must not forward `0` as a measurement.** Apple's `ContextSizeExceeded` carries non-optional `Int`s; LedgerKit's case carries `Int?` precisely so nil can say *not reported* (D17, rev 7). `NormalizeAppleErrors.swift:146` forwards them unchanged, which is right for Apple's on-device model — it reports real numbers — and wrong for any provider that reports none: Anthropic's mapper sends `0`/`0` because the Messages API says neither, so the ledger would record a context window of zero tokens **forever**, in a log that cannot be rewritten. Proposed fix: map `0` → `nil` on that path, since a context size of 0 is not a measurement any model can produce and an overflow with `tokenCount: 0` is self-contradictory. The deprecated-26 path at line 274 already does the equivalent and says why. Classification is unaffected (§8 ignores the payload); this is about what the ledger *claims* | ☑ **Accepted 2026-08-16 (owner) and landed.** `reported(_:)` maps `0` → `nil` on the 27-family path; `contextSizeUnreported` is the test that would have caught it, and the mutation removing the filter fails it. Classification asserted unchanged in the same test, so the fix is visibly about what the ledger *records* rather than what a user sees. **Rev 11 note still owed**: §8's `contextSizeExceeded` paragraph says the fields are optional "because the ledger records what was reported, and non-Apple providers report neither" — true, and now with a named provider that proves it, plus the zero-sentinel rule that makes the optionality real rather than nominal |
+
+Owner-agreed procedure (not a numbered decision): **Beta 4 is deleted once
 Beta 5 is green** — one toolchain, no CI-selection ambiguity (audit F3).~~
 **Superseded by D56(b), 2026-08-16.** The procedure is not wrong, its
 precondition is unreachable on this host: Beta 5 cannot go green until macOS

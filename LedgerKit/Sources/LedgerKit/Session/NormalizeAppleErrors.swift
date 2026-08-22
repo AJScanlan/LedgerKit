@@ -131,6 +131,35 @@ private func unmapped(_ error: some Error) -> GenerationError {
 
 // MARK: - LanguageModelError (27) — §8's coverage table, row for row
 
+/// A reported token count, or `nil` where the provider reported none (D57).
+///
+/// **Apple's counts are non-optional `Int`; LedgerKit's are `Int?` on purpose**
+/// — D17 widened `contextSizeExceeded` to carry them and made them optional
+/// because "the ledger records what was *reported*, and nil says 'not reported'
+/// where 0 cannot". That distinction only bites once a provider reports nothing,
+/// and until M8 nothing did: Apple's on-device model sends real numbers
+/// (`contextSize: 4096, tokenCount: 4223`, measured at M6), so forwarding them
+/// unchanged was correct and looked total.
+///
+/// It is not. Anthropic's `ClaudeForFoundationModels` maps a request-too-large
+/// failure onto `LanguageModelError.contextSizeExceeded` — as §8's anchoring bet
+/// predicted a well-behaved provider would — with **`contextSize: 0,
+/// tokenCount: 0`**, because the Messages API reports neither. Forwarded
+/// unchanged, the ledger would durably assert *"the context window is 0 tokens
+/// and the prompt was 0 tokens"* — a measurement nobody took, in a log that by
+/// construction cannot be rewritten.
+///
+/// Zero is safe to read as absence in both fields: a model with a zero-token
+/// context cannot exist, and an *overflow* reporting zero tokens contradicts
+/// itself. Classification is unaffected either way — §8 maps the case and
+/// ignores the payload — so this is purely about what the ledger **claims**.
+///
+/// The deprecated-26 path has said the same thing in prose since rev 9; this is
+/// that reasoning applied on the path a third-party provider actually reaches.
+private func reported(_ count: Int) -> Int? {
+    count > 0 ? count : nil
+}
+
 /// The built-in taxonomy §8 is defined as a total normalization *of*.
 ///
 /// Every row here is §8's coverage table, which is why the table is worth
@@ -141,9 +170,11 @@ private func unmapped(_ error: some Error) -> GenerationError {
 func normalize(_ error: LanguageModelError, since now: Date) -> GenerationError {
     switch error {
     case .contextSizeExceeded(let exceeded):
-        // Apple's two numbers ride along (D17). LedgerKit's are optional because
-        // a non-Apple provider reports neither; here both are present.
-        .contextSizeExceeded(contextSize: exceeded.contextSize, tokenCount: exceeded.tokenCount)
+        // Apple's two numbers ride along (D17), through the zero filter below.
+        .contextSizeExceeded(
+            contextSize: reported(exceeded.contextSize),
+            tokenCount: reported(exceeded.tokenCount)
+        )
     case .rateLimited(let limited):
         // Apple's third `Retry-After` form: an instant, converted here so the
         // ledger stores something clock-independent (§8, rev 7).
