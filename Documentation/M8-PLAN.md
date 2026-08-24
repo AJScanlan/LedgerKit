@@ -689,7 +689,49 @@ are recorded as such rather than folded in silently.
 
 ### Phase 2 — The demo app (UI over public API, `ScriptedLanguageModel`-driven)
 
-**Status:** ☐ not started
+**Status:** 🟨 **SKELETON LANDED 2026-08-16 — handed to Alexander for design.**
+The app builds warning-free, runs on the iOS 27 simulator, and completes the loop
+end to end: create → send → stream → **relaunch and the conversation is still
+there**. Plumbing is done; the visual layer is deliberately unfinished, because
+the owner is driving design and the goal ("could plausibly have been made by
+Apple", possibly a standalone app later) is not a thing to guess at.
+
+**Files** — all in `Projection/Projection/`, which is a
+`PBXFileSystemSynchronizedRootGroup`, so **new files need no `project.pbxproj`
+edit**. That retires one of the two inherited hazards outright; the hand-patched
+`packageProductDependencies` were not touched.
+
+| File | Role |
+|---|---|
+| `ProjectionApp.swift` | Two gates, two failures: OS availability (build-target fact) then store-open (runtime fact) |
+| `AppModel.swift` | D51/D52 — the store, the **one** provider line, and D55's rendered throw channel |
+| `ConversationListScreen.swift` | `NavigationSplitView`, the index-backed list, create/delete |
+| `ChatScreen.swift` | Owns its `ConversationProjection`; transcript, `safeAreaBar` composer, `isDeleted` navigation, branch switcher |
+| `ChatComposer.swift` | The input bar — send/stop as one control in two states |
+| `MessageBubble.swift` | **The showpiece**: the exhaustive five-case switch, carried forward from M7 with its comments |
+
+**Deviation, recorded rather than silent:** `StreamingPreview.swift` and
+`ContentView.swift` are **deleted**. M7's handoff said M8 *styles* the preview
+rather than replacing it, and the part that mattered — the exhaustive switch and
+the reasoning attached to each case — is carried into `MessageBubble.swift`
+verbatim. What was dropped is the single-conversation `Harness`, which the real
+`AppModel` supersedes, and Xcode's "Hello, world!" boilerplate. Keeping the
+harness would have meant two `Bubble` implementations drifting apart.
+
+**API friction for M9's review (guardrail 1), one finding so far:**
+`Conversation.activeMessages` is a **computed** `compactMap` over the active path.
+Apple's SwiftUI guidance is explicit that derived collections should be cached on
+the model rather than recomputed per body evaluation, so an app following that
+advice has to hoist it into a local (which `ChatScreen` does) or cache it
+itself. Not a defect — it is the honest shape for a value type — but it is the
+library asking every consumer to remember something, which is what an API review
+is for.
+
+⚠️ **Unverified and genuinely open: is the stream *visible*?** The scripted
+pacing (`.wait(.milliseconds(320))` between emits) is the same mechanism M7's
+preview used, and that one was eyeballed as good — but the tap→screenshot
+round-trip through the automation tooling exceeds the script's ~2.9 s, so every
+sample caught completed text. **This needs a human watching, not a screenshot.**
 
 **Goal:** the real app — list, chat, branch switcher, throw channel — running
 against the scripted provider on any Mac, styled from the skeleton M7 left.
