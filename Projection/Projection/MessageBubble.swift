@@ -51,11 +51,19 @@ struct MessageBubble: View {
             text(content.text)
 
         case .streaming(let partial):
-            // The live case, and the only one no fold can produce (§6.2). An
-            // empty partial is a generation that has started and not yet spoken
-            // — §6.2 deliberately has no separate `.pending`, so this is what
-            // that looks like.
-            text("\(partial)\(Text(" ●").foregroundStyle(.tint))")
+            // The live case, and the only one no fold can produce (§6.2).
+            //
+            // **Two presentations of one state, split on emptiness.** An empty
+            // partial is a generation that has started and not yet spoken —
+            // §6.2 deliberately has no separate `.pending`, so this is what that
+            // looks like — and it gets the indicator. The moment there is text,
+            // the text is its own evidence that something is happening, so the
+            // indicator goes away entirely rather than trailing a caret.
+            if partial.isEmpty {
+                TypingIndicator()
+            } else {
+                text(partial)
+            }
 
         case .interrupted(let partial):
             // What a crash looks like on reload: the fold found no terminal
