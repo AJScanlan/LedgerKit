@@ -49,6 +49,16 @@ swift test  --package-path Understudy
   ```bash
   xcodebuild -workspace LedgerKit.xcworkspace -scheme Projection -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' build
   ```
+- **XcodeBuildMCP is wired for this repo** (`.xcodebuildmcp/config.yaml`, all workflows enabled) and is the fastest way to *run* the demo rather than just build it — one step boots, installs, launches, and captures runtime logs (52.6 s cold, measured 2026-08-25):
+
+  ```bash
+  xcodebuildmcp simulator build-and-run --workspace-path LedgerKit.xcworkspace --scheme Projection --simulator-id <iPhone 17 Pro / iOS 27.0>
+  ```
+
+  ⚠️ **Always pass `--scheme` and `--simulator-id` explicitly — two defaults stores exist and they disagree.** The CLI reads `sessionDefaults` from `.xcodebuildmcp/config.yaml`; the MCP `session_set_defaults` tool writes a *separate* store, and `persist: true` does **not** reach that yaml (verified 2026-08-25). A bare CLI command silently builds the wrong scheme on the wrong simulator and reports success — same shape as the `--filter` trap above. Keep the two in sync by hand; neither one repairs the other.
+  ⚠️ `.xcodebuildmcp/config.yaml` is **gitignored as of 2026-08-25** because it pins a machine-specific `simulatorId` UUID — each machine sets its own via `xcodebuildmcp setup` or by editing the file.
+  - MCP observation tools (`screenshot`, `snapshot_ui`) accept **no** simulator argument — they fail `MISSING_REQUIRED_PARAMETERS` until `session_set_defaults` has run in that session.
+  - Build products and runtime logs land in an isolated root, not Xcode's shared one: `~/Library/Developer/XcodeBuildMCP/workspaces/LedgerKit-*/` (`logs/` holds per-launch runtime and oslog captures — the way to confirm a launch was clean).
 - **TLA+ models live in `Formal/`** (M7, D45) — `ConversationStore`'s interleavings only; the reducer is deliberately *not* modelled (it is pure and already swept exhaustively in real code). The whole encoding is one rule: **a PlusCal label is an `await`**, so actor reentrancy transcribes rather than being interpreted. Needs `export PATH="/opt/homebrew/bin:$PATH"` (bare `java` is the macOS stub and errors) and `~/.tla/tla2tools.jar`.
 
   ```bash

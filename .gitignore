@@ -63,3 +63,6 @@ fastlane/test_output
 
 .DS_Store
 .claude/settings.local.json
+
+# XcodeBuildMCP: pins a machine-specific simulatorId; each machine sets its own.
+.xcodebuildmcp/
