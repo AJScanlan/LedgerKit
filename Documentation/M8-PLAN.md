@@ -727,6 +727,78 @@ itself. Not a defect — it is the honest shape for a value type — but it is t
 library asking every consumer to remember something, which is what an API review
 is for.
 
+**Markdown + streaming-animation spike (owner-requested, 2026-08-29).**
+`microsoft/SwiftStreamingMarkdown` integrated into the app target and driven from
+LedgerKit's partials. **It works, and it looks markedly better** — real bullets,
+bold, paragraph spacing — but it carries four costs that belong in a decision
+rather than in a diff.
+
+- ✅ **The two designs meet exactly.** `StreamedMarkdownSource.text` is an
+  `AsyncStream<String>` whose every emission must be *"the complete Markdown
+  source so far, not an incremental delta"* — which is what
+  `MessageState.streaming(partial:)` already is, and what M7-PLAN **D47**
+  independently decided for the store's feed. So the adapter
+  (`MarkdownMessageText.swift`) is a `yield`, not an accumulator, and the stream
+  can use `.bufferingNewest(1)` and **drop snapshots under back-pressure without
+  losing a character** — safe *only* because each snapshot is cumulative.
+- ✅ **Split syntax survives.** The demo script now deliberately splits chunks
+  *inside* Markdown (`"**Val"` / `"ley fold**"`), which is what real deltas do
+  (§7.3's coalescing, §7.4's flush policy). The final render is correct — no raw
+  asterisks, no reflow. That is the library's whole reason to exist and it holds.
+- ⚠️ **It cannot be resolved by a stable version.** It depends on `highlightswift`
+  at an *unstable* version, and SPM refuses to combine that with a
+  `from:` requirement. The app therefore pins **`branch: main`** — no semantic
+  versioning, no release notes, and `main` can move under us.
+- ⚠️ **Seven transitive dependencies**: `swift-syntax` (with a prebuilt macro
+  download), `swift-markdown`, `swift-cmark`, `highlightswift`, `iosmath`,
+  `swiftui-shimmer`, `equatable`. Two are revision-pinned with no version at all.
+  Clean build went **34 s → 56 s**. Compare the Claude package's **zero**.
+- ⚠️ **First remote package in the project**, so `project.pbxproj` needed real
+  surgery (`XCRemoteSwiftPackageReference` + `packageReferences` + a product
+  dependency). Backed up before patching; lints clean and builds.
+- ⛔️ **Accessibility regression, and it is the one that matters for "could have
+  been made by Apple".** Every rendered block surfaces as
+  `typeText|text-field` — VoiceOver announces assistant turns as **editable text
+  fields**. The *labels* are excellent (`"List with 3 items, item 1: …"`, better
+  than plain `Text` would give), so the fix is plausibly an
+  `.accessibilityRepresentation` at our call site rather than a fork — but as it
+  stands the app tells assistive tech that the model's answer is a form control.
+
+**Streaming smoothness — the finding that mattered (2026-08-29).** Reading
+Microsoft's own sample app answered "why does theirs look better than ours"
+definitively, and the answer is not the renderer:
+
+> **Their LLM-chat demo does not stream a model.** `LLMChatInteractor` replays a
+> *finished* string at `chunkSize = 3` characters every `30 ms` — a constant
+> ~100 chars/second — parsing a progressively larger prefix. The calm is the
+> fixed cadence, not the animation.
+
+Our app forwarded a real provider's partials straight through, which cannot look
+like that for two compounding reasons: the on-device model **outruns** 100 ch/s,
+and its output is **lumpy** because the framework coalesces snapshots (M6: three
+emissions arriving as one) and §7.4's flush policy reshapes them again. **No
+per-character animation can smooth a lump that arrives in one frame** — by the
+time the renderer sees it, it is already a single edit.
+
+So `StreamingPartialSource` now **decouples display rate from arrival rate**: it
+holds the newest partial as a *target* and releases a prefix at Microsoft's
+cadence, with a proportional catch-up above ~120 characters of backlog so a fast
+provider cannot leave the display arbitrarily behind (text still typing itself
+out after the generation ended reads as a hang, not as calm).
+
+⚠️ **This is sound only because partials are cumulative and monotonic** — showing
+a prefix of the latest partial is always a state the conversation really passed
+through. Third time D47's cumulative choice has paid out. The one exception is
+handled explicitly: **D50's abandonment path can shorten the partial**, and the
+pacer clamps rather than interpolating, because it must never appear to *un-type*.
+
+**Two numbers to turn for the GIF**, both in `MarkdownMessageText.swift`:
+`charactersPerTick` (3) and `tick` (30 ms). Lower the first or raise the second
+to slow it down. **Known rough edge:** at completion the bubble swaps the
+streaming view for the static one, so if the pacer is still draining there is a
+snap. The catch-up rule keeps the residue small; if it shows on camera, the fix
+is to keep the streaming presentation until the pacer drains.
+
 ⚠️ **Unverified and genuinely open: is the stream *visible*?** The scripted
 pacing (`.wait(.milliseconds(320))` between emits) is the same mechanism M7's
 preview used, and that one was eyeballed as good — but the tap→screenshot

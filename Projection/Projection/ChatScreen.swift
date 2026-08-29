@@ -24,6 +24,63 @@ struct ChatScreen: View {
     @State private var branchOptions: BranchOptions?
     @FocusState private var composerFocused: Bool
 
+    /// Measured heights, keyed by message — the inputs to `trailingSpace`.
+    @State private var heights: [MessageID: CGFloat] = [:]
+    @State private var viewportHeight: CGFloat = 0
+
+    private static let messageSpacing: CGFloat = 20
+
+    /// The visible gap between the navigation bar and an anchored question.
+    /// **The number to turn** if it rests too high or too low.
+    private static let anchorLead: CGFloat = 24
+
+    /// What `scrollTo(_:anchor:)` costs before the gap above is even applied —
+    /// **measured, not reasoned about**, after two corrections that guessed wrong.
+    ///
+    /// Instrumenting the real geometry showed the scroll view's visible top at
+    /// `y = 116` and the anchored row settling at `y = 112` *with* a 28 pt lead
+    /// already applied — so with no lead at all the row lands at 84, a full
+    /// **32 pt above the visible top**. `scrollTo` resolves against content
+    /// coordinates that include the stack's own top padding and the inter-message
+    /// spacing, and neither is visible from the API.
+    ///
+    /// Kept separate from ``anchorLead`` rather than folded into one number,
+    /// because the two mean different things: this is a fixed property of the
+    /// layout, that is a design choice. Adjusting the gap should not require
+    /// re-deriving the correction.
+    private static let anchorCorrection: CGFloat = 32
+
+    /// How far the anchored question should sit below the scroll view's visible
+    /// top, in the coordinates both the scroll target *and* the reserved space
+    /// have to agree on.
+    ///
+    /// ⚠️ **They must use the same value, and finding that out took measuring.**
+    /// For a short answer the requested scroll is unsatisfiable — there is not
+    /// enough content below the question to scroll it that far — so the position
+    /// clamps and is decided entirely by how much trailing space exists. Two
+    /// instrumented runs made the relationship exact: the spacer grew by 36 pt and
+    /// the row rose by 36 pt, one for one. For a *long* answer the spacer is zero
+    /// and the anchor governs instead. Feed them different numbers and the
+    /// question rests in two different places depending on how much the model
+    /// happened to say.
+    private static var anchorOffset: CGFloat { anchorLead + anchorCorrection }
+
+    /// Converts ``anchorLead`` into the `UnitPoint` `scrollTo` wants.
+    ///
+    /// `scrollTo(_:anchor:)` resolves its anchor as a **fraction of the row's own
+    /// height**, so a fixed point value cannot be handed to it directly. A
+    /// negative fraction resolves to a position *above* the row, which is exactly
+    /// "stop short by this much" — and dividing by the row's measured height is
+    /// what makes the result a constant number of points rather than something
+    /// that drifts with how tall the question happens to be.
+    ///
+    /// The fallback is one line of chat; it is only ever used on the first frame
+    /// of a brand-new message, before `onGeometryChange` has reported.
+    private static func anchorPoint(forRowOfHeight height: CGFloat?) -> UnitPoint {
+        let measured = max(height ?? 44, 1)
+        return UnitPoint(x: 0, y: -anchorOffset / measured)
+    }
+
     var body: some View {
         Group {
             if let projection {
@@ -53,23 +110,58 @@ struct ChatScreen: View {
         // argument *and* again in a count would do the work twice.
         let messages = projection.conversation.activeMessages
 
-        return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
-                ForEach(messages) { message in
-                    MessageBubble(
-                        message: message,
-                        siblingCount: projection.conversation.messages.siblings(of: message.id).count,
-                        onRegenerate: { await model.regenerate(message.id, in: conversation) },
-                        onShowBranches: { showBranches(for: message, in: projection) }
-                    )
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Self.messageSpacing) {
+                    ForEach(messages) { message in
+                        MessageBubble(
+                            message: message,
+                            siblingCount: projection.conversation.messages.siblings(of: message.id).count,
+                            onRegenerate: { await model.regenerate(message.id, in: conversation) },
+                            onShowBranches: { showBranches(for: message, in: projection) }
+                        )
+                        .id(message.id)
+                        // Only the streaming message's height actually changes,
+                        // because `onGeometryChange` fires on change alone — so
+                        // settled rows cost one write each and then go quiet.
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            heights[message.id] = height
+                        }
+                    }
+
+                    // **The room the answer grows into.** See `trailingSpace`.
+                    Color.clear
+                        .frame(height: trailingSpace(for: messages))
+                        .allowsHitTesting(false)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 12)
+            }
+            // ⚠️ **Not `contentMargins`.** Insetting the scroll content was the
+            // obvious fix and was wrong twice: it pushed every conversation's
+            // first message away from the navigation bar, and it moved the
+            // anchored question *further* under the bar rather than clear of it,
+            // because the inset shifts the offset `scrollTo` resolves against.
+            // The lever that works is the anchor itself — see below.
+            //
+            // Governs where an *existing* conversation opens — at the bottom,
+            // with no animation nobody asked for. The send-time positioning
+            // below is explicit and takes over from there.
+            .defaultScrollAnchor(.bottom)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+            .onChange(of: latestUserMessage(in: messages)) { _, anchor in
+                // **The Claude behaviour**: on send, the question rises to the
+                // top and the answer fills the space beneath it, rather than the
+                // question being shoved upward by text arriving under it.
+                //
+                // Only fires when the *user* message identity changes, so a
+                // regeneration or a branch switch does not yank the view.
+                guard let anchor else { return }
+                withAnimation(.easeOut(duration: 0.35)) {
+                    proxy.scrollTo(anchor, anchor: Self.anchorPoint(forRowOfHeight: heights[anchor]))
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 12)
         }
-        // Chat reads bottom-up: newest content should be on screen when the
-        // view appears, without a scroll animation the user did not ask for.
-        .defaultScrollAnchor(.bottom)
         // **`safeAreaBar`, not `safeAreaInset` and not a `ZStack` overlay.**
         // New in iOS 26 and the difference is not cosmetic: a bar declared this
         // way participates in the scroll edge effect, so content passing behind
@@ -135,6 +227,50 @@ struct ChatScreen: View {
         guard !text.isEmpty else { return }
         draft = ""
         Task { await model.send(text, in: conversation) }
+    }
+
+    /// The most recent user message — the thing the answer is an answer *to*,
+    /// and therefore what should be at the top of the screen while it arrives.
+    private func latestUserMessage(in messages: [Message]) -> MessageID? {
+        messages.last { $0.role == .user }?.id
+    }
+
+    /// Blank space below the transcript, sized so the latest question can sit at
+    /// the top of the viewport with its answer beneath it.
+    ///
+    /// ## Why a spacer rather than a scroll animation
+    ///
+    /// Scrolling the question to the top is only *possible* if there is enough
+    /// content beneath it to scroll — at the moment of sending there is almost
+    /// none, so the scroll would have nothing to move into. This manufactures
+    /// exactly the shortfall.
+    ///
+    /// **And it is what keeps the question still afterwards.** The spacer shrinks
+    /// by precisely as much as the answer grows, so total content height is
+    /// constant while the response streams and nothing above it moves. That is
+    /// the whole difference from an ordinary chat transcript, where arriving text
+    /// pushes the question upward — and it falls out of the arithmetic rather
+    /// than needing a second animation to counteract the first.
+    ///
+    /// Once the answer outgrows the reserved space this reaches zero and normal
+    /// bottom-anchored scrolling resumes, which is the right behaviour for a long
+    /// reply: the reading position should follow the text.
+    private func trailingSpace(for messages: [Message]) -> CGFloat {
+        guard viewportHeight > 0,
+              let anchor = latestUserMessage(in: messages),
+              let start = messages.firstIndex(where: { $0.id == anchor })
+        else { return 0 }
+
+        let turn = messages[start...]
+        let content = turn.reduce(CGFloat.zero) { $0 + (heights[$1.id] ?? 0) }
+        let gaps = CGFloat(turn.count - 1) * Self.messageSpacing
+
+        // **Deliberately the same constant that positions the question**, not a
+        // second number that happens to look similar: the room to reserve below
+        // the question is exactly the viewport minus where the question starts.
+        // Two independent values would drift, and the symptom would be a strip of
+        // dead space under a finished answer.
+        return max(0, viewportHeight - Self.anchorOffset - content - gaps)
     }
 
     /// Whether a generation is live, **derived from the projection rather than

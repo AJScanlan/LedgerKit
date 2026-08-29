@@ -14,6 +14,8 @@ import SwiftUI
 /// happening, and a second indicator alongside it would be redundant motion.
 struct TypingIndicator: View {
 
+    static let indicatorHeight: CGFloat = 29
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animating = false
 
@@ -28,6 +30,7 @@ struct TypingIndicator: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+        .frame(height: Self.indicatorHeight)
         .background(.quaternary.opacity(0.55), in: .capsule)
         // One label for the group, not three: VoiceOver should say what is
         // happening, not enumerate the decoration that says it.

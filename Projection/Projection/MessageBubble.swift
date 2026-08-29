@@ -44,66 +44,127 @@ struct MessageBubble: View {
 
     // MARK: - The switch
 
-    @ViewBuilder
-    private var content: some View {
+    /// **The showpiece: five cases, no `default`.** Add a case to `MessageState`
+    /// and this stops compiling until someone decides what the new state looks
+    /// like — tenet 1 paying out at the last possible layer.
+    ///
+    /// It returns *how to present* the message rather than the presentation
+    /// itself, and that indirection is load-bearing rather than stylistic: it
+    /// gives the assistant's renderer **exactly one call site** downstream, which
+    /// is what keeps its view identity stable across the
+    /// waiting → streaming → settled boundaries. Building the renderer inside
+    /// three different branches made it three different views, and SwiftUI
+    /// rebuilt it at every hand-off (see `AssistantMarkdown`).
+    ///
+    /// It also reads better as documentation: the mapping from state to
+    /// treatment is now a table rather than a pile of view code.
+    private var presentation: Presentation {
         switch message.state {
         case .complete(let content):
-            text(content.text)
+            Presentation(text: content.text)
 
         case .streaming(let partial):
-            // The live case, and the only one no fold can produce (§6.2).
-            //
-            // **Two presentations of one state, split on emptiness.** An empty
-            // partial is a generation that has started and not yet spoken —
-            // §6.2 deliberately has no separate `.pending`, so this is what that
-            // looks like — and it gets the indicator. The moment there is text,
-            // the text is its own evidence that something is happening, so the
-            // indicator goes away entirely rather than trailing a caret.
-            if partial.isEmpty {
-                TypingIndicator()
-            } else {
-                text(partial)
-            }
+            // The live case, and the only one no fold can produce (§6.2). An
+            // empty partial is a generation that has started and not yet spoken
+            // — §6.2 deliberately has no separate `.pending` — and
+            // `AssistantMarkdown` shows the typing indicator for exactly that.
+            Presentation(text: partial, isStreaming: true)
 
         case .interrupted(let partial):
             // What a crash looks like on reload: the fold found no terminal
             // (I5). Nothing repaired anything — this is simply what the log
             // says.
-            text(partial, dimmed: partial.isEmpty)
-            affordance("Regenerate", icon: "arrow.clockwise", note: "Interrupted")
+            Presentation(
+                text: partial,
+                affordance: .init(title: "Regenerate", icon: "arrow.clockwise", note: "Interrupted")
+            )
 
         case .cancelled(let partial):
-            text(partial, dimmed: partial.isEmpty)
-            note("Stopped", icon: "stop.circle")
+            Presentation(text: partial, note: .init(title: "Stopped", icon: "stop.circle"))
 
         case .failed(let partial, let error, let recoverability):
-            if !partial.isEmpty { text(partial) }
             // **The affordance comes from `Recoverability`, never from the
             // error.** §8's whole contract: the app switches over what it can
             // *do*, not over what went wrong.
-            switch recoverability {
-            case .retryable(let after):
-                affordance(after == nil ? "Retry" : "Retry shortly", icon: "arrow.clockwise", note: "Failed")
-            case .recoverableUpstream(.enableAppleIntelligence):
-                affordance("Open Settings", icon: "gear", note: "Apple Intelligence is off")
-            case .recoverableUpstream(.awaitModelDownload):
-                affordance("Try again", icon: "arrow.down.circle", note: "The model is still downloading")
-            case .recoverableUpstream(.reduceContext):
-                // Kept even though the demo never approaches the window
-                // (M8-PLAN D54): its *presence* is the demo of §8's contract,
-                // and on-device the 4096-token budget makes it reachable in two
-                // substantial turns.
-                affordance("Shorten and retry", icon: "scissors", note: "This conversation is too long")
-            case .recoverableUpstream(.reauthenticate):
-                affordance("Sign in again", icon: "person.badge.key", note: "Credentials need attention")
-            case .terminal:
-                affordance("Regenerate", icon: "arrow.triangle.2.circlepath", note: "Failed")
-            }
-            Text(String(describing: error))
+            Presentation(
+                text: partial,
+                affordance: Self.affordance(for: recoverability),
+                errorDetail: String(describing: error)
+            )
+        }
+    }
+
+    /// **§8's contract, as a total function.** The affordance comes from
+    /// `Recoverability` and never from the error: the app switches over what the
+    /// user can *do*, not over what went wrong. Exhaustive, no `default` — a new
+    /// `RequiredAction` stops this compiling.
+    private static func affordance(for recoverability: Recoverability) -> Presentation.Badge {
+        switch recoverability {
+        case .retryable(let after):
+            .init(title: after == nil ? "Retry" : "Retry shortly",
+                  icon: "arrow.clockwise", note: "Failed")
+        case .recoverableUpstream(.enableAppleIntelligence):
+            .init(title: "Open Settings", icon: "gear", note: "Apple Intelligence is off")
+        case .recoverableUpstream(.awaitModelDownload):
+            .init(title: "Try again", icon: "arrow.down.circle",
+                  note: "The model is still downloading")
+        case .recoverableUpstream(.reduceContext):
+            // Kept even though the demo never approaches the window (M8-PLAN
+            // D54): its *presence* is the demo of §8's contract, and on-device
+            // the 4096-token budget makes it reachable in two substantial turns.
+            .init(title: "Shorten and retry", icon: "scissors",
+                  note: "This conversation is too long")
+        case .recoverableUpstream(.reauthenticate):
+            .init(title: "Sign in again", icon: "person.badge.key",
+                  note: "Credentials need attention")
+        case .terminal:
+            .init(title: "Regenerate", icon: "arrow.triangle.2.circlepath", note: "Failed")
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        let presentation = presentation
+
+        // **Markdown for the assistant, plain text for the user.** What a person
+        // typed is not Markdown source and should not be reinterpreted as it — a
+        // user asking about `**` would otherwise watch their own message turn
+        // bold.
+        if message.role == .assistant {
+            // The one call site. Everything above decided *what* to show here.
+            AssistantMarkdown(text: presentation.text, isStreaming: presentation.isStreaming)
+                .frame(maxWidth: 560, alignment: .leading)
+        } else {
+            text(presentation.text)
+        }
+
+        if let note = presentation.note {
+            self.note(note.title, icon: note.icon)
+        }
+        if let affordance = presentation.affordance {
+            self.affordance(affordance.title, icon: affordance.icon, note: affordance.note)
+        }
+        if let detail = presentation.errorDetail {
+            Text(detail)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .textSelection(.enabled)
         }
+    }
+
+    /// What one message looks like, independent of how it is drawn.
+    private struct Presentation {
+        struct Badge {
+            var title: String
+            var icon: String
+            var note: String = ""
+        }
+
+        var text: String
+        var isStreaming: Bool = false
+        var note: Badge?
+        var affordance: Badge?
+        var errorDetail: String?
     }
 
     // MARK: - Pieces

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		2173766030433295004EEE97 /* SwiftStreamingMarkdown in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1100000000000000000302 /* SwiftStreamingMarkdown */; };
 		7A1100000000000000000101 /* LedgerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1100000000000000000201 /* LedgerKit */; };
 		7A1100000000000000000102 /* Understudy in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1100000000000000000202 /* Understudy */; };
 /* End PBXBuildFile section */
@@ -57,6 +58,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2173766030433295004EEE97 /* SwiftStreamingMarkdown in Frameworks */,
 				7A1100000000000000000101 /* LedgerKit in Frameworks */,
 				7A1100000000000000000102 /* Understudy in Frameworks */,
 			);
@@ -121,6 +123,7 @@
 			packageProductDependencies = (
 				7A1100000000000000000201 /* LedgerKit */,
 				7A1100000000000000000202 /* Understudy */,
+				7A1100000000000000000302 /* SwiftStreamingMarkdown */,
 			);
 			productName = Projection;
 			productReference = 2159E4013006CC1600BF78C1 /* Projection.app */;
@@ -204,6 +207,9 @@
 			);
 			mainGroup = 2159E3F83006CC1600BF78C1;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				7A1100000000000000000301 /* XCRemoteSwiftPackageReference "SwiftStreamingMarkdown" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2159E4023006CC1600BF78C1 /* Products */;
 			projectDirPath = "";
@@ -637,6 +643,17 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		7A1100000000000000000301 /* XCRemoteSwiftPackageReference "SwiftStreamingMarkdown" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/microsoft/SwiftStreamingMarkdown";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		7A1100000000000000000201 /* LedgerKit */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -645,6 +662,11 @@
 		7A1100000000000000000202 /* Understudy */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Understudy;
+		};
+		7A1100000000000000000302 /* SwiftStreamingMarkdown */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7A1100000000000000000301 /* XCRemoteSwiftPackageReference "SwiftStreamingMarkdown" */;
+			productName = SwiftStreamingMarkdown;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 import LedgerKit
 import Understudy
 
@@ -83,19 +84,33 @@ final class AppModel {
     /// demonstrate nothing. Pacing is what makes streaming *visible*.
     func driver() -> GenerationDriver {
         GenerationDriver(
-            model: ScriptedLanguageModel(script: Self.demoScript),
-            descriptor: ModelDescriptor(provider: "understudy", model: "scripted")
+            model: SystemLanguageModel.default
         )
     }
 
+    /// ⚠️ **The chunk boundaries are the test, not the content.**
+    ///
+    /// Several of these split *inside* Markdown syntax — `"**Val"` before its
+    /// closing `**`, a list marker arriving before its item text. That is the
+    /// condition `SwiftStreamingMarkdown` exists for, and the condition a naïve
+    /// renderer fails visibly: it flashes raw asterisks, then reflows when the
+    /// delimiter closes. Splitting cleanly on word boundaries would make the
+    /// spike look like it worked without testing anything.
+    ///
+    /// It is also honest about our own pipeline: real deltas do not respect
+    /// syntax, because the framework coalesces snapshots on its own cadence and
+    /// §7.4's flush policy reshapes them again.
     private static var demoScript: Script {
         Script(
             [
-                "A valley fold ", "brings the paper ", "toward you. ",
-                "Crease away from ", "the mountain, ", "and the paper ",
-                "forms a V ", "when you look ", "at it edge-on.",
+                "Three folds worth knowing:\n\n",
+                "- **Val", "ley fold** — the paper ", "comes toward you, ",
+                "forming a V.\n",
+                "- **Moun", "tain fold** — the mirror ", "image, folding away.\n",
+                "- **Squash ", "fold** — open a flap ", "and flatten it.\n\n",
+                "Every model is ", "these three, repeated.",
             ]
-            .flatMap { [Script.Step.emit($0), .wait(.milliseconds(320))] }
+            .flatMap { [Script.Step.emit($0), .wait(.milliseconds(280))] }
         )
     }
 
