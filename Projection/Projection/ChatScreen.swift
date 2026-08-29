@@ -21,7 +21,6 @@ struct ChatScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var projection: ConversationProjection?
     @State private var draft = ""
-    @State private var branchOptions: BranchOptions?
     @FocusState private var composerFocused: Bool
 
     /// Measured heights, keyed by message — the inputs to `trailingSpace`.
@@ -114,11 +113,16 @@ struct ChatScreen: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Self.messageSpacing) {
                     ForEach(messages) { message in
+                        let versions = versions(of: message, in: projection.conversation)
                         MessageBubble(
                             message: message,
-                            siblingCount: projection.conversation.messages.siblings(of: message.id).count,
+                            versionIndex: versions.firstIndex(of: message.id) ?? 0,
+                            versionCount: versions.count,
                             onRegenerate: { await model.regenerate(message.id, in: conversation) },
-                            onShowBranches: { showBranches(for: message, in: projection) }
+                            onSelectVersion: { index in
+                                guard versions.indices.contains(index) else { return }
+                                Task { await model.switchBranch(to: versions[index], in: conversation) }
+                            }
                         )
                         .id(message.id)
                         // Only the streaming message's height actually changes,
@@ -183,17 +187,6 @@ struct ChatScreen: View {
             // read. This is what being told is for.
             if isDeleted { dismiss() }
         }
-        .confirmationDialog(
-            "Switch to another version",
-            isPresented: Binding(get: { branchOptions != nil }, set: { if !$0 { branchOptions = nil } }),
-            presenting: branchOptions
-        ) { options in
-            ForEach(options.siblings) { sibling in
-                Button(preview(of: sibling)) {
-                    Task { await model.switchBranch(to: sibling.id, in: conversation) }
-                }
-            }
-        }
     }
 
     @ToolbarContentBuilder
@@ -227,6 +220,29 @@ struct ChatScreen: View {
         guard !text.isEmpty else { return }
         draft = ""
         Task { await model.send(text, in: conversation) }
+    }
+
+    /// Every version of a message, in sibling order, **including the message
+    /// itself** — what a `‹ 2 of 3 ›` pager needs.
+    ///
+    /// ⚠️ **API friction worth recording for M9's review.** `siblings(of:)`
+    /// deliberately *excludes* the message — matching the English word, and its
+    /// doc even says "non-empty exactly when a branch switcher is warranted" — so
+    /// the one consumer the method anticipates cannot use it directly. Building a
+    /// pager needs the inclusive, ordered set *and* the current message's index
+    /// in it, which forces reaching past `siblings(of:)` to `parent` +
+    /// `children(of:)`, and special-casing the virtual root through
+    /// `rootChildren` (I6). Nothing here is wrong; it is a missing convenience
+    /// that the library's own documentation implies exists.
+    private func versions(of message: Message, in conversation: Conversation) -> [MessageID] {
+        if let parent = message.parent {
+            conversation.messages.children(of: parent).map(\.id)
+        } else {
+            // Root-level messages are children of the virtual root, which is not
+            // a message and so has no `children(of:)` to ask (I6). An edited
+            // first message legitimately has root-level siblings.
+            conversation.messages.rootChildren
+        }
     }
 
     /// The most recent user message — the thing the answer is an answer *to*,
@@ -285,26 +301,4 @@ struct ChatScreen: View {
         if case .streaming = messages.last?.state { true } else { false }
     }
 
-    private func showBranches(for message: Message, in projection: ConversationProjection) {
-        let siblings = projection.conversation.messages.siblings(of: message.id)
-        guard !siblings.isEmpty else { return }
-        branchOptions = BranchOptions(siblings: siblings)
-    }
-
-    private func preview(of message: Message) -> String {
-        let text = switch message.state {
-        case .complete(let content): content.text
-        case .streaming(let partial), .interrupted(let partial),
-             .cancelled(let partial), .failed(let partial, _, _): partial
-        }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Empty version" : String(trimmed.prefix(48))
-    }
-
-    /// `confirmationDialog(presenting:)` wants an `Identifiable`, and wrapping
-    /// the siblings gives the dialog a stable identity across presentations.
-    private struct BranchOptions: Identifiable {
-        let siblings: [Message]
-        var id: MessageID? { siblings.first?.id }
-    }
 }

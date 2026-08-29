@@ -26,9 +26,12 @@ import SwiftUI
 struct MessageBubble: View {
 
     let message: Message
-    let siblingCount: Int
+    /// This message's position among its versions, and how many there are —
+    /// `0`/`1` for a message that was never regenerated.
+    let versionIndex: Int
+    let versionCount: Int
     let onRegenerate: () async -> Void
-    let onShowBranches: () -> Void
+    let onSelectVersion: (Int) -> Void
 
     var body: some View {
         // **Unary by construction.** A `List`/`LazyVStack` row whose body
@@ -206,23 +209,87 @@ struct MessageBubble: View {
         }
     }
 
-    /// The branch switcher's entry point — shown only where there is another
-    /// branch to reach, which is what `siblings(of:)` being non-empty means.
+    /// **The branch switcher** — shown only where there is another version to
+    /// reach, which is what more than one sibling means.
     ///
     /// **DoD-1 depends on this existing**: the hero GIF requires the interrupted
     /// partial to be "reachable via the branch switcher", which is why cut
-    /// line 1 (hide the switcher) was retired rather than invoked.
+    /// line 1 (hide the switcher) was retired rather than invoked. It is the
+    /// visible proof of §6.4's central claim — that regenerate-as-sibling makes
+    /// the crashed attempt *survive* rather than be overwritten.
+    ///
+    /// An inline pager rather than the sheet this started as: switching versions
+    /// is a comparison, and a modal that covers the thing being compared is the
+    /// wrong shape for it. `‹ 2 of 3 ›` is also what every LLM chat has
+    /// converged on, so it needs no explaining.
     @ViewBuilder
     private var footer: some View {
-        if siblingCount > 0 {
-            Button {
-                onShowBranches()
-            } label: {
-                Label("\(siblingCount + 1) versions", systemImage: "arrow.trianglehead.branch")
-                    .font(.caption)
+        HStack(spacing: 14) {
+            // **Regenerate a message that succeeded.** Easy to leave out, and its
+            // absence is quietly serious: without it a sibling can only ever be
+            // created by a *failure*, so the branch switcher below — and with it
+            // DoD-1's whole "the partial survives as its own branch" claim —
+            // would almost never appear. §6.4's regenerate-as-sibling is a
+            // feature of healthy conversations, not an error path.
+            //
+            // Suppressed where the state already offers its own Regenerate, so
+            // an interrupted message does not carry two of them.
+            if showsRegenerate {
+                Button {
+                    Task { await onRegenerate() }
+                } label: {
+                    Image(systemName: "arrow.trianglehead.clockwise")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 22, height: 22)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Regenerate")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+
+            versionPager
         }
+    }
+
+    /// Whether the state already carries its own Regenerate affordance.
+    private var showsRegenerate: Bool {
+        guard message.role == .assistant else { return false }
+        switch message.state {
+        case .complete, .cancelled: return true
+        case .streaming, .interrupted, .failed: return false
+        }
+    }
+
+    @ViewBuilder
+    private var versionPager: some View {
+        if versionCount > 1 {
+            HStack(spacing: 4) {
+                step(-1, "chevron.left", enabled: versionIndex > 0)
+                Text("\(versionIndex + 1) of \(versionCount)")
+                    .font(.caption.monospacedDigit())
+                    // Monospaced digits so the row does not twitch as the
+                    // numbers change width under the user's thumb.
+                    .foregroundStyle(.secondary)
+                step(+1, "chevron.right", enabled: versionIndex < versionCount - 1)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Version \(versionIndex + 1) of \(versionCount)")
+        }
+    }
+
+    private func step(_ delta: Int, _ icon: String, enabled: Bool) -> some View {
+        Button {
+            onSelectVersion(versionIndex + delta)
+        } label: {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .frame(width: 22, height: 22)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(enabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
+        .disabled(!enabled)
+        .accessibilityLabel(delta < 0 ? "Previous version" : "Next version")
     }
 }

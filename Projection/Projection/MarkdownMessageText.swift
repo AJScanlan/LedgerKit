@@ -128,6 +128,32 @@ final class StreamingPartialSource: StreamedMarkdownSource {
         continuation.finish()
     }
 
+    /// Adopts whatever text already exists, **without pacing it**, and decides
+    /// whether anything more is coming.
+    ///
+    /// ⚠️ **The rule that makes this correct: pace only what arrives *after* the
+    /// view is watching.** Text that was already there was not streamed to us —
+    /// it was read from the log — and typing it out would be theatre, not
+    /// feedback. Without this, opening an existing conversation replayed every
+    /// answer at 100 ch/s, and so did switching branches, because the pacer had
+    /// no way to tell "this is new" from "this is history".
+    ///
+    /// Three cases, one line each, and they are the same line:
+    /// - **A fresh generation** starts with `text == ""`, so nothing is adopted
+    ///   and everything that follows is paced. Unchanged.
+    /// - **A settled message** adopts all of it and closes the stream — instant,
+    ///   with no pump left running behind it.
+    /// - **Attaching mid-generation** (scrolling a long conversation until a live
+    ///   answer comes into view) adopts what has arrived so far and paces only
+    ///   the rest, which is the behaviour §7.4 describes for a projection created
+    ///   while a generation is streaming.
+    func begin(with text: String, isStreaming: Bool) {
+        target = text
+        shown = text.count
+        continuation.yield(text)
+        if !isStreaming { finish() }
+    }
+
     /// Records the newest partial. **Does not display it** — the pump does that.
     func update(_ partial: String) {
         guard partial != target else { return }
@@ -242,19 +268,14 @@ struct AssistantMarkdown: View {
             // The same frames-of-lag argument applies to the indicator itself: a
             // hard removal blinks it out before any glyph replaces it. A short
             // cross-fade covers the parse.
-            .animation(.easeOut(duration: 0.2), value: source.hasReleasedText)
-            .onAppear { source.update(text) }
+//            .animation(.easeOut(duration: 0.2), value: source.hasReleasedText)
+            // Adopt what is already there; pace only what comes after.
+            .onAppear { source.begin(with: text, isStreaming: isStreaming) }
             .onChange(of: text) { _, updated in source.update(updated) }
             .onChange(of: isStreaming) { _, streaming in
                 // Terminal reached. Let the pacer finish what it is holding
                 // rather than snapping to the full text.
                 if !streaming { source.completeWhenDrained() }
-            }
-            .task {
-                // A message that is already settled when it first appears — every
-                // message in a reloaded conversation — has no streaming phase to
-                // wait for, so it drains at once and closes.
-                if !isStreaming { source.completeWhenDrained() }
             }
             .onDisappear { source.finish() }
     }
