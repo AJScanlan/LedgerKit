@@ -834,10 +834,37 @@ against the scripted provider on any Mac, styled from the skeleton M7 left.
       **edit** on user messages *as a stretch goal only* — the GIF does not
       need it, and G2's branching is already demonstrated by
       regenerate-as-sibling plus the switcher.
-- [ ] **Simulator drive-through** (headless verification before the gate's
+- [x] **Simulator drive-through** (headless verification before the gate's
       human one): launch, create a conversation, send, watch `.streaming`,
       stop, regenerate, switch branches, delete — asserting screen state at
       each step.
+      ✅ `ProjectionUITests` — `testTheWholeLoop` (40 s) and
+      `testRenamingReachesTheList` (24 s).
+      - **Driven by `ScriptedLanguageModel` and a per-launch throwaway store**,
+        selected by a `--uitest` launch argument. A launch argument rather than a
+        build flag, so the binary under test is the one that ships. The throwaway
+        store matters more than it looks: sharing the real one would leave
+        conversations on the machine recording the GIF, and would make "the empty
+        state appears" pass or fail depending on history.
+      - ⚠️ **Guardrail 3 still holds.** The provider is now *chosen* in one place
+        (`language`/`descriptor`) and the driver still *constructed* in exactly
+        one, which is what the corrected grep looks for.
+      - **The assertions key on accessibility labels**, so they read as English —
+        `"Stop generating"`, `"Version 2 of 2"`, `"Previous version"`. Those
+        labels were added for VoiceOver; that they turned out to be the test's
+        vocabulary is a fair argument for having added them.
+      - What it pins: `.streaming` is observed — a state **no fold of any log can
+        produce** (§6.2), so seeing it is evidence the live overlay works rather
+        than that text merely arrived; the terminal is observed via Regenerate
+        appearing and Stop retiring; regenerate yields `Version 2 of 2` rather
+        than replacing the first answer (§6.4's regenerate-as-sibling, DoD-1's
+        mechanism); switching returns to `Version 1 of 2`; deleting the only
+        conversation returns the empty state.
+      - ⚠️ **Read the summary lines, not a grep for `Test Case`.** `xcodebuild`
+        prints `Test case` (lower-case c), and a pattern that misses it reports
+        nothing while the run is green — the same shape as CLAUDE.md's `--filter`
+        trap, and it caught me here. A transient `xctrunner` launch failure also
+        appears in the log and **recovers**; it is not a failure.
 
 **Review gate:** the app runs the full loop in the simulator against
 `ScriptedLanguageModel`; guardrail 3's one-provider-line grep passes; any API
@@ -1038,9 +1065,9 @@ Item 2 is **already decided** and awaits only the wording pass.
 | D53: PCC generates (or fallback decided on evidence) | two spikes recorded in Phase 1; owner deferred to Phase 3 | ☑ |
 | DoD-1: kill/relaunch flow live over sqlite; GIF recorded | Phase 3; `RecoveryTests` as the automated sibling | ☐ |
 | DoD-2: one-line swap runs against the D53 provider | Phase 3 | ☐ |
-| Throw channel rendered (D55) | Phase 2 UI + drive-through | ☐ |
-| Exhaustive switch keeps no `default` | guardrail 2 review | ☐ |
-| One provider-construction line in the app | guardrail 3 grep | ☐ |
+| Throw channel rendered (D55) | `AppModel.present(_:)`'s exhaustive switch + the rendered alert | ☑ |
+| Exhaustive switch keeps no `default` | `MessageBubble.presentation` (5 cases) and `affordance(for:)` (§8's table) | ☑ |
+| One provider-construction line in the app | `grep -rn "GenerationDriver(" Projection/` → 1 | ☑ |
 | Healthy-log property over every demo-written log, killed runs included | existing property suites | ☐ |
 | Rev 11 carried into code (per-batch sweep + the two new greps) | Phase 4 sweep log | ☐ |
 

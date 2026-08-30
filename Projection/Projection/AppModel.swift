@@ -43,12 +43,27 @@ final class AppModel {
     /// does not claim. Picking the directory is the app's job exactly as
     /// ADR-003 says it is.
     static func databaseURL() throws -> URL {
-        let directory = URL.applicationSupportDirectory.appending(
-            path: "LedgerKit",
-            directoryHint: .isDirectory
-        )
+        // A UI test gets its own throwaway database, per launch. Two reasons,
+        // and the second is the one that matters: a test that shared the real
+        // store would leave conversations behind on the machine recording the
+        // GIF, and — worse — would *start* from whatever the last run left, so
+        // "the empty state appears" could pass or fail depending on history.
+        let directory = isUITesting
+            ? URL.temporaryDirectory.appending(path: "LedgerKitUITests/\(UUID().uuidString)",
+                                               directoryHint: .isDirectory)
+            : URL.applicationSupportDirectory.appending(path: "LedgerKit",
+                                                        directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appending(path: "demo.sqlite")
+    }
+
+    /// Whether this launch is being driven by `ProjectionUITests`.
+    ///
+    /// A launch argument rather than a build configuration, so the very same
+    /// binary that ships is the one under test — a `#if DEBUG` fork would let
+    /// the tested app and the real app drift.
+    static var isUITesting: Bool {
+        ProcessInfo.processInfo.arguments.contains("--uitest")
     }
 
     /// Opens the store. **`.sqlite(at:)`, from the very first run.**
@@ -83,9 +98,27 @@ final class AppModel {
     /// (measured at M6), so the stream would land in a single frame and
     /// demonstrate nothing. Pacing is what makes streaming *visible*.
     func driver() -> GenerationDriver {
-        GenerationDriver(
-            model: SystemLanguageModel.default
-        )
+        GenerationDriver(model: language, descriptor: descriptor)
+    }
+
+    /// **The provider, chosen once.** Still one decision in one place — the
+    /// driver above is still constructed exactly once, which is what guardrail 3
+    /// greps for — but a UI test needs a provider that says the same thing every
+    /// run, and asserting against a real model would be asserting the model.
+    /// That is tenet 5 at the app layer: the double is first-class, so the test
+    /// exercises every layer except which provider answered.
+    private var language: any LanguageModel {
+        Self.isUITesting ? ScriptedLanguageModel(script: Self.demoScript) : SystemLanguageModel.default
+    }
+
+    private var descriptor: ModelDescriptor {
+        Self.isUITesting
+            ? ModelDescriptor(provider: "understudy", model: "scripted")
+            // What the `SystemLanguageModel` convenience initializer defaults to,
+            // spelled out because this path no longer goes through it. Version
+            // stays nil: which *build* answered is genuinely unknown, and a guess
+            // would be a fabrication in an append-only log (§7.8).
+            : ModelDescriptor(provider: "apple", model: "system")
     }
 
     /// ⚠️ **The chunk boundaries are the test, not the content.**
