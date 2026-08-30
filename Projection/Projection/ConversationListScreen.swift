@@ -23,6 +23,7 @@ struct ConversationListScreen: View {
     @State private var list: ConversationListProjection?
     @State private var selection: ConversationID?
     @State private var pendingDeletion: ConversationSummary?
+    @State private var renameRequest: RenameRequest?
 
     var body: some View {
         NavigationSplitView {
@@ -107,6 +108,9 @@ struct ConversationListScreen: View {
             // tombstone and no undo.
             Text("This permanently deletes the conversation and its history.")
         }
+        .renameConversation($renameRequest) { id, title in
+            Task { await model.setTitle(title, in: id) }
+        }
     }
 
     private func conversations(_ list: ConversationListProjection) -> some View {
@@ -118,6 +122,24 @@ struct ConversationListScreen: View {
                 ConversationRow(title: summary.title, lastEventAt: summary.lastEventAt)
             }
             .swipeActions(edge: .trailing) {
+                Button("Delete", systemImage: "trash", role: .destructive) {
+                    pendingDeletion = summary
+                }
+                // Leading edge would put Rename under the swipe that usually
+                // means "archive" elsewhere in iOS; keeping both on the trailing
+                // edge matches Mail, where destructive sits outermost.
+                Button("Rename", systemImage: "pencil") {
+                    renameRequest = RenameRequest(id: summary.id, currentTitle: summary.title)
+                }
+                .tint(.accentColor)
+            }
+            // The same action a long press offers, because a swipe is not
+            // discoverable on its own and a context menu is where iOS users
+            // look for "what else can I do to this row".
+            .contextMenu {
+                Button("Rename…", systemImage: "pencil") {
+                    renameRequest = RenameRequest(id: summary.id, currentTitle: summary.title)
+                }
                 Button("Delete", systemImage: "trash", role: .destructive) {
                     pendingDeletion = summary
                 }

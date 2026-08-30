@@ -21,6 +21,7 @@ struct ChatScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var projection: ConversationProjection?
     @State private var draft = ""
+    @State private var renameRequest: RenameRequest?
     @FocusState private var composerFocused: Bool
 
     /// Measured heights, keyed by message — the inputs to `trailingSpace`.
@@ -187,13 +188,21 @@ struct ChatScreen: View {
             // read. This is what being told is for.
             if isDeleted { dismiss() }
         }
+        .renameConversation($renameRequest) { id, title in
+            Task { await model.setTitle(title, in: id) }
+        }
     }
 
     @ToolbarContentBuilder
     private func toolbar(_ projection: ConversationProjection) -> some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Menu("Conversation", systemImage: "ellipsis") {
-                Button("Rename…", systemImage: "pencil") { /* TODO(design) */ }
+                Button("Rename…", systemImage: "pencil") {
+                    renameRequest = RenameRequest(
+                        id: conversation,
+                        currentTitle: projection.conversation.title
+                    )
+                }
                 Button("Delete", systemImage: "trash", role: .destructive) {
                     Task { await model.delete(conversation) }
                 }
