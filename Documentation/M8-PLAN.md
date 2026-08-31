@@ -1,13 +1,14 @@
 # M8 Implementation Plan — the `Projection` demo app (the hero)
 
-**Status:** 🟨 **PHASES 0 AND 1 COMPLETE 2026-08-16 — 457 green on Xcode 27
+**Status:** 🟨 **PHASES 0, 1 AND 2 COMPLETE — 457 green on Xcode 27
 Beta 5** (434 `LedgerKit` + 23 `Understudy`, warning-free, across host, device,
 deep and iOS 27 simulator tiers). Toolchain of record: Xcode `27A5237l`, macOS
 SDK `26A5406c`, host OS `26A5406e`, iOS runtime `24A5408d`; Beta 4 deleted, one
 Xcode installed. **M7's last open exit item (the streaming eyeball) is closed**,
-so M7 is now unconditionally complete. **Phase 2 next — the demo app**, which
-needs no provider decision: it runs on `ScriptedLanguageModel` (D53 deferred to
-Phase 3).
+so M7 is now unconditionally complete. **Phase 2 is done and accepted by the owner**; the app runs
+the whole loop, renders Markdown with a paced cadence, and has a UI-test
+drive-through. **Phase 3 next — DoD-1's kill/relaunch GIF and DoD-2's swap**,
+the latter still gated on D53 (PCC entitlement, or Anthropic's next tag).
 
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M8 section) · [SPEC.md](./SPEC.md)
 §11 (the sketch and the showpiece switch), §13 DoD-1/DoD-2, §12 (cut lines),
@@ -689,12 +690,37 @@ are recorded as such rather than folded in silently.
 
 ### Phase 2 — The demo app (UI over public API, `ScriptedLanguageModel`-driven)
 
-**Status:** 🟨 **SKELETON LANDED 2026-08-16 — handed to Alexander for design.**
-The app builds warning-free, runs on the iOS 27 simulator, and completes the loop
-end to end: create → send → stream → **relaunch and the conversation is still
-there**. Plumbing is done; the visual layer is deliberately unfinished, because
-the owner is driving design and the goal ("could plausibly have been made by
-Apple", possibly a standalone app later) is not a thing to guess at.
+**Status:** ☑ **PHASE 2 COMPLETE.** The app builds warning-free, runs on the iOS
+27 simulator, and completes the loop end to end. Every checklist item is done and
+the review gate is met: the full loop runs against `ScriptedLanguageModel`
+(`ProjectionUITests`, green twice), guardrail 3's grep returns exactly one
+`GenerationDriver(`, the API friction is recorded in §7 item 6, and **Alexander
+drove it by hand and accepted it**.
+
+**What Phase 2 turned out to be.** It was scoped as "skeleton, hand off for
+design" and became considerably more, deliberately: the GIF is what LedgerKit
+gets sold with, so the streaming had to look like something Apple, Anthropic or
+Microsoft could have shipped. The work that was *not* in the plan — Markdown
+rendering, the pacer, the anchored scroll, the typing indicator — is where most
+of the milestone's findings came from.
+
+⚠️ **Three findings from that stretch worth carrying, because each was a wrong
+belief rather than a missing feature:**
+
+1. **Smoothness is cadence, not animation.** Microsoft's own LLM-chat sample does
+   not stream a model — it replays a finished string at 3 characters per 30 ms.
+   Forwarding a real provider cannot look like that, and no per-character
+   animation can smooth a lump that arrives in one frame.
+2. **A view-identity change is a layout jump.** Three view types for one
+   assistant turn (indicator → streaming → settled) meant two rebuilds, and with
+   a bottom-anchored scroll view every height discontinuity shoves the
+   transcript. Animating the transitions could not have helped: there was nothing
+   to interpolate between.
+3. **Measure before the third guess.** The scroll anchor took two wrong
+   corrections — one of which was a regression — before instrumenting the real
+   geometry showed the scroll was *clamping*, so the trailing spacer decided the
+   position and the anchor was irrelevant. Two instrumented runs made the
+   relationship exact where reasoning had not.
 
 **Files** — all in `Projection/Projection/`, which is a
 `PBXFileSystemSynchronizedRootGroup`, so **new files need no `project.pbxproj`
@@ -1043,9 +1069,29 @@ Item 2 is **already decided** and awaits only the wording pass.
 4. `MessageTree.updateStates` and `Message.visibleText` placement — one look
    during the API review; neither is public.
 5. **New at M8:** the GIF asset (raw take + location) for the README hero;
-   the API-friction list from Phase 2 (possibly empty — say so if so); the
+   the API-friction list from Phase 2 (**not empty** — item 6); the
    demo as the README's quickstart source (its app model is the 60-second
    example §13 DoD-4 wants).
+6. **API friction the demo actually hit** (guardrail 1 — recorded rather than
+   worked around). Both are *missing conveniences*, not defects, and both were
+   found by building the thing the API was designed for:
+   - **`Conversation.activeMessages` is computed**, so a SwiftUI body re-walks
+     the active path on every evaluation. Apple's own guidance is explicit that
+     derived collections belong on the model rather than recomputed per pass, so
+     every consumer following it must hoist or cache. Honest for a value type;
+     worth a look when the read surface is reviewed.
+   - **`siblings(of:)` excludes the message itself**, so the branch switcher its
+     own documentation names — *"non-empty exactly when a branch switcher is
+     warranted"* — cannot use it. A `‹ 2 of 3 ›` pager needs the **inclusive,
+     ordered** set plus the current index, which forces reaching past it to
+     `parent` + `children(of:)` and special-casing the virtual root through
+     `rootChildren` (I6). See `ChatScreen.versions(of:in:)`.
+7. **The demo's dependency costs, if Projection is ever extracted** (owner's
+   stated intent): `SwiftStreamingMarkdown` resolves only on a **branch pin**,
+   brings **seven** transitive dependencies, and renders assistant turns to
+   VoiceOver as **editable text fields**. The last is a defect rather than a
+   trade-off and is plausibly fixable at our call site with
+   `.accessibilityRepresentation`.
 
 ---
 
@@ -1099,6 +1145,7 @@ no rollback. Deletion is rescheduled to after the host tier is genuinely green.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-08-29 | **Phase 2 ☑ COMPLETE** | 457 (434 + 23) + `ProjectionUITests` ×2 | Skeleton → real app, then well past the plan's scope because the GIF is the deliverable LedgerKit is sold with. Landed: six-screen app over public API only; **Markdown + streaming** via `SwiftStreamingMarkdown` (branch-pinned, seven transitive deps, VoiceOver regression — all recorded in §7 item 7); a **pacer** that decouples display rate from arrival rate (Microsoft's 3 chars / 30 ms), sound only because partials are cumulative; **one view per assistant turn** to stop identity changes lurching the transcript; **Claude-style anchoring** where a trailing spacer trades height with the answer 1:1; **inline `‹ 2 of 3 ›` branch switcher** (DoD-1's mechanism) plus Regenerate on settled messages, whose absence had made siblings reachable only through failure; **rename** from list and toolbar; and a **UI drive-through** on `ScriptedLanguageModel` + throwaway store via `--uitest`. Owner drove it by hand and accepted. §7 gains items 6–7: the API friction (`activeMessages` computed, `siblings(of:)` exclusive) and the dependency costs |
 | 2026-08-16 | **Phase 1 ☑ COMPLETE** | **457** (434 + 23), host + device + deep + simulator | Gate met. **D53 resolved (owner): defer to Phase 3** — neither provider usable today, both expected to become so, and Phase 2 needs neither. **D57 accepted and landed** (zero-count context overflow → nil), found by spiking `ClaudeForFoundationModels`: Anthropic maps request-too-large onto `LanguageModelError.contextSizeExceeded` with `0`/`0`, which LedgerKit would have recorded as a measured zero-token window in an append-only log. The spike also produced §7.3's **first third-party prefix-stability evidence** (0 violations — a data point, not a measurement: 4 snapshots vs rev 9's 412) and independently confirmed Phase 0's `Transcript.CustomSegment` finding, since the package's *tagged* releases break on the same removal |
 | 2026-08-16 | **Phase 1 — at the gate** | **456** (433 + 23), host + device + deep + simulator | F1 landed in three parts (D50.1 store notify, D50.2 prune conjunction, D50.3 attach-path reconciliation) behind four new tests written red-first: all four failed before the fix, three by *hanging* until `.timeLimit`, which is F1 itself. `drive` split into slot-lifecycle + `runToTerminal` so abandonment has one catch rather than one per door. Five mutations, five resolved — row 4 was **initially uncatchable** (a leaked `shownPartials` entry is unreachable through `liveSet`), answered by deriving the invariant *nothing running ⇒ nothing held* and exposing `generationsWithShownPartials` to assert it. F2/F4 comment corrections landed (three "proposed for rev 9" → "landed"; the session-cache prose reworded to allowance-plus-reality, public symbol first). **F7 found and fixed**: the §7.7 residue's `> 100` floor was calibrated on model verbosity and flaked at 74/81 — repaired to a two-measured-value comparison; the residue's *answer* never moved. ⛔️ **D53 negative**: PCC is `.available` and fails deterministically (`ModelManagerError#1046`) while on-device generates on the same host — awaiting the owner's fallback decision |
 | 2026-08-16 | **Phase 0 ☑ COMPLETE** | **452** (429 + 23), both substrates | Owner signed off both §7 items (§6 item 3.1 and 3.3), drafted to `scratchpad/rev11-draft.md` per the standing pattern. Three one-line code edits landed together: `Transcript.Segment` 4 → 3, `Response.Action` 7 → 6, pin `26A5388f` → `26A5406c`; each manifest entry carries the *why*. **3.3 is scoping only — nothing wired**: `ModelDescriptor.version` stays nil (a `displayName` is display data, and a closed map over an open set of `Variant`s is the `unrecognized`-floor problem on the wire); `StopInfo.resolvedModelID` recorded as the home *if* Apple ever ships a stable identifier. Eyeball closed (owner) → **M7 unconditionally complete**; Beta 4 deleted → audit F3 moot; CLAUDE.md's two toolchain lines and the pin reference updated, with the SDK/OS train-match warning added. SPEC untouched — rev 11 lands at Phase 4 |

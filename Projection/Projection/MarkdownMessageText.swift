@@ -236,7 +236,7 @@ final class StreamingPartialSource: StreamedMarkdownSource {
 struct AssistantMarkdown: View {
 
     static let config = MarkdownRenderConfig.default
-        .withShouldAnimateText(value: true)
+        .withShouldAnimateText(value: false)
 
     /// The partial while streaming; the final text once settled.
     let text: String
