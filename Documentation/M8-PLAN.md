@@ -1,21 +1,34 @@
 # M8 Implementation Plan — the `Projection` demo app (the hero)
 
-**Status:** 🟨 **PHASES 0, 1 AND 2 COMPLETE — 457 green on Xcode 27
-Beta 5** (434 `LedgerKit` + 23 `Understudy`, warning-free, across host, device,
-deep and iOS 27 simulator tiers). Toolchain of record: Xcode `27A5237l`, macOS
-SDK `26A5406c`, host OS `26A5406e`, iOS runtime `24A5408d`; Beta 4 deleted, one
-Xcode installed. **M7's last open exit item (the streaming eyeball) is closed**,
-so M7 is now unconditionally complete. **Phase 2 is done and accepted by the owner**; the app runs
-the whole loop, renders Markdown with a paced cadence, and has a UI-test
-drive-through. **Phase 3 is complete — both DoD lines are demonstrated and
-recorded.** DoD-1 (`Documentation/assets/dod1.gif`): kill mid-stream, relaunch,
-`.interrupted` with the flushed partial, regenerate, switch back to the crashed
-attempt as version 1 of 2. DoD-2 (`dod2.gif`): the one-line provider swap run
-against Claude, with the log recording `provider: "anthropic"`. **The DoD-2
-wiring lives on branch `m8-dod2-claude`, not here** — the vendor package is
-still untagged and pinning `main` to a revision is what D58 rules out. **Phase 4 is done: SPEC rev 11 was ratified at this boundary on
-2026-09-05 (Appendix I, five items in four batches, nothing touching the wire).
-M8 is complete.**
+**Status:** ☑ **M8 COMPLETE 2026-09-05 — 457 tests green** (434 `LedgerKit` + 23 `Understudy`, warning-free, across host,
+device, deep and iOS 27 simulator tiers) plus **6 `ProjectionUITests`** driving the
+whole loop against `ScriptedLanguageModel`. Toolchain of record: Xcode `27A5237l`,
+macOS SDK `26A5406c`, host OS `26A5406e`, iOS runtime `24A5408d`; Beta 4 deleted,
+one Xcode installed.
+
+**Both DoD lines are demonstrated and recorded.** DoD-1
+(`Documentation/assets/dod1.gif`): kill mid-stream, relaunch, `.interrupted`
+carrying the flushed partial, regenerate, switch back to the crashed attempt as
+version 1 of 2. DoD-2 (`dod2.gif`): the one-line provider swap run against Claude,
+with the log recording `provider: "anthropic"`. ⚠️ **The DoD-2 wiring lives on
+branch `m8-dod2-claude`, not here** — the vendor package is still untagged, and
+pinning `main` to a revision is what D58 rules out; it also forces an iOS 27
+deployment floor that **must never reach the packages**.
+
+**SPEC rev 11 ratified at this boundary** (Appendix I — five items in four
+batches, nothing touching the wire). Unusually, *three of the five are the spec
+correcting itself rather than growing*: two Beta 5 surface changes, and DoD-1
+**weakened** because demonstrating it showed the line demanded partial text the
+system does not promise. Also closed: M7's last open exit item (the streaming
+eyeball), so M7 is unconditionally complete.
+
+**Carried into M9:** the naming review (`GenerationID`'s collision;
+`siblings(of:)`'s exclusivity, which the branch pager could not use), **D60** —
+§7.4's flush cadence is also the floor on display granularity, recorded not fixed
+— and DoD-2's dependency, revisited when Anthropic tags a Beta 5-compatible
+release. ⚠️ **The toolchain pin is still `26A5406c` while Beta 6/7 are out**: a
+Phase 0 repeat is owed, and now that both DoD clips are banked there is nothing
+left holding it back.
 
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M8 section) · [SPEC.md](./SPEC.md)
 §11 (the sketch and the showpiece switch), §13 DoD-1/DoD-2, §12 (cut lines),
