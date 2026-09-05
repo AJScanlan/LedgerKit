@@ -153,6 +153,12 @@ struct ChatScreen: View {
             // with no animation nobody asked for. The send-time positioning
             // below is explicit and takes over from there.
             .defaultScrollAnchor(.bottom)
+            // Swipe the transcript to put the keyboard away — stock behaviour in
+            // Messages and Mail, and its absence is the kind of thing nobody
+            // reports as a bug but everybody feels: with a draft typed and no
+            // Return key to press, the keyboard could only be dismissed by
+            // sending.
+            .scrollDismissesKeyboard(.interactively)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
             .onChange(of: latestUserMessage(in: messages)) { _, anchor in
                 // **The Claude behaviour**: on send, the question rises to the
@@ -228,6 +234,15 @@ struct ChatScreen: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
+        // **Dismiss on send — the LLM-chat convention, not the Messages one.**
+        // Messages keeps the keyboard up because replies are a line long and the
+        // next turn is imminent. An assistant answer is several paragraphs and
+        // takes seconds to arrive, so holding the keyboard costs ~40% of the
+        // screen for the whole time there is something worth reading. Claude and
+        // ChatGPT both dismiss here; measured on-device timings make the case
+        // plainer still — the answer is on screen for far longer than the draft
+        // was.
+        composerFocused = false
         Task { await model.send(text, in: conversation) }
     }
 
