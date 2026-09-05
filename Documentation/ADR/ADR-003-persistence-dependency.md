@@ -33,10 +33,20 @@ rules; M4 ratifies it by wiring.
 - **In-memory `DatabaseQueue`** gives tests and previews a real SQL engine with zero
   I/O — the persistence counterpart of `ScriptedLanguageModel` (tenet 5), and what
   `PersistenceConfiguration.inMemory` maps to.
-- **`ValueObservation`** feeds the `conversations` index to the projection's
-  `conversationList` (G9, M7) without polling — and §9's "index updates on non-delta
-  appends only" rule exists precisely so this observation doesn't churn at streaming
-  cadence.
+- ~~**`ValueObservation`** feeds the `conversations` index to the projection's
+  `conversationList` (G9, M7) without polling.~~ **Retired at M9 Phase 1 (2026-09-05):
+  this bullet was written in the future tense at M1 and became false at M7, when value
+  observation was examined and *declined* — see "Settled at M7" below, which is this
+  document's own answer.** The index is fed by the store's notification feed instead,
+  because the store actor is the only writer in the process. §9's "index updates on
+  non-delta appends only" rule survives on its own merits and is unrelated to how the
+  index is observed: it exists so a streaming generation does not churn the table at
+  flush cadence, whoever is watching.
+
+  ⚠️ **Kept as a strike rather than deleted**, so the drafting history stays legible —
+  GRDB was chosen partly *for* a feature that was later turned down, and an ADR that
+  quietly removed the reason would misreport why the decision was taken. The decision
+  still holds; one of its supporting arguments did not.
 - **`DatabaseMigrator`** covers the little schema evolution we have (the *data* never
   migrates: events are versioned-and-frozen per ADR-001, snapshots are
   discard-on-mismatch).

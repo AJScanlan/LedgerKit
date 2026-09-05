@@ -446,10 +446,19 @@ deep tier), pin moved, any surface/behaviour drift written into §6 item 3 with
 its disposition, Beta 4 gone, eyeball closed. **If drift required a §8
 decision, it is signed off here, not embedded silently in the manifest.**
 
-**Gate status:** drift recorded (§6 item 3); simulator green; **host, device and
-deep tiers blocked on D56**; two §7 sign-offs outstanding (Segment's lost
-`.custom`; OQ8's reopening by `SystemLanguageModel.variant`); pin unmoved by
-design; Beta 4 retained by design.
+**Gate status — ☑ met.** Drift recorded (§6 item 3) and both §7 sign-offs taken
+(Segment's lost `.custom`; OQ8's reopening by `SystemLanguageModel.variant`),
+landing as rev 11 batches A and B. Simulator green throughout; the **host,
+device and deep tiers unblocked once D56(d) moved the OS onto the Beta 5
+train**, and all four went green together. Pin moved to `26A5406c`; Beta 4
+deleted afterwards, per the rescheduled procedure below.
+
+⚠️ **This paragraph described the phase mid-flight until M9 Phase 1 (F2)** — it
+said "blocked" and "outstanding" about conditions that cleared the same week,
+which made a *completed* phase read as stuck. The lesson is small and cheap:
+a gate paragraph is a status, so it is written twice — once when the gate is
+reached, once when it is met — and the second write is the one that gets
+skipped.
 
 ---
 
@@ -481,18 +490,20 @@ empty streaming bubble. The demo can now be built on it.
 fixed, and D53's empirical question is answered — before any UI is built on
 top.
 
-- [ ] **F1 — the store half (D50.1):** in `drive`, catch any throw out of the
+- [x] **F1 — the store half (D50.1):** in `drive`, catch any throw out of the
       body, clear `shownPartials[generation]`, `notify(.changed(conversation))`,
       rethrow. Comment states the no-suspension-before-release invariant
       (D38's argument, third appearance). Covers all three couldn't-record
       doors: a failed delta flush, a failed terminal in `windDown`, and a
       persistence failure in the rehydration read.
-- [ ] **F1 — the projection half (D50.2):** `pruneLiveSet(against: storeLive)`
+      **☑** `abandon(_:in:)` in `ConversationStore.swift`; `drive` split into slot lifecycle + `runToTerminal`, so abandonment has one catch rather than one per door.
+- [x] **F1 — the projection half (D50.2):** `pruneLiveSet(against: storeLive)`
       — keep iff classified `.interrupted` **and** present in `storeLive`.
       Update the prune's doc: the two-ends split (store's view adds the
       just-started; the prune retires the just-finished *and now the
       abandoned*).
-- [ ] **F6 — the attach half (D50.3):** `init` runs the same prune, so attach
+      **☑** Landed as `reconciled(_:with:routing:against:)` rather than `pruneLiveSet(against:)` — one reconciliation point serving both the re-pull and the attach path, which is why it is not named for pruning alone.
+- [x] **F6 — the attach half (D50.3):** `init` runs the same prune, so attach
       and re-pull share one reconciliation point instead of one path having it.
       Distinct trigger from F1 and **survives F1's fix**: a projection attaching
       between a terminal's append and its `release` reads a `.complete` message
@@ -501,12 +512,14 @@ top.
       heals. Test alongside F1's, with the same harness: park a driver, let the
       terminal land, attach inside the window, assert `.complete` with its text.
       **Mutation:** remove the init-side prune (test must fail).
-- [ ] **F1 — the comment riders:** `shownPartials`' "cleared when the
+      **☑** `static` precisely so `init` can call it (see its doc); the attach path reconciles at line 160.
+- [x] **F1 — the comment riders:** `shownPartials`' "cleared when the
       generation winds down" gains the abandon path;
       `windDown`'s "truest account" justification is replaced with the real
       reason (the clear must follow the terminal append, and the abandon path
       has its own clear now).
-- [ ] **F1 — tests (the D30 pattern):** tier 1, `ScriptedDriver` + the
+      **☑** Comment riders corrected with the code.
+- [x] **F1 — tests (the D30 pattern):** tier 1, `ScriptedDriver` + the
       write-hostile store double (M5's per-throw-condition harness), projection
       attached: fail a mid-generation flush → assert the projection reaches
       `.interrupted` carrying the **durable prefix** (the visible shrink is the
@@ -516,14 +529,17 @@ top.
       the prune conjunction (test must fail); note honestly that
       clear-vs-notify order is unobservable (no suspension) and claim nothing
       for it.
-- [ ] **F2 — `GenerationDriving.swift` session-cache comments** (lines 31,
+      **☑** `AbandonedGenerationTests.swift` — four tests, written red-first; three failed by *hanging* until `.timeLimit`, which is F1 itself.
+- [x] **F2 — `GenerationDriving.swift` session-cache comments** (lines 31,
       116): reword to allowance-plus-reality per §7.8 rev 10 — v0.1 rebuilds
       per generation; a reuse cache is legal headroom with its own validity
       rule. Line 116 is on a **public** symbol; it goes first.
-- [ ] **F4 — three "Proposed for rev 9" comments** in
+      **☑** Reworded to allowance-plus-reality (`GenerationDriving.swift:123-127`): v0.1 rebuilds per generation and caches nothing; a reuse cache is legal headroom that would carry its own validity rule.
+- [x] **F4 — three "Proposed for rev 9" comments** in
       `NormalizeAppleErrors.swift` (~209, ~225, ~268) → "landed rev 9",
       matching line 200's spelling in the same file.
-- [ ] **The PCC spike (D53):** ~10 lines against the Beta 5 host —
+      **☑** All three retired — `grep -rn 'Proposed for rev' Sources Tests` is empty as of M9 Phase 1.
+- [x] **The PCC spike (D53):** ~10 lines against the Beta 5 host —
       `PrivateCloudComputeLanguageModel` availability, one short generation,
       and what §8's PCC error rows actually receive if it fails. Scratch probe
       first (the M6 pattern); promote to a device-gated test only if it earns
@@ -536,6 +552,7 @@ top.
       `PrivateCloudComputeLanguageModel()` and **the spike is purely
       empirical**: does it generate here.
       ⛔️ **RAN 2026-08-16 — PCC does NOT generate on this host.** Verbatim:
+      **☑** Spike ran 2026-08-16, **negative** (`ModelManagerError#1046` while the on-device control generated on the same host). Closed by D58.
 
       ```
       PCC availability: available / isAvailable=true
@@ -854,32 +871,39 @@ sample caught completed text. **This needs a human watching, not a screenshot.**
 **Goal:** the real app — list, chat, branch switcher, throw channel — running
 against the scripted provider on any Mac, styled from the skeleton M7 left.
 
-- [ ] **App model (D51):** owns the store (opened once at
+- [x] **App model (D51):** owns the store (opened once at
       `Application Support/LedgerKit/demo.sqlite` per D52, `.sqlite(at:)` —
       the one-line change handoff 4 named) and the `driver()` factory — still
       the only line naming a provider.
-- [ ] **Conversation list screen:** `ConversationListProjection`; create
+      **☑** `Projection/Projection/AppModel.swift` — and it is still the **one** `GenerationDriver(` construction (guardrail 3).
+- [x] **Conversation list screen:** `ConversationListProjection`; create
       (`createConversation`), rename (`setTitle` via a dialog), delete (swipe,
       `deleteConversation`), navigate to detail. Empty-state view for a fresh
       install.
-- [ ] **Chat screen:** the styled `StreamingPreview` — real `TextField` input
+      **☑** `ConversationListScreen.swift`, plus `RenameConversation.swift`.
+- [x] **Chat screen:** the styled `StreamingPreview` — real `TextField` input
       replacing the canned prompt, send/stop, the **exhaustive switch with no
       `default`** (guardrail 2), the streaming caret, the diagnostics badge
       kept (a demo that hid quarantine residue would hide the reducer's most
       interesting sentence).
-- [ ] **Branch switcher:** at any message with non-empty `siblings(of:)`, a
+      **☑** `ChatScreen.swift` + `ChatComposer.swift`; markdown via `MarkdownMessageText.swift` / `AssistantMarkdown`.
+- [x] **Branch switcher:** at any message with non-empty `siblings(of:)`, a
       switcher affordance (chips or a menu) driving
       `switchBranch(to:in:)`. This is DoD-1's "reachable via the branch
       switcher" — the reason cut line 1 is retired, so it is not optional.
-- [ ] **Deletion navigation:** `isDeleted` pops the detail screen (M7 handoff
+      **☑** `MessageBubble.onSelectVersion` driven by `ChatScreen.versions(of:in:)` — whose own doc records the `siblings(of:)` friction that became M9's D64.
+- [x] **Deletion navigation:** `isDeleted` pops the detail screen (M7 handoff
       5) — delete from the list while the detail is open and nothing throws at
       anybody.
-- [ ] **Throw channel rendered (D55):** the catch replacing `try?`, per the
+      **☑** `ChatScreen.swift:191` — `.onChange(of: projection.isDeleted)` dismisses.
+- [x] **Throw channel rendered (D55):** the catch replacing `try?`, per the
       decision's per-case table.
-- [ ] **Regenerate** on assistant messages (skeleton's affordances carry), and
+      **☑** `AppModel.swift:189` — `// MARK: - The throw channel (D55)`, catching `LedgerError` and `CancellationError` separately.
+- [x] **Regenerate** on assistant messages (skeleton's affordances carry), and
       **edit** on user messages *as a stretch goal only* — the GIF does not
       need it, and G2's branching is already demonstrated by
       regenerate-as-sibling plus the switcher.
+      **☑** `MessageBubble.onRegenerate`.
 - [x] **Simulator drive-through** (headless verification before the gate's
       human one): launch, create a conversation, send, watch `.streaming`,
       stop, regenerate, switch branches, delete — asserting screen state at
@@ -980,10 +1004,11 @@ drives it once.
     tapping Paste is the only reliable text entry here (the simulator-control
     `text` action never delivered a keystroke), and it keeps the Paste/AutoFill
     callout out of the take.
-- [ ] **Crop the status bar out of any future cut.** It carries no information,
+- [x] **Crop the status bar out of any future cut.** It carries no information,
       it shows the black dynamic-island mask, and it is what makes a splice
       between takes visible (the two takes here are 11 minutes apart). Done for
       this GIF; keep doing it.
+      **☑** Applied to both cuts (`crop=1206:2492:0:130`); the recipe is in CLAUDE.md's recording notes.
 - [x] **DoD-2, the swap** — done 2026-09-05 on branch `m8-dod2-claude`, against
       `ClaudeForFoundationModels` pinned to revision `fd965bf` (still untagged;
       owner's call to proceed rather than wait). Artifacts:
@@ -1049,9 +1074,10 @@ drives it once.
 
   **Nothing failed**, so §8 normalization produced nothing to record — worth
   noting as an absence rather than leaving the checklist item silently unmet.
-- [ ] **On-device pass:** the same app over `SystemLanguageModel.default` on
+- [x] **On-device pass:** the same app over `SystemLanguageModel.default` on
       the host — short turns per D54. If the window is hit anyway, the
       `.reduceContext` bubble rendering **is** the correct demo (D54).
+      **☑** Ran; DoD-1 was shot on-device and `dod2.gif` shows the three-provider swap.
 
 **Review gate:** GIF exists and is watchable; the swap ran against a real
 second provider (or D53's fallback, as decided); both DoD lines in §13 are
@@ -1267,18 +1293,18 @@ Item 2 is **already decided** and awaits only the wording pass.
 | D50 | **The abandoned-generation remedy**: the store clears `shownPartials` and publishes `.changed` on any throw out of `drive` (D39's "live set moved" half, previously unimplemented); the projection's prune keeps an entry iff classified `.interrupted` **and** present in the store's live set. Shown text visibly shrinks to the durable prefix — owned, and stated in rev 11 item 1 | **Proposed** 2026-08-16 (audit F1); Phase 1 confirms |
 | D51 | Demo architecture: one app model owns the store + the single provider-naming `driver()` line; screens own their projections; `isDeleted` drives navigation | **Proposed** 2026-08-16 |
 | D52 | Database at `Application Support/LedgerKit/demo.sqlite`; the library's protection floor is the demo's whole answer | **Proposed** 2026-08-16 |
-| D53 | DoD-2's provider is PCC, **pending the Phase 1 spike**; on a negative result the fallback (Claude-package ring check, or restate DoD-2) is Alexander's call on the evidence. **Both branches now have evidence.** PCC: entitlement-gated (Apple Small Business Program, applied, no response yet) and failing `ModelManagerError#1046` meanwhile. Claude: **works end to end** — real streamed generation, prefix-stable, correct usage accounting — but its **tagged** releases do not build on Beta 5 (they use the removed `Transcript.CustomSegment`); only the untagged default branch does. So the choice is *when*, not *whether*: wait for either Anthropic's next tag or Apple's entitlement, or pin the demo to a revision. Recommendation: **wait** — Phase 2 needs neither. ☑ **Resolved 2026-08-16 (owner): defer to Phase 3**, then ☑ **closed 2026-08-31 by D58** — the answer is Claude on a revision pin, recorded before the toolchain moves. No demo pin to an unreleased vendor revision; Phase 2 proceeds on `ScriptedLanguageModel`. If both land by Phase 3 the demo shows **scripted → on-device → Claude → PCC** at one line each, which *demonstrates* DoD-2's claim rather than asserting it; if neither has, pinning a revision for a demo — not a shipped library dependency — is the fallback-to-the-fallback | ⛔️ **Spike ran 2026-08-16 and came back NEGATIVE** — PCC reports `.available` and fails deterministically (`ModelManagerError#1046`), while the on-device control generates on the same host. Evidence is in Phase 1's checklist. **Awaiting Alexander's fallback decision**; Phase 3 cannot demonstrate DoD-2 until it is taken |
+| D53 | DoD-2's provider is PCC, **pending the Phase 1 spike**; on a negative result the fallback (Claude-package ring check, or restate DoD-2) is Alexander's call on the evidence. **Both branches now have evidence.** PCC: entitlement-gated (Apple Small Business Program, applied, no response yet) and failing `ModelManagerError#1046` meanwhile. Claude: **works end to end** — real streamed generation, prefix-stable, correct usage accounting — but its **tagged** releases do not build on Beta 5 (they use the removed `Transcript.CustomSegment`); only the untagged default branch does. So the choice is *when*, not *whether*: wait for either Anthropic's next tag or Apple's entitlement, or pin the demo to a revision. Recommendation: **wait** — Phase 2 needs neither. ☑ **Resolved 2026-08-16 (owner): defer to Phase 3**, then ☑ **closed 2026-08-31 by D58** — the answer is Claude on a revision pin, recorded before the toolchain moves. No demo pin to an unreleased vendor revision; Phase 2 proceeds on `ScriptedLanguageModel`. If both land by Phase 3 the demo shows **scripted → on-device → Claude → PCC** at one line each, which *demonstrates* DoD-2's claim rather than asserting it; if neither has, pinning a revision for a demo — not a shipped library dependency — is the fallback-to-the-fallback | ☑ **Closed 2026-08-31 by D58.** The spike came back NEGATIVE on 2026-08-16 — PCC reports `.available` and fails deterministically (`ModelManagerError#1046`) while the on-device control generates on the same host — the owner deferred to Phase 3 the same day, and D58 then settled it: Claude on a revision pin, recording only. **DoD-2 was demonstrated 2026-09-05 across three providers** (`dod2.gif`). ⚠️ This cell said *awaiting a decision* until M9 Phase 1 while its own decision cell recorded the resolution twice over — the drift F3 caught, and the reason a status column that restates a decision has to be edited when the decision moves |
 | D54 | 4096 budget: short turns for the GIF; `.reduceContext` bubble kept; no compaction wiring — hitting the window renders the bubble, which is correct | **Accepted** 2026-08-16 (owner) |
 | D55 | The throw channel is rendered, not swallowed: alert for `persistenceFailure`, prevented-state for `generationInFlight`, ignore `CancellationError`, render-if-ever-reached for the target errors | **Accepted** 2026-08-16 (owner) |
-| D56 | **The Beta 5 posture.** (a) Two build repairs land as Phase 0's owned exception to "zero repo changes", because no failure inventory exists until the build compiles: `Understudy`'s metadata box → `any ConvertibleToGeneratedContent` (public `Script` vocabulary unchanged), and `GenerationDriver.stopInfo(from:)` reading `GeneratedContent` via `try? String(_:)` instead of a cast that had become a permanent nil. (b) **Beta 4 is retained** until the host tier is genuinely green — the deletion was priced against a condition this host could not yet reach. (c) The manifests and the SDK pin are **verified but not edited**, pending the two §7 sign-offs in §6 item 3.1/3.3, which the owner scheduled for the Phase 0 gate alongside rev 11's drafting. (d) **The OS moves to the Beta 5 train** (owner, 2026-08-16) rather than the toolchain moving back — the only option that lets Phase 0 close, since the device tier, the residue suite, the PCC spike and both surface tripwires are all host-only | **Accepted** 2026-08-16 — (a) landed; (b)(c) in force; (d) owner action pending |
+| D56 | **The Beta 5 posture.** (a) Two build repairs land as Phase 0's owned exception to "zero repo changes", because no failure inventory exists until the build compiles: `Understudy`'s metadata box → `any ConvertibleToGeneratedContent` (public `Script` vocabulary unchanged), and `GenerationDriver.stopInfo(from:)` reading `GeneratedContent` via `try? String(_:)` instead of a cast that had become a permanent nil. (b) **Beta 4 is retained** until the host tier is genuinely green — the deletion was priced against a condition this host could not yet reach. (c) The manifests and the SDK pin are **verified but not edited**, pending the two §7 sign-offs in §6 item 3.1/3.3, which the owner scheduled for the Phase 0 gate alongside rev 11's drafting. (d) **The OS moves to the Beta 5 train** (owner, 2026-08-16) rather than the toolchain moving back — the only option that lets Phase 0 close, since the device tier, the residue suite, the PCC spike and both surface tripwires are all host-only | ☑ **Closed.** Accepted 2026-08-16 — (a) landed; (b)(c) in force; **(d) done**: the host moved to the Beta 5 train, Phase 0 closed on it, and M8 completed green on 2026-09-05. ⚠️ This cell read *owner action pending* until M9 Phase 1, months after the action was taken and the milestone shipped on it (F5) |
 
-~~| D57 | **`contextSizeExceeded` must not forward `0` as a measurement.** Apple's `ContextSizeExceeded` carries non-optional `Int`s; LedgerKit's case carries `Int?` precisely so nil can say *not reported* (D17, rev 7). `NormalizeAppleErrors.swift:146` forwards them unchanged, which is right for Apple's on-device model — it reports real numbers — and wrong for any provider that reports none: Anthropic's mapper sends `0`/`0` because the Messages API says neither, so the ledger would record a context window of zero tokens **forever**, in a log that cannot be rewritten. Proposed fix: map `0` → `nil` on that path, since a context size of 0 is not a measurement any model can produce and an overflow with `tokenCount: 0` is self-contradictory. The deprecated-26 path at line 274 already does the equivalent and says why. Classification is unaffected (§8 ignores the payload); this is about what the ledger *claims* | ☑ **Accepted 2026-08-16 (owner) and landed.** `reported(_:)` maps `0` → `nil` on the 27-family path; `contextSizeUnreported` is the test that would have caught it, and the mutation removing the filter fails it. Classification asserted unchanged in the same test, so the fix is visibly about what the ledger *records* rather than what a user sees. **Rev 11 note still owed**: §8's `contextSizeExceeded` paragraph says the fields are optional "because the ledger records what was reported, and non-Apple providers report neither" — true, and now with a named provider that proves it, plus the zero-sentinel rule that makes the optionality real rather than nominal |
+| D57 | **`contextSizeExceeded` must not forward `0` as a measurement.** Apple's `ContextSizeExceeded` carries non-optional `Int`s; LedgerKit's case carries `Int?` precisely so nil can say *not reported* (D17, rev 7). `NormalizeAppleErrors.swift:146` forwards them unchanged, which is right for Apple's on-device model — it reports real numbers — and wrong for any provider that reports none: Anthropic's mapper sends `0`/`0` because the Messages API says neither, so the ledger would record a context window of zero tokens **forever**, in a log that cannot be rewritten. Proposed fix: map `0` → `nil` on that path, since a context size of 0 is not a measurement any model can produce and an overflow with `tokenCount: 0` is self-contradictory. The deprecated-26 path at line 274 already does the equivalent and says why. Classification is unaffected (§8 ignores the payload); this is about what the ledger *claims* | ☑ **Accepted 2026-08-16 (owner) and landed.** `reported(_:)` maps `0` → `nil` on the 27-family path; `contextSizeUnreported` is the test that would have caught it, and the mutation removing the filter fails it. Classification asserted unchanged in the same test, so the fix is visibly about what the ledger *records* rather than what a user sees. **Rev 11 note still owed**: §8's `contextSizeExceeded` paragraph says the fields are optional "because the ledger records what was reported, and non-Apple providers report neither" — true, and now with a named provider that proves it, plus the zero-sentinel rule that makes the optionality real rather than nominal |
 
 | D58 | **DoD-2 is banked as a recording, not as a maintainable dependency.** Neither candidate provider is durably available: PCC is entitlement-gated with no response from Apple, and `ClaudeForFoundationModels` has had a Beta 5 adoption PR open three weeks with no external PRs accepted — while Beta 6/7 are already out, so its *tagged* releases are likely to fall further behind, not catch up. But the swap **works today** on a revision pin, and a recording outlives the dependency that made it. So: **record the DoD-2 clip on Beta 5 before upgrading**, then upgrade freely and drop the pin if it breaks. A fork was considered and declined — private maintenance of a demo dependency inverts the priority, since LedgerKit is the deliverable. Rev 11 restates §13's DoD-2 accordingly (§6 item 5) | **Accepted** 2026-08-31 (owner) |
 | D59 | **The composer dismisses the keyboard on send, and the transcript dismisses it on scroll.** Two one-line changes in `ChatScreen`, both HIG conformance rather than design: `composerFocused = false` in `send()`, and `.scrollDismissesKeyboard(.interactively)` on the transcript. Messages keeps the keyboard up because replies are a line long and the next turn is imminent; an assistant answer is several paragraphs and — measured in Phase 3 — is on screen for far longer than the draft was, so holding the keyboard costs ~40% of the display for the whole time there is something worth reading. Claude and ChatGPT both dismiss. The scroll-dismiss half was the more clearly missing of the two: with a draft typed and `axis: .vertical` giving the field no Return key, the keyboard could previously **only** be dismissed by sending. Made during Phase 3 because both materially degrade the GIF; each is one line and trivially revertible if the owner disagrees | ☑ Landed 2026-08-31; owner review outstanding |
 | D60 | **A provider swap changes streaming cadence, and the cause is architectural, not cosmetic.** The app renders from the store's `.delta` notifications, so `DeltaFlushPolicy` (250 ms / 512 chars) sets the **floor on display granularity** — the UI cannot update more finely than the log is written. Claude's whole response lands inside ~2 flush windows where the on-device model produced 5–8, and `StreamingPartialSource.comfortableBacklog` (120 chars) is then exceeded by every flush, so the pacer's catch-up branch renders at ~1600 ch/s and the calm cadence never engages. Neither layer is a bug; together they mean the pacer was tuned against one provider's chunking. A uniform cross-provider cadence needs either a display flush distinct from the durability flush (§7.4 conflates them today) or pacing from token arrival rather than from flushes | **Recorded, not fixed** — M9. Measured 2026-09-05 |
 
-Owner-agreed procedure (not a numbered decision): **Beta 4 is deleted once
+~~Owner-agreed procedure (not a numbered decision): **Beta 4 is deleted once
 Beta 5 is green** — one toolchain, no CI-selection ambiguity (audit F3).~~
 **Superseded by D56(b), 2026-08-16.** The procedure is not wrong, its
 precondition is unreachable on this host: Beta 5 cannot go green until macOS

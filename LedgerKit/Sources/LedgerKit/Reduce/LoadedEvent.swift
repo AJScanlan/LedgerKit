@@ -11,6 +11,23 @@
 /// structural: identity is `Optional` in exactly the row-1 case, so a loader
 /// that threw the envelope away along with an unrecognized payload has nowhere
 /// to put the `EventID` it should have recovered.
+///
+/// ## Why this is publicly constructible where ``QuarantinedEvent`` is not
+///
+/// The two look like the same fact and are opposite ends of it: a `LoadedEvent`
+/// is reduction's **input** — a claim about what a log contains — while a
+/// `QuarantinedEvent` is its **output**, a claim about what a reduction did.
+/// M4 Phase 0's rule closes the second and deliberately leaves the first open,
+/// because fabricating an input is what a test, a fixture, or somebody else's
+/// loader is *supposed* to do, and it asserts nothing: hand the fold a
+/// synthetic `.undecodable` row and it earns its diagnostic by actually
+/// reducing. Fabricating an output would assert a reduction that never ran.
+///
+/// It is also forced: ``Conversation/init(reducing:loadedFrom:mapping:)`` takes
+/// `some Sequence<LoadedEvent>`, so a public entry point cannot take an
+/// internal element type. Worth stating because the two doc comments read as
+/// contradicting each other otherwise, and the resolution is the derived-state
+/// rule's scope — it governs what reduction *produces*, never what it consumes.
 public enum LoadedEvent: Sendable, Equatable {
 
     /// Why a row's contents could not be read.

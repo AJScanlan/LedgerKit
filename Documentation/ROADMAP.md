@@ -1,7 +1,7 @@
 # LedgerKit v0.1 — Build Roadmap
 
 **Companion to:** [SPEC.md](./SPEC.md) — **rev 11 ratified 2026-09-05** at the M8 boundary (Appendix I, five items in four batches; nothing touches the wire). Further amendments open **rev 12**, which ratifies at the M9 boundary. (Rev 10: M7 boundary, 2026-08-16; rev 9: M6 boundary, 2026-08-02; rev 8: M5 boundary, 2026-07-28; rev 7: M4 boundary, 2026-07-26; rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
-**Target:** tagged `0.1.0` before iOS 27 GA (~Sept 2026). Estimate from spec §12: **4–6 weeks part-time**, assuming the ⚠️ beta verifications hold.
+**Target:** tagged `0.1.0` against **the SDK current when the tag is cut** — restated on evidence at M9 (D67), replacing "before iOS 27 GA". "Before GA" was always a proxy for *usable on GA day*, and it is a bad one: a `0.1.0` whose own `sdkBuildIsPinned` names a superseded beta fails its own tripwire the week it ships. The estimate held — M0–M8 landed inside spec §12's **4–6 weeks part-time**, and the ⚠️ beta verifications did hold, three passes in a row.
 **Sequencing strategy:** *pure core first* — build and fully test everything platform-agnostic (§6) before touching the beta-coupled session seam (§7).
 
 > This document is the **build order**. The spec is the **contract**. Where they ever disagree, the spec wins and this file is stale — fix it.
@@ -189,7 +189,7 @@ The concurrency boundary and the public write API (§6.5, §11). Still no FM —
 **Beta risk:** none; the milestone imports no Foundation Models anywhere. It *defines* the driver protocol that M6 implements.
 
 ### M6 — `GenerationDriver`: the session seam (⚠️ ALL beta risk)
-The one OS-coupled module (§7). Expect one verification evening per beta — but **a much shorter one than this roadmap was planned around**: OQ1–9 all closed at rev 7 by reading the SDK, and the four *behavioural* residues that remained are **all answered as of rev 9** (2026-08-02). The API shapes this milestone consumes were known going in; how they *act* is what M6 measured, and four of those answers contradicted what this document had assumed. ⚠️ The per-beta evening is now scheduled by **CI rather than memory** — the surface tripwires and the residue suite both re-ask their questions on a weekly run, which is the point of writing answers as tests.
+The one OS-coupled module (§7). Expect one verification evening per beta — but **a much shorter one than this roadmap was planned around**: OQ1–9 all closed at rev 7 by reading the SDK, and the four *behavioural* residues that remained are **all answered as of rev 9** (2026-08-02). The API shapes this milestone consumes were known going in; how they *act* is what M6 measured, and four of those answers contradicted what this document had assumed. ⚠️ The per-beta evening is **partly** scheduled by CI rather than memory: the surface tripwires re-ask their questions on the weekly run, and so does `concurrentRequests`, which needs no hardware. The other three residues are `LEDGERKIT_DEVICE`-gated and CI does not set that flag — they are re-asked by hand at each beta pass (see the beta-verification track below, corrected at M9 Phase 1). Writing answers as tests is still the point; what CI automates is the shape half.
 
 **Build order, decision log (D30–D37) and phase gates: [M6-PLAN.md](./M6-PLAN.md)** (drafted 2026-07-28 at the M5 boundary; Phase 0 landed 2026-07-29).
 
@@ -267,17 +267,22 @@ The [Projection](../Projection) Xcode app (built from `LedgerKit.xcworkspace`, s
 **Beta risk:** medium — and it materialized. Phase 0 hit **Beta 5 breaking `Understudy`'s build and, silently, two metadata reads**; the host suite then SIGSEGV'd in dyld because the SDK was ahead of the OS. Both were the beta, not the repo, exactly as the phase was designed to prove — and the fix was an OS update, not a code change.
 **Deferred to M9, deliberately:** the DoD-2 wiring lives on branch `m8-dod2-claude`, not `main`. `ClaudeForFoundationModels` is still untagged, and pinning `main` to a vendor revision is what D58 rules out. Revisit when Anthropic tags a Beta 5-compatible release.
 
-### M9 — README, ADR-001, tag `0.1.0`
-DoD-3/4/5.
+### M9 — README, ADR-001, tag `0.1.0` ⏳ **IN PROGRESS**
+DoD-3/4/5. **Build order, decision log (D61–D72) and phase gates: [M9-PLAN.md](./M9-PLAN.md)** (drafted 2026-09-05 from the M8 boundary audit, findings F1–F42).
 
-- README: 60-second quickstart, the recoverability table, the exhaustive-switch example, and the **"why not just persist `session.transcript`?"** section (§2 incumbent argument, the five-way failure — **DoD-4**).
-- **ADR-001** ratified (§9, §6.1): tagged-JSON encoding, discriminator registry (tags never reused, removed tags reserved), unknown-discriminator→quarantine + tolerant-terminal exception, gap-diagnostic rule, version-frozen corpus, upcasters named as the evolution idiom. Its open items D-1–D-3 close here. *(ADR-002 was accepted at M1 and ADR-003 ratifies at M4, so DoD-5's "ADR-001 committed" reads as the ADR set being settled.)*
-- Full CI green: crash-fuzz (suffix + interior-gap), cancellation chaos, hostile-fixture quarantine (§6.6 row-for-row + non-rules + cascade), **P1–P3** (**DoD-3**).
-- Tag `0.1.0`; pre-1.0 SemVer caveats (**DoD-5**).
+> ⚠️ **This section was a four-bullet sketch until 2026-09-05 and understated the milestone badly** (audit F8). M9's real work is not the README. The audit found four things nobody had scheduled — the **packaging** question handed forward since M6, the **naming review**, a **derived-state mutability** hole, and a **stale formal model** — and any one of them is more consequential than the prose. Rewritten here from the plan.
+
+**Five phases, and the README is the fourth of them.**
+
+- **Phase 0 — the toolchain.** ✅ **Done 2026-09-05.** Xcode 27 Beta 6 (`27A5252f`), macOS 27 SDK `26A5419a`, host `26A5425a`. **457 green** across host, device, deep and simulator tiers; the demo app builds; `ProjectionUITests` 6/6. Exactly one failure before the pin moved and it *was* the pin — **Apple's surface did not move at all**, so rev 12's beta-fallout item is empty. All four §14 residues re-confirmed (budget still 4096; 0 revisions in 248 snapshots).
+- **Phase 1 — hygiene.** ⏳ Document alignment (this section, M8-PLAN's drift, ENHANCEMENTS, CLAUDE.md, ADR-003's self-contradiction), the **Formal model re-transcribed** against `drive`'s post-M8 shape and re-calibrated, CI, git.
+- **Phase 2 — the breaking changes, while they are still free.** The root `Package.swift` (**D61** — there is no root manifest today, so `.package(url:)` resolves to *nothing*; this is a DoD-5 blocker, not a tidiness item); `GenerationID` → **`GenerationAttemptID`** (**D62** — Apple's `@Generable` macro emits the bare name and the collision lands inside an expansion the consumer never wrote; re-verified live on Beta 6); derived state made `private(set)` (**D63**); `MessageTree.versions(of:)` replacing `siblings(of:)` and `ModelDescriptor.appleSystem` (**D64**); LICENSE (**D66**, MIT); the app target to 27 (**D70**).
+- **Phase 3 — the README** (DoD-4), written against the shipped layout and shipped names, with every snippet lifted from something that compiles. DocC is a stretch and is the first thing cut.
+- **Phase 4 — rev 12, ADR-001 Accepted, the freeze, the tag.** ⚠️ **The freeze happens *before* the tag** (D67): the corpus README's procedure detaches at the tag and copies afterwards, which leaves `frozen/` empty at the tag a consumer actually gets. And the tag is cut against **the SDK current when Phase 4 opens**, not a calendar date — a `0.1.0` whose own `sdkBuildIsPinned` names a superseded beta fails its own tripwire the week it ships.
 
 **Satisfies:** DoD-3, DoD-4, DoD-5.
-**Exit:** all five DoD items checked; `0.1.0` tagged.
-**Beta risk:** low.
+**Exit:** all five DoD items checked; **a remote consumer can `.package(url:from: "0.1.0")` and get both products**; rev 12 ratified; ADR-001 **Accepted**; `Corpus/frozen/0.1.0` populated and asserted non-empty; `0.1.0` tagged.
+**Beta risk:** low, and Phase 0 confirmed it — but not zero: an RC is likely inside M9's window, and D67 repeats Phase 0 if the SDK moves rather than tagging against a stale one.
 
 ---
 
@@ -296,7 +301,7 @@ GA is ~Sept 2026. Treat this as a recurring per-beta checklist, not a one-time g
 > | Is `Usage.Input.totalTokenCount` **inclusive of** `cachedTokenCount`? (§7.7) | **Inclusive** — the cache is a subset of the total, so an app must never sum `input.total + cached` |
 > | The real on-device **context budget** (N3) | **4096 tokens**, exhausted by **two** ~2k turns (N3, §7.1) — compaction is a week-one concern for on-device apps, not a v0.3 nicety |
 >
-> Re-verification is scheduled by **CI rather than memory** (weekly, `.github/workflows/ci.yml`): the surface tripwires re-check the SDK's shape and the residue suite re-asks these questions on every run. A **new built-in error case**, or a change to `LanguageModel`'s two protocol requirements, is the kind of change that reopens one.
+> Re-verification is scheduled by **CI rather than memory** (weekly, `.github/workflows/ci.yml`) — but **only for three of these four, and only the shape half runs unattended.** The surface tripwires re-check the SDK's shape on every run, and `concurrentRequests` re-asks itself there too, because the check belongs to `LanguageModelSession` rather than to any model and so needs no hardware. ⚠️ **The other three are `LEDGERKIT_DEVICE`-gated and CI does not set that flag**, so they report *skipped* on every scheduled run and are re-asked only when someone runs them by hand — which M9 Phase 0 did (M9-PLAN). This sentence claimed all four re-asked on every run until M9 Phase 1; the claim was the kind that makes a green dashboard mean less than a reader thinks, so it is corrected rather than softened. Whether to set the flag on the self-hosted runner is M9's D72. A **new built-in error case**, or a change to `LanguageModel`'s two protocol requirements, is the kind of change that reopens one.
 
 | OQ | What to pin | Blocks |
 |----|-------------|--------|
@@ -355,7 +360,7 @@ Cut from the *top* first; never cross the "never cut" line.
 M0 → M1 → M2 ─┬─ M3 (interleaves with M2)
               └─ M4 → M5 → M6 → M7 → M8 → M9
                                             ▲    ▲
-                                            │    └── next
+                                            │    └── in progress (Phase 0 done 2026-09-05)
                                             └── done 2026-09-05
 ```
 

@@ -97,6 +97,74 @@ an unbounded set of poisoned identifiers for the process's lifetime.
 Neither is adopted here. This directory reports; `Documentation/M7-PLAN.md`
 decides.
 
+---
+
+## Re-verified at M9 Phase 1 (2026-09-05) — and the re-transcription was *not* needed
+
+The M8 boundary audit flagged this model as stale (F30) because M8 Phase 1
+restructured the verb it models: `drive` was split into a slot lifecycle plus
+`runToTerminal`, with an abandon catch that clears `shownPartials` and publishes
+`.changed`. M9 Phase 1 was scheduled to re-transcribe it.
+
+**It did not need re-transcribing, and checking why is more useful than the
+rewrite would have been.** This model's state is four variables — `convExists`,
+`rows`, `live`, `deleting` — and the restructure touches none of them:
+
+| M8 change | Model variable touched |
+|---|---|
+| `drive` split into slot lifecycle + `runToTerminal` | none — the split adds no `await` the model collapses differently; `SRunning` already abstracts the entire generation into one step |
+| `abandon(_:in:)` added | none — it writes `shownPartials` and calls `notify`, and neither is modelled |
+| `defer { release }` | `live`, and **`release` itself is unchanged**: an abandoned generation reaches `live := "none"` by the same path a terminating one does |
+
+So an abandonment and a normal termination are the *same transition* in this
+abstraction, which is why `NoOrphanRows` could not have moved.
+
+**Confirmed by running it rather than by arguing it.** All four variants
+reproduce their recorded results exactly, on Java 26 and today's `tla2tools`:
+
+| `Fix` | Result | States generated | Left on queue |
+|---|---|---|---|
+| `none` | **FAILS** — `NoOrphanRows` (A3) | 377 | 51 |
+| `tombstone` | **FAILS** — `NoOrphanRows` | 586 | 58 |
+| `sticky` | passes (exhausted) | 954 | 0 |
+| `guard` | passes (exhausted) | 1044 | 0 |
+
+Identical to the table above, so **the calibration rule still holds**: the model
+still reproduces a bug known to be real, and its passes therefore still carry
+information. `pcal.trans` also produced a byte-identical file, so the checked-in
+translation was never behind its PlusCal.
+
+### The generalizable part
+
+**A model is stale when its *abstraction* stops matching, not when the code
+changes.** F30 reasoned from the diff — the verb was restructured, so the model
+of the verb must be too — and that is the right instinct and the wrong
+conclusion here, because the restructure was entirely inside the region this
+model deliberately collapses. The cheap check is not "did the code change" but
+"did any modelled variable change, or did any `await` appear or vanish at a
+point the model labels". Both answers were no, in about the time it took to read
+two functions.
+
+⚠️ **What *would* invalidate it**, recorded so the next audit has a test rather
+than an instinct: a new suspension point inside `reserve`'s straight-line region
+(splitting the one atomic claim into two), any change to `release`'s placement
+relative to the append, or a second writer to `events` — which is also
+ADR-003's trigger for reopening value observation.
+
+### One thing M8 found that this model does *not* cover, deliberately
+
+M8's F1 — an abandoned generation stuck `.streaming` on an attached projection —
+is a **read-side** property: it relates the projection's live set to the store's,
+not rows to a genesis. This model has no projection in it, so it could not have
+found F1 and cannot regress-test the fix; `AbandonedGenerationTests` does that,
+with four tests written red-first.
+
+A second model with a read-side invariant (*nothing running ⇒ nothing shown
+streaming*) is a plausible v0.2 item. It is **not** scope for M9: the fix is
+already guarded by tests, and the calibration rule would demand that a new model
+first reproduce F1 before any of its passes could be believed — which is a
+milestone's work, not a phase's.
+
 ## Running it
 
 Requires a JDK and `tla2tools.jar` (from

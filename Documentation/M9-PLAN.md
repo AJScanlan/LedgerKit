@@ -518,39 +518,88 @@ there, which cannot both happen).
 
 ### Phase 1 — Hygiene: the audit's document findings, the Formal model, CI, git
 
-**Status:** ☐ not started.
+**Status:** ⏳ **in progress 2026-09-05.** Documents aligned; the Formal model
+re-verified (and the re-transcription turned out to be unnecessary — see below); CI
+deferred to the owner.
 
 **Goal:** every document says what is true today, the store's model is re-calibrated
 against the store's current shape, and CI can survive a second Xcode.
 
-- [ ] **M8-PLAN staleness (F1–F6):** tick Phase 1/2 checklists and Phase 3's on-device
-      pass with a one-line note each; rewrite Phase 0's "Gate status" paragraph; fix
-      D53/D56 status columns; move the `~~` so only the procedure paragraph is struck;
-      record the D59 verdict.
-- [ ] **ENHANCEMENTS entry 1** gains M7's pricing evidence *against* (F22), verbatim from
-      M7-PLAN §7 item 3.
-- [ ] **ROADMAP M9 section** rewritten from this plan (F8); the beta-verification track's
-      CI sentence corrected (F9); tag spelling aligned (F10).
-- [ ] **CLAUDE.md**: skip count is six, not five (`LEDGERKIT_DEEP`); the residue/CI
-      sentence (F9). The full status rewrite waits for ratification, as always.
-- [ ] **Formal (F30):** re-transcribe `drive`'s current shape (slot lifecycle +
-      `runToTerminal` + the abandon catch/notify) into `LedgerStore.tla` under the
-      label-is-an-`await` rule; translate; run all four configs. **`_none` and
-      `_tombstone` must still fail** — if all four pass, the model stopped reproducing A3
-      and is distrusted until it does again (`Formal/README.md`). Record the trace
-      lengths in this plan.
-- [ ] **CI (D72):** selection by SDK build string; app-build step on the simulator job;
-      `LEDGERKIT_DEVICE=1` conditional on `CI_RUNNER`. Run the selection loop locally
-      with two Xcodes present *before* committing it (the F3 lesson) — Phase 0 leaves a
-      window with both installed; use it.
-- [ ] **ADR-003 self-contradiction (F19):** strike the "Why GRDB fits" `ValueObservation`
-      bullet with a pointer to the M7 section.
-- [ ] `LoadedEvent`'s doc gains the one sentence reconciling it with
-      `QuarantinedEvent.init`'s (F29). No code.
+- [x] **M8-PLAN staleness (F1–F6).** All **17** unticked boxes ticked with a one-line
+      evidence note each — and verified against the source first rather than ticked on
+      the strength of the milestone being marked COMPLETE, which is F1's lesson pointing
+      the other way. Phase 0's "Gate status" paragraph rewritten (it said *blocked* and
+      *outstanding* about conditions that cleared the same week). D53's status cell
+      corrected — it read **awaiting a decision** while its own decision cell recorded
+      the resolution twice over. D56's read **owner action pending** months after the
+      action was taken. ⚠️ **F5's `~~` was worse than the audit recorded:** it opened at
+      D57's table row and closed six lines later, so it struck **D57, D58, D59 and D60**
+      — four live decisions, including the one D60 that rev 11 amended §7.4 for — along
+      with the procedure paragraph it meant to retire. Moved to cover the paragraph
+      alone.
+- [ ] **D59's verdict (F6)** — still `☑ Landed 2026-08-31; owner review outstanding`.
+      Cannot be recorded without the owner: the keyboard-dismissal behaviour shipped in
+      both DoD recordings without objection, but *shipped unremarked* is not *reviewed*,
+      and inferring a sign-off is the one thing a decision log must not do.
+- [x] **ENHANCEMENTS entry 1** gains M7's pricing evidence *against* (F22) — and M8's
+      too, since the demo's branch pager also declined a whole-tree walk. Two consumers
+      have now not wanted it; the honest reading is that **export is not merely the
+      natural slot, it is the only demand anyone has found.**
+- [x] **ROADMAP M9 section** rewritten from this plan (F8) — it was a four-bullet sketch
+      that understated the milestone badly. Beta-verification track's CI sentence
+      corrected (F9) in **both** places it appears. The **target line** restated on D67's
+      evidence ("before iOS 27 GA" → against the SDK current at the tag) and the
+      critical-path diagram updated. Tag spelling (F10) was **already aligned** in
+      ROADMAP — the only `v0.1.0` in the repo is `Corpus/README.md`, which D67 corrects
+      at Phase 4 together with the procedure's order; splitting that one paragraph across
+      two phases would invite two edits to it.
+- [x] **CLAUDE.md**: skip count is six, not five. Residue/CI sentence corrected (F9) —
+      it now says exactly which residue runs unattended (`concurrentRequests`, because
+      its check belongs to the session) and which three do not. Plus **F42**, found while
+      reviewing Phase 0's diff.
+- [x] **Formal (F30) — re-verified, and the re-transcription was not needed.**
+      All four configs reproduce their recorded results exactly on Java 26:
+      `none` **FAILS** `NoOrphanRows` (377 states, 51 left), `tombstone` **FAILS** (586,
+      58), `sticky` passes exhausted (954, 0), `guard` passes exhausted (1044, 0).
+      `pcal.trans` produced a **byte-identical** file, so the checked-in translation was
+      never behind its PlusCal. **Calibration intact.**
 
-**Review gate:** documents aligned; TLC re-calibrated with `_none`/`_tombstone` failing
-and `_guard` passing; CI loop verified against two Xcodes; suites green (nothing here
-should have moved a test).
+      ⚠️ **F30's premise was wrong, and the reason generalizes.** The audit reasoned from
+      the diff — M8 restructured `drive`, so the model of `drive` must be stale — but the
+      restructure is entirely inside the region this model deliberately collapses. Its
+      state is four variables (`convExists`, `rows`, `live`, `deleting`); `abandon(_:in:)`
+      writes `shownPartials` and calls `notify`, **neither of which is modelled**, and
+      `release` is unchanged, so an abandonment and a normal termination are the *same
+      transition*. **A model is stale when its abstraction stops matching, not when the
+      code changes** — and the cheap test is "did a modelled variable change, or did an
+      `await` appear or vanish at a labelled point", which took two functions to answer.
+      Written into `Formal/README.md` along with what *would* invalidate it, so the next
+      audit has a test rather than an instinct.
+- [ ] **CI (D72) — deferred to the owner (2026-09-05).** They are already changing the
+      Xcode selection (a variable, or "latest 27") and are checking what GitHub's runners
+      carry, so a concurrent edit here would collide. The other two parts stay open and
+      are independent of that: an **app-build step** (the app is what Beta 5 broke first,
+      and CI does not build it) and **`LEDGERKIT_DEVICE=1` when `CI_RUNNER` is set**.
+      ⚠️ **The selection bug is live on this host right now** — Beta 5 and Beta 6 both
+      report SDK major 27, glob order puts Beta 5 first, and `-gt` keeps it, so CI would
+      select **Beta 5** and `sdkBuildIsPinned` would pass against a stale pin. Beta 5 is
+      therefore **still installed**, so the loop can be tested against two Xcodes when
+      this is picked up.
+- [x] **ADR-003 self-contradiction (F19):** the "Why GRDB fits" `ValueObservation` bullet
+      struck, with a pointer to the document's own "Settled at M7" section. Kept as a
+      strike rather than deleted — GRDB was chosen partly *for* a feature later turned
+      down, and silently removing the reason would misreport why the decision was taken.
+- [x] `LoadedEvent`'s doc gains the reconciliation with `QuarantinedEvent.init`'s (F29).
+      The resolution is the derived-state rule's **scope**: a `LoadedEvent` is
+      reduction's *input* and a `QuarantinedEvent` its *output*, so fabricating the first
+      asserts nothing while fabricating the second would claim a reduction that never
+      ran. It is also forced — a public entry point cannot take an internal element type.
+      No code.
+
+**Review gate:** documents aligned ☑; TLC re-calibrated with `_none`/`_tombstone` failing
+and `_guard` passing ☑ (and the re-transcription shown unnecessary, with the reasoning
+recorded); suites green ☑ — nothing here moved a test; **CI loop still to be verified
+against two Xcodes, with the owner** ☐; **D59's verdict outstanding** ☐.
 
 ---
 
@@ -804,3 +853,4 @@ the demo's dependency costs (M8 handoff 7 — not spec matter).
 |---|---|---|---|
 | 2026-09-05 | **Plan drafted** at the M8 boundary | 457 (434 + 23) + 6 `ProjectionUITests` | Drafted from the M8 boundary audit (F1–F40). Twelve decisions proposed (D61–D72), all awaiting owner sign-off. One audit recommendation reversed during drafting (F26 → D64.3: a stored `activeMessages` goes stale under the overlay). Phase 0 is Beta 6/7 and decides D62; Phase 2 carries every breaking change; the tag waits for the SDK current at Phase 4, not the calendar |
 | 2026-09-05 | **Phase 0 done** — Xcode 27 Beta 6 (`27A5252f`), SDK `26A5419a`, host `26A5425a`, iOS runtime `24A5423a` | **457 green** (434 + 23) host incl. device + deep · 434 green iOS sim · 6 `ProjectionUITests` · app builds | **The beta moved nothing.** Exactly one failure before the pin moved, and it *was* the pin; both surface manifests matched unmodified; all four §14 residues re-confirmed. §6 item 7 is empty and recorded as such. Git hygiene done (F34/F40): `main` +20 and `M9` pushed, `M8` tag pushed (it was missing too), `M8` branch deleted. **D62 fires** — the `@Generable` collision reproduces on Beta 6 in a *consumer* package. Four decisions signed off: D61 (with argument (iii) corrected — you don't *link* LedgerKit, but you do name it), D62 (`GenerationAttemptID` / `attemptID`; payload labels and `CodingKeys` deliberately unchanged; carries a `reducerVersion` bump), D64.1 amended (**delete** `siblings(of:)` rather than keep both), D70 (with the floor-evidence question answered rather than assumed). New findings: **F41** (two iOS runtimes, one device set, resolves to the newer — milder than it looked) and **F42** (CLAUDE.md's `consumedSurface` counts were stale at 4/7 where the manifest pins 3/6 — a *third* instance of D71's class, and the first where the stale thing was a **number** rather than prose, which is worse because a number invites someone to "fix" the manifest to match the doc). **D69's input changed**: the Claude package now tags `0.1.0`–`0.1.4`, so D58's untagged objection is gone and only buildability remains. ⚠️ Beta 5 **not** deleted: D72's selection loop needs two Xcodes present |
+| 2026-09-05 | **Phase 1 — documents, the Formal model** (CI deferred to the owner) | 457 green, unchanged — nothing here moved a test | **The Formal model needed no re-transcription, and why is the finding.** F30 reasoned from the diff (M8 restructured `drive`) but the restructure sits entirely inside the region the model collapses: `abandon(_:in:)` writes `shownPartials` and `notify`, neither of which is a model variable, and `release` is unchanged — so an abandonment and a termination are the same transition. All four configs reproduce exactly (377/586/954/1044; `none` and `tombstone` still FAIL `NoOrphanRows`), and `pcal.trans` output was byte-identical. **A model is stale when its abstraction stops matching, not when the code changes.** M8-PLAN's 17 unticked boxes ticked after verifying each against source; F5's `~~` turned out to strike **four live decisions** (D57–D60), not just the retired paragraph; D53 and D56 status cells contradicted their own decision cells. ROADMAP's M9 section rewritten from a four-bullet sketch; its target line restated on D67. F9 corrected in both places. ADR-003's `ValueObservation` bullet struck against its own M7 section. ENHANCEMENTS 1 now carries evidence *against* from two consumers. ⚠️ Outstanding: **D59's verdict** (needs the owner — shipped unremarked is not reviewed) and **CI's D72** (owner is mid-change; Beta 5 kept installed so the loop can be tested against two Xcodes) |

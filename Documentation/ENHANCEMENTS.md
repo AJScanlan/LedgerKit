@@ -11,7 +11,23 @@ whenever they earn their slot.
 
 ## 1. `MessageTree` whole-tree access
 
-**Status:** deferred at the M4 audit · **Natural slot:** with v0.2's export work, or earlier if a consumer asks
+**Status:** deferred at the M4 audit · **still deferred, and M7 supplied evidence
+*against*** (recorded here at M9 Phase 1) · **Natural slot:** with v0.2's export work, or
+earlier if a consumer asks
+
+> ⚠️ **Priced at M7 Phase 2, and the answer was no** (M7-PLAN §7, M9 item 3). The
+> observable projection is the consumer most likely to need a traversal, and building it
+> **did not want one**: it needs keyed lookup (`generationID` → message) and the active
+> path, both of which already exist. M8's demo app then agreed — the branch pager reaches
+> for `children(of:)` and `rootChildren`, never for a whole-tree walk.
+>
+> That is pricing evidence *against* this entry, not for it, and it is worth stating
+> plainly because the entry's own argument is a prediction ("consumers will write the
+> traversal recursively") that two consumers have now declined to make. The prediction is
+> not falsified — neither consumer *exports* anything, which is where the need was always
+> expected to come from — but it is no longer untested, and the honest reading is that
+> **export is not merely the natural slot, it is the only demand anyone has found.**
+> Ship it when export does, not before.
 
 `MessageTree` exposes `subscript(id:)`, `children(of:)`, `siblings(of:)`, and
 `rootChildren` — reachable traversal only. There is no `count`, no `isEmpty`,
