@@ -1,6 +1,6 @@
 # LedgerKit v0.1 — Build Roadmap
 
-**Companion to:** [SPEC.md](./SPEC.md) — **rev 10 ratified 2026-08-16** at the M7 boundary (Appendix H, thirteen items in five batches; nothing touches the wire). Further amendments open **rev 11**, which ratifies at the M8 boundary. (Rev 9: M6 boundary, 2026-08-02; rev 8: M5 boundary, 2026-07-28; rev 7: M4 boundary, 2026-07-26; rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
+**Companion to:** [SPEC.md](./SPEC.md) — **rev 11 ratified 2026-09-05** at the M8 boundary (Appendix I, five items in four batches; nothing touches the wire). Further amendments open **rev 12**, which ratifies at the M9 boundary. (Rev 10: M7 boundary, 2026-08-16; rev 9: M6 boundary, 2026-08-02; rev 8: M5 boundary, 2026-07-28; rev 7: M4 boundary, 2026-07-26; rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
 **Target:** tagged `0.1.0` before iOS 27 GA (~Sept 2026). Estimate from spec §12: **4–6 weeks part-time**, assuming the ⚠️ beta verifications hold.
 **Sequencing strategy:** *pure core first* — build and fully test everything platform-agnostic (§6) before touching the beta-coupled session seam (§7).
 
@@ -259,8 +259,8 @@ The [Projection](../Projection) Xcode app (built from `LedgerKit.xcworkspace`, s
 > Not to be confused with [LedgerKit/Sources/LedgerKit/Projection/](../LedgerKit/Sources/LedgerKit/Projection/) — the library's internal observable-projection layer, which is M7.
 
 - Chat UI driving the exhaustive `switch message.state` (§11) — the code-aesthetics showpiece.
-- **Kill-and-relaunch:** kill mid-stream → relaunch → `.interrupted` with partial text; Regenerate works; the interrupted partial survives as its own branch, reachable via the branch switcher (**DoD-1**, the README hero GIF).
-- **Provider swap:** one-line driver-init swap to a **second real provider** (**DoD-2 — restated 2026-08-13 at the M6 boundary audit; rev 10 item**). The demonstrable second provider is `PrivateCloudComputeLanguageModel` — a genuinely non-on-device Apple provider whose error family §8 already maps — because cut line 4 (invoked at M6) established the Claude package is not in this beta ring. The Claude package remains the aspiration if a later ring carries it; the product claim was always the one-line swap, not the vendor.
+- **Kill-and-relaunch:** kill mid-stream → relaunch → `.interrupted` carrying whatever the last flush made durable; Regenerate works; the interrupted attempt survives as its own branch, reachable via the branch switcher (**DoD-1**, the README hero GIF). ✅ **Demonstrated and recorded 2026-08-31** — `Documentation/assets/dod1.gif`. Rev 11 weakened this line — it used to demand partial *text*: a kill before the first flush yields an *empty* partial, which is correct (§7.4's recovery granularity at its limit) and, on-device, is the **more likely** outcome of a randomly-timed kill.
+- **Provider swap:** one-line driver-init swap to a **second real provider** (**DoD-2 — restated 2026-08-13 at the M6 boundary audit; rev 10 item**). ✅ **Demonstrated 2026-09-05 across three providers** — `ScriptedLanguageModel`, `SystemLanguageModel` and `ClaudeLanguageModel` — with only the driver-init line and its descriptor changed, and the log recording which answered (`Documentation/assets/dod2.gif`). Rev 11 restates the line on evidence: the product claim was always the one-line swap, not the vendor, and what is **not** claimed is that any vendor's package stays buildable across beta rings (PCC is entitlement-gated; Anthropic's package trails the SDK). Neither is a property of LedgerKit.
 
 **Satisfies:** G8, DoD-1, DoD-2.
 **Exit:** the kill/relaunch GIF is recordable; provider swap compiles & runs with a one-line change.
@@ -306,8 +306,8 @@ GA is ~Sept 2026. Treat this as a recurring per-beta checklist, not a one-time g
 | ~~OQ5~~ | ~~Built-in `LanguageModelError` case names~~ | **Closed at M3 (rev 6)**; §8 reconciled and its coverage stated as a table |
 | ~~OQ6~~ | ~~Session single-flight error surface~~ | **Closed at M4 (rev 7)**: typed `.concurrentRequests` (27+), split out of the iOS 26 enum that also held `rateLimited` — which is *why* the 26 evidence read that way. The 26 enum is deprecated, not gone, so §8 normalizes both families. Residue above |
 | ~~OQ7~~ | ~~Context/KV-cache APIs stop at session edge~~ | **Closed at M4 (rev 7) — the sherlock check passes.** All session-scoped, none persistent; and `Transcript` being officially mutable is an argument *for* durable truth outside it. No residue |
-| ~~OQ8~~ | ~~Requested-descriptor derivability~~ | **Closed at M4 (rev 7)**: not derivable — the protocol is `capabilities` + an opaque configuration, with no model-identity key anywhere. App-supplied at driver init; `resolvedModelID` is per-provider convention, **nil expected on-device** |
-| ~~OQ9~~ | ~~Reasoning / custom segment exposure~~ | **Closed at M4 (rev 7)**: observable *and* constructible, so v0.1's silence is an owned choice (N11), not an incapacity. `Transcript.Segment` also gained `attachment`/`custom` — entries did **not** change |
+| ~~OQ8~~ | ~~Requested-descriptor derivability~~ | **Closed at M4 (rev 7)**: not derivable — the protocol is `capabilities` + an opaque configuration, with no model-identity key **on the protocol** (rev 11 scopes this — Beta 5 added `SystemLanguageModel.variant` on the concrete type). App-supplied at driver init; `resolvedModelID` is per-provider convention, **nil expected on-device** |
+| ~~OQ9~~ | ~~Reasoning / custom segment exposure~~ | **Closed at M4 (rev 7)**: observable *and* constructible, so v0.1's silence is an owned choice (N11), not an incapacity. `Transcript.Segment` also gained `attachment` — and, in the Beta 4 read, a `custom` case **Beta 5 removed** (rev 11) — while entries did **not** change |
 
 ---
 
@@ -315,7 +315,7 @@ GA is ~Sept 2026. Treat this as a recurring per-beta checklist, not a one-time g
 
 Cut from the *top* first; never cross the "never cut" line.
 
-1. ~~Branch-switcher UX in the demo (keep the events, hide the UI).~~ **Retired 2026-08-16 (M7 boundary audit; owner sign-off; rev 11 item 2 lands the §12 edit).** Invoking it would falsify DoD-1 as written — the hero GIF requires the interrupted partial "reachable via the branch switcher" — and the price that justified the line expired when M7 landed `siblings(of:)`/`switchBranch` tested (`RecoveryTests.interruptedPartialSurvivesRegeneration` already automates the flow). A cut line whose invocation would gut the hero is not a real cut line.
+1. ~~Branch-switcher UX in the demo (keep the events, hide the UI).~~ **Retired 2026-08-16 (M7 boundary audit; owner sign-off; **§12 edit landed in rev 11**).** Invoking it would falsify DoD-1 as written — the hero GIF requires the interrupted partial "reachable via the branch switcher" — and the price that justified the line expired when M7 landed `siblings(of:)`/`switchBranch` tested (`RecoveryTests.interruptedPartialSurvivesRegeneration` already automates the flow). A cut line whose invocation would gut the hero is not a real cut line.
 2. GRDB polish → naive SQLite.
 3. Tool-invocation recording → v0.2.
 4. ~~Provider-mapping breadth → ship on-device + Claude-package only; Chat-Completions → v0.2.~~ **Invoked at M6, with a different outcome than the line priced:** the Claude package is not in this beta ring (a remote dependency is a person's decision), and what shipped is *wider* on the Apple side — on-device + three further Apple families + the deprecated 26 family + `URLError` + the generic `ProviderFault` lift rules (§8's second table). What is missing is a third-party family, and the generic path is what one would use. DoD-2 is restated against this reality (see M8).

@@ -55,9 +55,12 @@ public protocol GenerationDriving: Sendable {
     ///
     /// Rev 7 closed OQ8's residual by reading the SDK: `LanguageModel` is two
     /// requirements wide — `capabilities` and an opaque `executorConfiguration`
-    /// — and carries no model-identity key anywhere. There is nothing to derive
-    /// a descriptor *from*, so it is app-supplied at driver init, and asking is
-    /// the only correct design rather than a fallback.
+    /// — and carries no model-identity key **on the protocol** (rev 11 scopes
+    /// this: Beta 5 added `variant` to the concrete `SystemLanguageModel`, which
+    /// an existential still cannot reach). There is nothing a
+    /// provider-agnostic driver can derive a descriptor *from*, so it is
+    /// app-supplied at driver init, and asking is the only correct design
+    /// rather than a fallback.
     ///
     /// Non-`async` on purpose: a conforming actor must spell this
     /// `nonisolated let`, which is exactly right for a value fixed at init. A

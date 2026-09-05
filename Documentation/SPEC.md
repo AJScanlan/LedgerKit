@@ -1,8 +1,9 @@
 # LedgerKit v0.1 — Design Specification
 
-**Status:** **rev 10 — ratified 2026-08-16 at the M7 boundary**; subsequent amendments open rev 11. Rev 9 was ratified 2026-08-02 at the M6 boundary; rev 8 on 2026-07-28 at the M5 boundary; rev 7 on 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
-**Date:** 2026-08-16 (rev 9: 2026-08-02, rev 8: 2026-07-28, rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
+**Status:** **rev 11 — ratified 2026-09-05 at the M8 boundary**; subsequent amendments open rev 12. Rev 10 was ratified 2026-08-16 at the M7 boundary; rev 9 on 2026-08-02 at the M6 boundary; rev 8 on 2026-07-28 at the M5 boundary; rev 7 on 2026-07-26 at the M4 boundary; rev 6 on 2026-07-26 at the M3 boundary; rev 5 on 2026-07-25 at the M2 boundary.
+**Date:** 2026-09-05 (rev 10: 2026-08-16, rev 9: 2026-08-02, rev 8: 2026-07-28, rev 7: 2026-07-26, rev 6: 2026-07-26, rev 5: 2026-07-25, rev 4: 2026-07-13, rev 3: 2026-07-12, rev 2: 2026-07-12, rev 1: 2026-07-09)
 **Targets:** iOS 27 / macOS 27 (Foundation Models `LanguageModel` protocol as inference substrate)
+**Changes from rev 10:** Appendix I — M8's revision, and **three of its five items are the spec correcting itself rather than growing**: two because Beta 5 removed or added SDK surface, and one because *demonstrating* a DoD line showed the line claimed more than the system guarantees. The single new item (§7.4's flush cadence as the floor on display granularity) had been invisible for two milestones because the system had only ever been run against one provider. All four batches landed. No invariant weakens, and **nothing touches the wire**.
 **Changes from rev 9:** Appendix H — M7's revision, and its character is uncomfortable. Where rev 9 was *measurements that contradicted what a reader would reasonably have believed*, rev 10 is mostly **this document being wrong about its own tests and tools**: four of its thirteen items exist because something stated here was checked and did not hold. All five batches landed. No invariant weakens, and **nothing touches the wire** — no event kind, no payload shape, no discriminator.
 **Changes from rev 8:** Appendix G — M6's revision, and mostly *measurements that contradicted something a reader would reasonably have believed*. All six batches landed. No invariant weakens, and **nothing touches the wire** — batch D resolved that question, not by thrift (pre-1.0 the wire is free) but because §8 spends cases on affordances rather than conditions.
 **Changes from rev 7:** Appendix F — two items from the M4 boundary audit, nine from M5. No invariant weakens, no event kind changes, nothing touches the wire.
@@ -80,7 +81,7 @@ The single most important design input. Anything in the left column is a non-goa
 - **N10.** No assistant-initiated conversations through the v0.1 store API. The *wire format* has headroom — `generationStarted(parent: nil)` is a virtual-root child the reducer accepts (I6) — so enabling model-generated openers later is a store-policy relaxation, not a migration (the §6.5 pattern: log tolerant, store enforces). The v0.1 store simply never emits one.
 - **N11.** No transcript-entry-complete rehydration (rev 4, the honest scope of tenet "rebuild from the ledger"). Apple's `Transcript` carries six entry kinds — instructions, prompt, response, tool calls, tool outputs, reasoning. The v0.1 ledger represents the first three (as text) plus tool invocations as `ToolRecord`s; rehydration reconstructs **text + instructions only** (§7.1 fidelity classes). Tool-call/tool-output entries are not re-materialized into rebuilt transcripts under *any* recording policy in v0.1, and reasoning entries are **deliberately not recorded** (rev 7). The rev-4 wording said "not even recordable," which the 27 SDK falsifies: reasoning is observable (the executor channel has a `Reasoning` action family with its own `appendText` / `replaceTextSegment` and a `ReasoningSignature`) and constructible (`Transcript.Reasoning { id, segments, signature: Data? }`). So this is a scoping decision that must be defended rather than an incapacity to note. It is defended: reasoning text is the most sensitive content a model produces and the least stable across providers and versions, the ledger outlives the session (§9 privacy), and v0.1's `.metadataOnly` default for *tool* results applies the same judgement to a strictly less sensitive category. v0.2 revisits reconstruction from `.full` tool records (§12).
 
-**What did change at 27 is one level down (rev 7): `Transcript.Segment` grew from two cases to four** — `text`, `structure`, and now `attachment` and `custom`. The **entry** kinds did not change; the things entries *contain* did. So a prompt or response entry may legally carry image attachments or provider-custom segments, and Apple's `Attachment<Content>` is `PromptRepresentable`, which makes multimodal user input a real 27 feature rather than a rumour — hence N8a, which owns v0.1's text-only scope instead of leaving it to look like an oversight.
+**What did change at 27 is one level down (rev 7, corrected rev 11): `Transcript.Segment` grew from two cases to three** — `text`, `structure`, and now `attachment`. Rev 7 recorded four, including a `custom` case; **Beta 5 removed it**, along with the `Transcript.CustomSegment` protocol and the channel's `updateCustomSegment` action. The **entry** kinds still did not change; the things entries *contain* did. So a prompt or response entry may legally carry image attachments, and Apple's `Attachment<Content>` is `PromptRepresentable`, which makes multimodal user input a real 27 feature rather than a rumour — hence N8a, which owns v0.1's text-only scope instead of leaving it to look like an oversight.
 
 ---
 ## 6. Core model
@@ -384,7 +385,7 @@ FM streams *cumulative snapshots*, not deltas. The driver diffs successive snaps
 
 Four consequences (rev 9 adds the fourth), and none of them changes v0.1's shape. **(1) The fail-loud path is right and stays.** A non-prefix snapshot terminating the generation as `unrecognized("driver: non-prefix snapshot")` was chosen when it looked like a can't-happen assertion; it is now the honest response to a legal provider behaviour this version does not model. A wrong transcript is still worse than a dead one. **(2) Segment-aware diffing is preferred, and M6 built it** (rev 9 — rev 7 wrote this as an instruction; it is now a description). The driver diffs over `(segmentID, text)` pairs extracted from `transcriptEntries`, which sees the segment identities the flat-string view erases, and falls back to flat prefix-diffing only where entries are unavailable. Seeing segments buys a distinction the flat view cannot express: a segment growing while a *later* segment already holds text is a legal per-segment append, yet an append-only ledger cannot represent it — expressing it would require inserting mid-string — so it must be refused rather than mis-encoded. A flat differ would have silently accepted it as a non-prefix and taken path (1) for the wrong reason. **(3) Recording `replaceTextSegment` faithfully would need a new payload kind** — the ledger has no way to express "revise what I already told you", since `deltaAppended` is append-only by construction. That is a v0.2 conversation (§12), priced exactly like §7.6's started/ended split: new kind, old readers quarantine it, degrade rather than corrupt. **(4) Measured at M6, and the guarantee is still absent (rev 9 — OQ4's residue, answered).** No real provider was observed revising: **zero non-prefix snapshots across 412 snapshots of 12 generations** from Apple's on-device model. A *scripted* revision proved unobservable to a consumer at every pacing tried (0/60/600 ms), because the framework's accumulation hides it — a provider may revise and the consumer still sees a well-behaved prefix sequence. Two things follow, and they pull in opposite directions on purpose. The fail-loud path in (1) **cannot currently be reached end-to-end**, so it is proved at unit level instead; and it **stays anyway**, because the API still permits the revision and "no provider has done this yet" is an observation, not a property. This section's framing is therefore confirmed rather than relaxed: prefix stability is *provider behaviour*. It held. Nothing promised it would.
 
-**Non-text stream content (rev 4):** provider streams can vend more than text — response metadata, usage updates, and *custom segments* (reasoning, provider-specific segments like search results). **v0.1 records text deltas only.** Non-text segments are ignored — neither persisted nor rehydrated (N11, OQ9) — deliberately and loudly in the docs, not as an accident of the diff loop. Usage and resolved model identity are the two exceptions, captured at completion into `StopInfo` (§7.7, §7.8).
+**Non-text stream content (rev 4):** provider streams can vend more than text — response metadata, usage updates, and *reasoning segments*. (Rev 4 also listed provider-custom segments here; **Beta 5 removed that case** — see §5. The scoping decision below is unchanged, and now has one fewer thing to exclude.) **v0.1 records text deltas only.** Non-text segments are ignored — neither persisted nor rehydrated (N11, OQ9) — deliberately and loudly in the docs, not as an accident of the diff loop. Usage and resolved model identity are the two exceptions, captured at completion into `StopInfo` (§7.7, §7.8).
 
 ### 7.4 Delta persistence batching — two cadences, one truth hierarchy, one overlay
 
@@ -393,6 +394,8 @@ Writing every token to disk is wasteful; losing 30 s of stream on crash is bad U
 `projection = overlay_live( reduce(persistedLog ++ unflushedTail, mapping) )`
 
 where `overlay_live` maps `.interrupted → .streaming(partial:)` for exactly the `GenerationID`s the store currently has in flight, and is the identity otherwise. The decomposition matters: **no fold ever yields `.streaming`** — a log cannot know the process is alive — and `.interrupted` is precisely what a live generation *looks like* to a pure fold. Liveness is store state, deliberately outside the reducer: I1 stays pure. On crash, the live set is vacuously empty at next launch, the overlay is the identity, and the fold's `.interrupted` shows through — recovery is the overlay *disappearing*, not a recovery pass running. On flush, the unflushed tail is exactly what would be lost, which is the already-documented recovery granularity. Make both cadences configurable; the two halves are tested separately in §10.
+
+⚠️ **The flush cadence is also the floor on display granularity, and a provider swap is what makes that visible (rev 11, measured at M8).** A reader observes the live generation through the store's delta feed, so **the UI cannot update more finely than the log is written.** The two cadences are one knob wearing two hats: raising the flush interval buys fewer writes and costs both a larger recoverable tail *and* a coarser stream on screen. This stayed hidden through M6–M7 because it was only ever exercised against one provider. Measured across two, the same policy (250 ms / 512 characters) produced **5–8 flushes** for an on-device answer and **2** for a same-length answer from a network provider, whose whole response landed inside two flush windows. Nothing was wrong in either case — the second provider was simply faster than the policy's resolution. **The consequence for apps, stated because it is not obvious:** an app wanting a *uniform* cadence across providers cannot get it from this policy. It must either pace its own display from the cumulative partial (which this section's cumulative-delta guarantee already makes sound), or separate a display flush from the durability flush — which v0.1 deliberately does not offer, because durability is what the ledger is *for* and a second cadence with no durable meaning belongs above the seam. Recorded as an owned limit, not a gap.
 
 **Attaching mid-generation shows the live partial (rev 10).** A projection created *while* a generation is streaming renders `.streaming` carrying the whole partial — not `.interrupted`, and not merely the part that reached disk. This is worth stating because it is the ordinary case rather than an edge one (navigating from a conversation list into a streaming conversation), and because getting it wrong is invisible to P2: the predicate checks a projection against the live set it was handed, and an empty live set is self-consistent. Only a person looking at the screen would see the crash state under a running generation. The same holds for a generation that has started and produced no text yet — it shows `.streaming(partial: "")`, which is the case §6.2's refusal of a distinct `.pending` state was written for.
 
@@ -441,7 +444,7 @@ The mapping onto `TokenUsage` (§6.1) is 1:1 and total:
 
 The driver takes `any LanguageModel` at init. On-device ↔ Claude package ↔ Chat Completions server is the app's one-line choice; zero conditional code inside LedgerKit.
 
-**Model identity is two facts captured at two times (rev 4, resolving most of OQ8):** the **requested** descriptor — provider/model/version as configured — rides `generationStarted`, and rev 7 closes OQ8's residual: it is **app-supplied at driver init, necessarily**. The `LanguageModel` protocol is two requirements wide — `capabilities` and `executorConfiguration` — and the configuration is an opaque associated type with no model-identity key anywhere in the framework. There is nothing to derive from, so asking the app is not a fallback; it is the only correct design. The **resolved** identity lands in `StopInfo` at completion where a provider reports one — but rev 7 downgrades that expectation honestly: **no standard metadata key exists**, so `resolvedModelID` is a per-provider convention, and **nil is the expected value on-device**. Branch-compare uses the request; audit gets both; a provider silently upgrading its backend is *visible* as request ≠ resolved instead of invisible — where the provider reports anything at all, and a nil must never read as a failure.
+**Model identity is two facts captured at two times (rev 4, resolving most of OQ8):** the **requested** descriptor — provider/model/version as configured — rides `generationStarted`, and rev 7 closes OQ8's residual: it is **app-supplied at driver init, necessarily**. The `LanguageModel` protocol is two requirements wide — `capabilities` and `executorConfiguration` — and the configuration is an opaque associated type with no model-identity key **on the protocol**. There is nothing for a provider-agnostic driver to derive from, so asking the app is not a fallback; it is the only correct design. ⚠️ **Scoped at rev 11, and the scoping matters.** Beta 5 added `SystemLanguageModel.variant` — a `Variant` carrying a `displayName`. That *is* a model-identity key, so rev 7's unqualified claim — that the framework exposes none at all — is now false. The **design conclusion survives** because the key is on the concrete type, not on `any LanguageModel`: a driver holding an existential still cannot reach it. What does not survive is the reasoning as originally stated — and §14's own re-verification rule says a new surface is exactly what reopens a closed question. **`ModelDescriptor.version` stays nil regardless:** `Variant`'s only public payload is a `displayName`, and §8's standing rule refuses human-readable detail as durable data; deriving a stable token ourselves would be a closed map over an open set, written permanently into `generationStarted`'s payload. If `Variant` ever gains a stable identifier, `StopInfo.resolvedModelID` is its home — the *resolved* slot, not the *requested* one. The **resolved** identity lands in `StopInfo` at completion where a provider reports one — but rev 7 downgrades that expectation honestly: **no standard metadata key exists**, so `resolvedModelID` is a per-provider convention, and **nil is the expected value on-device**. Branch-compare uses the request; audit gets both; a provider silently upgrading its backend is *visible* as request ≠ resolved instead of invisible — where the provider reports anything at all, and a nil must never read as a failure.
 
 **Cardinality (rev 4, previously unstated; §7.9 names the type this constrains):** one driver may serve many conversations concurrently — §6.5's cross-conversation freedom is a driver property too, not just a store one. The driver is stateless per generation: it materializes a session **per generation** and may reuse one per conversation, never sharing one across conversations, because Apple sessions are single-flight (§6.5, §7.2). **v0.1 rebuilds every time (rev 10):** there is no cache, which is why there is nothing for `deleteConversation` to leave stale and why this section's cardinality ceiling is satisfied by construction rather than by policy. A per-conversation reuse cache keyed by `ConversationID` remains legal headroom — the §7.1 KV-cache optimization — and must carry its own validity rule if it ever lands. Correctness never depends on such a cache; discard-and-rebuild is always legal (ownership rule).
 
@@ -821,14 +824,14 @@ The pitch in one exhaustive `switch`: the compiler forces the app to handle inte
 
 ## 12. Phasing & effort (evenings/weekends, honest)
 
-- **v0.1 — target: tagged before iOS 27 GA (~Sept).** §6–§11 complete; demo app; README with the kill-mid-stream GIF. Estimate: **4–6 weeks part-time**, which assumes the ⚠️ verifications hold across betas — expect to repeat the API-verification evening per beta through August; price that in. Cut line if slipping, in order: (1) branch-switcher UX in demo (keep the events, hide the UI), (2) GRDB polish → naive SQLite, (3) tool-invocation recording → v0.2, (4) provider-mapping breadth — ship on-device mappings only; Chat-Completions family → v0.2. **Invoked at M6, with an outcome the line did not predict (rev 10):** the Claude package is not in this beta ring, so what shipped is *wider* on the Apple side — on-device plus three further Apple families, the deprecated 26 family, `URLError`, and the generic `ProviderFault` lift rules (§8's second table). What is still missing is a third-party family, and the generic path is what one would use. Never cut: I1–I7 **and P1–P3** tests, interruption recovery, ScriptedLanguageModel.
-- **v0.2:** tool records → replay view (and, if OQ2 makes live tool activity observable, the started/ended event-pair design — see §7.6's priced-in quarantine consequence); **transcript-fidelity rehydration** (reconstruct tool-call/tool-output entries from `.full` records into rebuilt transcripts; record reasoning/custom segments if OQ9 exposes them — closes the §7.1 fidelity gap for apps that opt in); guided-generation partials (extends `MessageContent`); export (Markdown/JSON — now self-describing per-event thanks to the envelope `conversationID`); `RecordingLanguageModel` (capture real streams as fixtures); **continuation-resume research** (relaxes I7 to N:1 — the honest version of "Resume"); **parallel sibling generation** (relax single-flight per §6.5, multi-model branch-compare UX; the §7.2 session gate and §7.8 cardinality rules are its groundwork); **erasure design doc** (crypto-shredding vs. log rewrite, §9).
+- **v0.1 — target: tagged before iOS 27 GA (~Sept).** §6–§11 complete; demo app; README with the kill-mid-stream GIF. Estimate: **4–6 weeks part-time**, which assumes the ⚠️ verifications hold across betas — expect to repeat the API-verification evening per beta through August; price that in. Cut line if slipping, in order: (1) branch-switcher UX in demo (keep the events, hide the UI) — **RETIRED at M8 (rev 11), not invoked.** Invoking it would have falsified DoD-1's own wording ("reachable via the branch switcher"), so the line was never actually spendable once §13 was written. It is also cheap now: M7 landed `siblings(of:)` and `switchBranch` tested, and M8's switcher is an inline `‹ 2 of 3 ›` pager — the price that justified the line expired. Annotated retired-with-reason rather than deleted, following line 4's invoked-with-outcome precedent: a cut line that was considered and dropped is evidence about the estimate. (2) GRDB polish → naive SQLite, (3) tool-invocation recording → v0.2, (4) provider-mapping breadth — ship on-device mappings only; Chat-Completions family → v0.2. **Invoked at M6, with an outcome the line did not predict (rev 10):** the Claude package is not in this beta ring, so what shipped is *wider* on the Apple side — on-device plus three further Apple families, the deprecated 26 family, `URLError`, and the generic `ProviderFault` lift rules (§8's second table). What is still missing is a third-party family, and the generic path is what one would use. Never cut: I1–I7 **and P1–P3** tests, interruption recovery, ScriptedLanguageModel.
+- **v0.2:** tool records → replay view (and, if OQ2 makes live tool activity observable, the started/ended event-pair design — see §7.6's priced-in quarantine consequence); **transcript-fidelity rehydration** (reconstruct tool-call/tool-output entries from `.full` records into rebuilt transcripts; record reasoning segments if OQ9 exposes them — closes the §7.1 fidelity gap for apps that opt in); guided-generation partials (extends `MessageContent`); export (Markdown/JSON — now self-describing per-event thanks to the envelope `conversationID`); `RecordingLanguageModel` (capture real streams as fixtures); **continuation-resume research** (relaxes I7 to N:1 — the honest version of "Resume"); **parallel sibling generation** (relax single-flight per §6.5, multi-model branch-compare UX; the §7.2 session gate and §7.8 cardinality rules are its groundwork); **erasure design doc** (crypto-shredding vs. log rewrite, §9).
 - **v0.3:** compaction bookkeeping integrated with utilities' summarizer — `compactionRecorded` **carries the summary text**, so both rehydration and the audit trail reproduce what the model actually saw, not merely that something happened; search; **sync design doc only** (log-shipping / CRDT exploration — the distributed-systems bridge, deliberately paper-first; inbox from v0.1: deletion tombstones (§9), envelope operation/correlation IDs (§6.1/§9)).
 
 ## 13. Definition of done (v0.1)
 
-1. Demo: kill the app mid-stream → relaunch → the message renders `.interrupted` with partial text; **Regenerate works, and the interrupted partial survives as its own branch, reachable via the branch switcher.** Recorded as a GIF; this is the README hero and the launch post.
-2. Swap `SystemLanguageModel` → **a second real provider**: the demo compiles and runs with only the driver-init line changed. The demonstrable second provider is `PrivateCloudComputeLanguageModel` — a genuinely non-on-device Apple provider whose error family §8 already maps — because cut line 4 established that the Claude package is not in this beta ring (§12). The Claude package remains the demonstration of choice if a later ring carries it; **the product claim was always the one-line swap, not the vendor** (rev 10).
+1. Demo: kill the app mid-stream → relaunch → the message renders `.interrupted` carrying **whatever the last flush made durable**; **Regenerate works, and the interrupted attempt survives as its own branch, reachable via the branch switcher.** Recorded as a GIF; this is the README hero and the launch post. ⚠️ **Rev 11 weakened this line, and demonstrating it is what showed the earlier wording demanded text the system does not promise.** A generation killed before its first flush reduces to `.interrupted` with an **empty** partial — which is correct, and is §7.4's recovery granularity at its limit rather than a failure to satisfy this line. On-device this is a live case, not a corner: time-to-first-token is measured in *seconds*, so the interval in which a kill yields an empty partial is **longer** than the interval in which it yields text. The demonstration must land a flush first; the *contract* must not require one.
+2. Swap `SystemLanguageModel` → **a second real provider**: the demo compiles and runs with only the driver-init line changed. **Demonstrated at M8 across three providers** — `ScriptedLanguageModel`, `SystemLanguageModel`, and `ClaudeLanguageModel` — with only the driver-init line and its matching descriptor changed, and the log recording which one answered. **The product claim was always the one-line swap, not the vendor** (rev 10), and rev 11 finishes the thought: **what is *not* claimed is that any particular vendor's package stays buildable across beta rings.** PCC needs an entitlement Apple has not granted; Anthropic's package trails the SDK on its own release cadence. Neither is a property of LedgerKit, which is the thing this section is a definition of done *for*. The recorded demonstration therefore uses whichever pair is installable when the camera runs, and the **evidence is the log** — `generationStarted.model` names the provider permanently — not the vendor's name in a build file.
 3. Crash-point fuzz suite (suffix **and interior-gap** variants), cancellation chaos suite (including the §7.2 boundary cases), hostile-fixture quarantine assertions (the §6.6 table, row-for-row, including the tolerant-terminal *non*-quarantine, the role-adjacency non-rules, and the cascade fixture), and **P1–P3** green in CI (Scripted model — no device dependency).
 4. README: 60-second quickstart, the recoverability table, the exhaustive-switch example, and the **"why not just persist `session.transcript`?" section** — the incumbent is the SwiftData transcript blob (§2), and the README answers it before the reader asks.
 5. Tagged `0.1.0`; pre-1.0 SemVer caveats stated; ADR-001 committed **and its registry mechanically enforced, not merely documented** (tagged-JSON event encoding; discriminator registry — tags never reused, removed tags reserved forever, checked against a manifest in CI; unknown-discriminator → quarantine with the single tolerant-terminal exception; the gap-diagnostic rule; version-frozen fixture corpus; upcasters named as the evolution idiom).
@@ -857,8 +860,8 @@ Re-verify per beta. The closed-by-reading answers are pinned by the §10 surface
 5. ~~**Built-in `LanguageModelError` inventory:** the case list `GenerationError` must totally cover (§8) — including exact case *names*.~~ **Resolved at M3 (rev 6)**, from the SDK interface: `contextSizeExceeded`, `rateLimited`, `guardrailViolation`, `refusal`, `unsupportedCapability`, `unsupportedTranscriptContent`, `unsupportedGenerationGuide`, `unsupportedLanguageOrLocale`, `timeout` — each carrying a payload struct. §8 is reconciled against this list and now states its coverage as a table. Re-verify per beta; a *new* built-in case is the one change that would reopen this.
 6. ~~**Session single-flight surface:** the exact error/behavior when a second request hits a responding session (feeds §6.5/§7.2). iOS 26 evidence: it surfaced *as* `GenerationError.rateLimited` — single-source, verify.~~ **Resolved at M4 (rev 7)**: `LanguageModelSession.Error.concurrentRequests` (typed, 27+), split out of the iOS 26 enum that also held `rateLimited` — which is how the 26 evidence arose. §7.2's gate is retained: the 26 enum is deprecated, not absent, so a provider built against it can still throw the overloaded shape. **Closed at M6 (rev 9): thrown, not trapped** (§7.2).
 7. ~~**Context-management & KV-cache APIs:** confirm the new iOS 27 context APIs stop at the session boundary — this is the sherlock check for §2.~~ **Resolved at M4 (rev 7): the sherlock check passes.** `ContextOptions` is per-request, `TranscriptErrorHandlingPolicy` per-session, `session.usage` per-session, `Transcript` mutable in place. All session-scoped, none persistent (§2). No residue.
-8. ~~**`ModelDescriptor` derivation, narrowed (rev 4):** whether the *requested* descriptor is derivable from `any LanguageModel`'s configuration surface or must be app-supplied at driver init.~~ **Resolved at M4 (rev 7): app-supplied, necessarily.** `LanguageModel` exposes only `capabilities` and an opaque `executorConfiguration`; there is no model-identity key in the framework. `StopInfo.resolvedModelID` is per-provider convention — **expect nil on-device** (§7.8).
-9. ~~**Reasoning & custom segments (rev 4):** what the iOS 27 stream and transcript expose — observable? recordable? re-constructible?~~ **Resolved at M4 (rev 7)**: observable (the channel's `Reasoning` action family) and constructible (`Transcript.Reasoning { segments, signature }`); `Transcript.Segment` also gained `attachment` and `custom`, while `Transcript.Entry`'s six kinds are unchanged. v0.1 records none of it **by choice** (N11, N8a). No blocking residue; v0.2 scope.
+8. ~~**`ModelDescriptor` derivation, narrowed (rev 4):** whether the *requested* descriptor is derivable from `any LanguageModel`'s configuration surface or must be app-supplied at driver init.~~ **Resolved at M4 (rev 7): app-supplied, necessarily.** `LanguageModel` exposes only `capabilities` and an opaque `executorConfiguration`; there is no model-identity key **on the protocol** (rev 11 scopes this: Beta 5 added `SystemLanguageModel.variant` on the concrete type — §7.8). `StopInfo.resolvedModelID` is per-provider convention — **expect nil on-device** (§7.8).
+9. ~~**Reasoning & custom segments (rev 4):** what the iOS 27 stream and transcript expose — observable? recordable? re-constructible?~~ **Resolved at M4 (rev 7)**: observable (the channel's `Reasoning` action family) and constructible (`Transcript.Reasoning { segments, signature }`); `Transcript.Segment` also gained `attachment` (and, in the Beta 4 SDK rev 7 read, a `custom` case **Beta 5 subsequently removed** — §5), while `Transcript.Entry`'s six kinds are unchanged. v0.1 records none of it **by choice** (N11, N8a). No blocking residue; v0.2 scope.
 
 ---
 
@@ -1305,3 +1308,111 @@ edit) to record that value observation was examined at M7 and **declined**, with
 trigger that would reopen it: a second writer.
 
 - rev 8 → rev 9 map: see Appendix G.
+
+---
+
+## Appendix I — Changes from rev 10
+
+Rev 11 is opened by **M8** (the demo app and the two DoD demonstrations) and ratified
+at its boundary, **2026-09-05**. Five items in four batches. **No invariant weakens, no
+event kind is added or removed, and nothing touches the wire** — `payloadVersion` and
+`reducerVersion` are unchanged, no corpus fixture moved, and no `Registry/tags.json`
+entry changed, confirmed item by item.
+
+Unusually for a revision, **three of the five items are the spec correcting itself
+rather than growing**: two because a beta removed or added SDK surface, and one because
+demonstrating a DoD line showed the line claimed more than the system guarantees. That
+distribution is the point of doing amendments at milestone boundaries where something
+was actually *run*.
+
+**Batch A — factual correction forced by Beta 5.**
+
+- **`Transcript.Segment` lost `.custom` (§5, §7.3, §12, OQ9).** Beta 5 removed the case,
+  the `Transcript.CustomSegment` protocol and its extensions, and the channel's
+  `Response.Action.updateCustomSegment`. Segment is back to **three** kinds (`text`,
+  `structure`, `attachment`); `Transcript.Entry` still has six. Rev 7 had recorded four,
+  and three live sentences cited a case that no longer exists — including OQ9's closure,
+  which used `custom` as evidence that v0.1's silence is "an owned choice, not an
+  incapacity". **OQ9's answer is unchanged**: reasoning survives, so the choice is still
+  owned; only the justification lost one of its two examples. ⚠️ **A surface can shrink,
+  so a tripwire that only anticipates additions is half a tripwire** — the generalizable
+  lesson, and the reason `appleErrorSurface`/`consumedSurface` pin shapes in both
+  directions. **Appendix E is deliberately not edited**: it records what *rev 7 said*,
+  and rewriting an appendix makes the change log lie about the change (the convention
+  §10.1 already applies to `LedgerKitTestSupport`'s old name).
+
+**Batch B — scoping a claim that became false.**
+
+- **§7.8 / OQ8: "no model-identity key anywhere in the framework" → "…on the protocol".**
+  Beta 5 added `SystemLanguageModel.variant`, a `Variant` carrying a `displayName`. That
+  *is* a model-identity key, so rev 7's absolute is false. **The design conclusion
+  survives** — the key is on the concrete type, not on `any LanguageModel`, so a
+  provider-agnostic driver still cannot reach it — but the reasoning as written claimed
+  more than the evidence now supports, and §14's own re-verification rule says a new
+  surface is exactly what reopens a closed question. **`ModelDescriptor.version` stays
+  nil**, decided rather than deferred: `Variant` publishes only a human-readable
+  `displayName`, and §8's standing rule refuses human-readable detail as durable data;
+  deriving a stable token ourselves would be a closed map over an open set written
+  permanently into `generationStarted`'s payload. **Watch-note:** if `Variant` ever gains
+  a stable identifier, `StopInfo.resolvedModelID` is its home — the *resolved* slot, not
+  the *requested* one. Beta 5's metadata retyping and its smaller API changes move **no
+  spec sentence**, recorded here as an explicit no-change so the next audit does not
+  re-derive it.
+
+**Batch C — the two demonstrations.**
+
+- **§12 cut line 1 retired, not invoked.** "Hide the branch-switcher UI" would have
+  falsified DoD-1's own wording, so the line was never actually spendable once §13 was
+  written; and the price that justified it expired when M7 landed `siblings(of:)` and
+  `switchBranch` tested. Annotated retired-with-reason rather than deleted, following
+  line 4's invoked-with-outcome precedent — **a cut line that was considered and dropped
+  is evidence about the estimate**, which is what the list is for.
+- **§13 DoD-1: "with partial text" → "whatever the last flush made durable".** A
+  generation killed before its first flush reduces to `.interrupted` with an **empty**
+  partial. That is correct — it is §7.4's recovery granularity at its limit — but the DoD
+  as written demanded text the system does not promise. Found by demonstrating it: the
+  first take killed at six seconds and caught zero deltas. On-device this is not a corner
+  case, because time-to-first-token is measured in *seconds*, so a randomly-timed kill is
+  **more** likely to yield an empty partial than a populated one. The demonstration must
+  land a flush; the contract must not require one. ⚠️ Note the direction of travel — the
+  contract was made **weaker**, which is the only safe direction for a DoD to move on the
+  strength of one's own demo being inconvenient.
+- **§13 DoD-2 restated on evidence rather than a vendor.** Demonstrated at M8 across
+  **three** providers — `ScriptedLanguageModel`, `SystemLanguageModel`,
+  `ClaudeLanguageModel` — with only the driver-init line and its descriptor changed, and
+  the log naming which one answered. Rev 10 had already conceded that the product claim
+  was the one-line swap rather than the vendor; rev 11 finishes the thought by stating
+  what is **not** claimed: that any particular vendor's package stays buildable across
+  beta rings. PCC is entitlement-gated; Anthropic's package trails the SDK on its own
+  cadence. Neither is a property of LedgerKit, which is the thing §13 is a definition of
+  done *for*. **The evidence is the log**, not a build file.
+
+**Batch D — the one genuinely new finding.**
+
+- **§7.4: the flush cadence is also the floor on display granularity.** §7.4 described the
+  flush policy purely as a durability knob — what a crash costs. Demonstrating DoD-2
+  showed it is also, unavoidably, a *display* knob: a reader observes the live generation
+  through the store's delta feed, so **the UI cannot update more finely than the log is
+  written**. Measured across two providers, the same policy (250 ms / 512 characters)
+  produced 5–8 flushes for an on-device answer and **2** for a same-length answer from a
+  network provider. Nothing malfunctioned; the second provider was simply faster than the
+  policy's resolution. Stated as an **owned limit**: an app wanting a uniform
+  cross-provider cadence must pace its own display from the cumulative partial (which
+  §7.4's cumulative-delta guarantee already makes sound), because a display flush with no
+  durable meaning belongs above the seam. ⚠️ **This is why the item exists at all:** the
+  coupling was invisible for two milestones because the system had only ever been
+  exercised against one provider, and it surfaced the first time §13 item 2 was actually
+  performed rather than described. §8's closing note says provider-mapping churn is gold;
+  this is the same lesson arriving through §7.4 instead.
+
+**Considered and declined, recorded so the next audit does not re-derive them:**
+`siblings(of:)`'s exclusivity (real friction — building the branch pager needs the
+inclusive, ordered set plus the current index, so the one consumer the method anticipates
+cannot use it — but that is API convenience, which is M9's naming review, not a contract
+change); M8's latency measurements (observations about a substrate at a point in time,
+which belong in the plan and CLAUDE.md — the one number that reached the spec is Batch
+D's "5–8 versus 2", present as *ratio* evidence for a structural claim rather than as a
+performance promise); and the demo's composer behaviour (the spec says nothing about the
+demo's interaction design and should not start).
+
+- rev 9 → rev 10 map: see Appendix H.

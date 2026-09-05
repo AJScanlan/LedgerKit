@@ -56,9 +56,16 @@ public actor GenerationDriver: GenerationDriving {
     ///
     /// OQ8 closed by reading the SDK: `LanguageModel` is two requirements wide —
     /// `capabilities` and an opaque `executorConfiguration` — with no
-    /// model-identity key anywhere in the framework. There is nothing to derive
-    /// a descriptor *from*, so asking is not a fallback; it is the only correct
-    /// design (§7.8).
+    /// model-identity key **on the protocol**. There is nothing a
+    /// provider-agnostic driver can derive a descriptor *from*, so asking is not
+    /// a fallback; it is the only correct design (§7.8).
+    ///
+    /// ⚠️ Scoped at rev 11: Beta 5 added `SystemLanguageModel.variant`, so the
+    /// key is no longer absent from the *framework* — only from the protocol.
+    /// The conclusion holds because this initializer takes `any LanguageModel`
+    /// and cannot see it. `ModelDescriptor.version` still stays nil: `Variant`
+    /// publishes only a `displayName`, and human-readable detail is not durable
+    /// data (§8).
     ///
     /// - Parameters:
     ///   - model: The provider. On-device, Private Cloud Compute, a Claude
@@ -280,7 +287,7 @@ public actor GenerationDriver: GenerationDriving {
 
     /// The ordered text segments of a snapshot's response entries (§7.3).
     ///
-    /// Non-text segments — structure, attachment, custom — are **ignored, not
+    /// Non-text segments — structure, attachment — are **ignored, not
     /// refused**: v0.1 records text deltas only (N11, OQ9), and a provider
     /// interleaving a reasoning segment has not misbehaved. Ignoring them costs
     /// nothing because the delta is a concatenation of text.

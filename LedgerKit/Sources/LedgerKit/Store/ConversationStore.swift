@@ -1029,9 +1029,9 @@ public actor ConversationStore {
         var records = leading
         records.append(mint(
             // The *requested* descriptor comes from the driver and is never
-            // invented here (§7.8, D21 constraint 3): nothing in the framework
-            // exposes model identity, so the app supplies it at driver init and
-            // the store copies it.
+            // invented here (§7.8, D21 constraint 3): nothing reachable through
+            // `any LanguageModel` exposes model identity, so the app supplies it
+            // at driver init and the store copies it.
             .generationStarted(generation: generation, message: assistant, parent: parent, model: driver.model),
             in: conversation
         ))
