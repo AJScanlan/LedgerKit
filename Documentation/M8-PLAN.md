@@ -905,7 +905,7 @@ drives it once.
 
 ### Phase 3 — DoD-1 and DoD-2: the kill, the GIF, the swap
 
-**Status:** ◧ **DoD-1 done (2026-08-31)**; DoD-2 clip outstanding.
+**Status:** ☑ **COMPLETE** — DoD-1 (2026-08-31) and DoD-2 (2026-09-05).
 
 **Goal:** the two Definition-of-Done demonstrations, witnessed and recorded.
 
@@ -968,10 +968,71 @@ drives it once.
       it shows the black dynamic-island mask, and it is what makes a splice
       between takes visible (the two takes here are 11 minutes apart). Done for
       this GIF; keep doing it.
-- [ ] **DoD-2, the swap:** change the one `driver()` line to the D53 provider
-      with an explicit descriptor; build; run; one real generation on screen.
-      Then swap back. Record what §8 normalization produced if anything failed
-      — provider-mapping churn is gold (§8's closing note).
+- [x] **DoD-2, the swap** — done 2026-09-05 on branch `m8-dod2-claude`, against
+      `ClaudeForFoundationModels` pinned to revision `fd965bf` (still untagged;
+      owner's call to proceed rather than wait). Artifacts:
+      `Documentation/assets/dod2.gif` / `.mp4`.
+
+  **The claim held.** `language` returns `ClaudeLanguageModel(name: .sonnet5,
+  auth: .apiKey(key))` instead of `SystemLanguageModel.default`, `descriptor`
+  moves with it, and **nothing else in the app changed** — no call site, no
+  view, no store code. The log is the evidence, not the pixels:
+
+  ```
+  generationStarted  model = {"provider":"anthropic","model":"claude-sonnet-5"}
+  generationEnded    outcome = completed
+                     usage = {input 9, output 14, cached 0, reasoning 0}
+  ```
+
+  Two real turns completed, `.completed` both times, usage accounted. The
+  credential was read from the launch environment
+  (`SIMCTL_CHILD_ANTHROPIC_API_KEY=… xcrun simctl launch …`) and never entered
+  the repository, a file, or a transcript.
+
+  **Costs, stated rather than glossed:**
+
+  - The package floors at **iOS 27**, so the app's deployment target had to go
+    26.5 → 27.0. That is this vendor's constraint, not LedgerKit's — but it is
+    a real cost of the swap, and it makes the app's own OS-availability gate
+    vacuous while it is in force. **Do not let this reach `LedgerKit`/
+    `Understudy`**; the floor rule in CLAUDE.md still stands for the libraries.
+  - The revision pin is why this lives on a branch. D58's rule — bank DoD-2 as
+    a recording, not a maintained dependency — is unchanged; `main` must not
+    depend on an untagged vendor revision. M9 revisits when Anthropic tags.
+
+  ⚠️ **The finding worth more than the demo: a provider swap silently changes
+  the *feel* of streaming, and §7.4 is why.** Measured against Claude:
+
+  | | on-device (warm) | Claude (network) |
+  |---|---|---|
+  | time to first token | 4.0 s | **2.06–2.11 s** |
+  | streaming phase | 2.6 s | **0.24–1.5 s** |
+  | flushes | 8 × ~110 ch | **2 × ~210 ch** |
+
+  Claude reaches first token **faster than the local model** — a network round
+  trip beats on-device prefill on this hardware, which inverts the usual
+  assumption. But the whole response then lands inside roughly **two**
+  `DeltaFlushPolicy` windows (250 ms / 512 chars), and the app renders from the
+  store's `.delta` notifications, so **the flush policy sets the floor on
+  display granularity**: the UI cannot update more finely than the log is
+  written. On-device this was invisible because the model was slow enough that
+  250 ms windows produced 5–8 flushes.
+  Then the second layer compounds it: `StreamingPartialSource.comfortableBacklog`
+  is **120 characters**, and every Claude flush exceeds it, so each one takes
+  the proportional catch-up branch (`backlog / 4` per 30 ms tick ≈ 1600 ch/s)
+  and the calm 100 ch/s cadence never engages at all. The result is that a
+  645-character answer appeared within a single 8 fps video frame.
+  **Neither layer is a bug** — §7.4 is about durability cadence and the pacer's
+  catch-up exists so display never lags a fast provider — but together they mean
+  *the pacer was tuned against one provider's chunking*. An app wanting a
+  uniform cadence across providers must either flush more often for display than
+  for durability (separating the two, which §7.4 currently conflates) or pace
+  from token arrival rather than from flushes. **Recorded for M9; not fixed
+  here.** This is exactly the "provider-mapping churn is gold" note §8 asks for,
+  pointing at §7.4 rather than §8.
+
+  **Nothing failed**, so §8 normalization produced nothing to record — worth
+  noting as an absence rather than leaving the checklist item silently unmet.
 - [ ] **On-device pass:** the same app over `SystemLanguageModel.default` on
       the host — short turns per D54. If the window is hit anyway, the
       `.reduceContext` bubble rendering **is** the correct demo (D54).
@@ -1174,7 +1235,7 @@ Item 2 is **already decided** and awaits only the wording pass.
 | F2/F4 comment corrections | diff | ☑ |
 | D53: PCC generates (or fallback decided on evidence) | two spikes recorded in Phase 1; owner deferred to Phase 3 | ☑ |
 | DoD-1: kill/relaunch flow live over sqlite; GIF recorded | Phase 3; `RecoveryTests` as the automated sibling | ☑ **2026-08-31** — `Documentation/assets/dod1.gif` (+ `.mp4`). Killed with `simctl terminate` at 4 durable deltas; the resulting log carries no terminal, and the fold derived `.interrupted` unaided |
-| DoD-2: one-line swap runs against the D53 provider | Phase 3 | ☐ |
+| DoD-2: one-line swap runs against the D53 provider | Phase 3 | ☑ **2026-09-05** on branch `m8-dod2-claude` — `ClaudeForFoundationModels` @ `fd965bf`, two real turns, log records `provider: "anthropic", model: "claude-sonnet-5"` with `.completed` and honest usage. `Documentation/assets/dod2.gif` |
 | Throw channel rendered (D55) | `AppModel.present(_:)`'s exhaustive switch + the rendered alert | ☑ |
 | Exhaustive switch keeps no `default` | `MessageBubble.presentation` (5 cases) and `affordance(for:)` (§8's table) | ☑ |
 | One provider-construction line in the app | `grep -rn "GenerationDriver(" Projection/` → 1 | ☑ |
@@ -1199,6 +1260,7 @@ Item 2 is **already decided** and awaits only the wording pass.
 
 | D58 | **DoD-2 is banked as a recording, not as a maintainable dependency.** Neither candidate provider is durably available: PCC is entitlement-gated with no response from Apple, and `ClaudeForFoundationModels` has had a Beta 5 adoption PR open three weeks with no external PRs accepted — while Beta 6/7 are already out, so its *tagged* releases are likely to fall further behind, not catch up. But the swap **works today** on a revision pin, and a recording outlives the dependency that made it. So: **record the DoD-2 clip on Beta 5 before upgrading**, then upgrade freely and drop the pin if it breaks. A fork was considered and declined — private maintenance of a demo dependency inverts the priority, since LedgerKit is the deliverable. Rev 11 restates §13's DoD-2 accordingly (§6 item 5) | **Accepted** 2026-08-31 (owner) |
 | D59 | **The composer dismisses the keyboard on send, and the transcript dismisses it on scroll.** Two one-line changes in `ChatScreen`, both HIG conformance rather than design: `composerFocused = false` in `send()`, and `.scrollDismissesKeyboard(.interactively)` on the transcript. Messages keeps the keyboard up because replies are a line long and the next turn is imminent; an assistant answer is several paragraphs and — measured in Phase 3 — is on screen for far longer than the draft was, so holding the keyboard costs ~40% of the display for the whole time there is something worth reading. Claude and ChatGPT both dismiss. The scroll-dismiss half was the more clearly missing of the two: with a draft typed and `axis: .vertical` giving the field no Return key, the keyboard could previously **only** be dismissed by sending. Made during Phase 3 because both materially degrade the GIF; each is one line and trivially revertible if the owner disagrees | ☑ Landed 2026-08-31; owner review outstanding |
+| D60 | **A provider swap changes streaming cadence, and the cause is architectural, not cosmetic.** The app renders from the store's `.delta` notifications, so `DeltaFlushPolicy` (250 ms / 512 chars) sets the **floor on display granularity** — the UI cannot update more finely than the log is written. Claude's whole response lands inside ~2 flush windows where the on-device model produced 5–8, and `StreamingPartialSource.comfortableBacklog` (120 chars) is then exceeded by every flush, so the pacer's catch-up branch renders at ~1600 ch/s and the calm cadence never engages. Neither layer is a bug; together they mean the pacer was tuned against one provider's chunking. A uniform cross-provider cadence needs either a display flush distinct from the durability flush (§7.4 conflates them today) or pacing from token arrival rather than from flushes | **Recorded, not fixed** — M9. Measured 2026-09-05 |
 
 Owner-agreed procedure (not a numbered decision): **Beta 4 is deleted once
 Beta 5 is green** — one toolchain, no CI-selection ambiguity (audit F3).~~

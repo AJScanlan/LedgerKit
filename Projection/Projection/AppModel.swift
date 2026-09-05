@@ -1,3 +1,4 @@
+import ClaudeForFoundationModels
 import Foundation
 import FoundationModels
 import LedgerKit
@@ -108,17 +109,40 @@ final class AppModel {
     /// That is tenet 5 at the app layer: the double is first-class, so the test
     /// exercises every layer except which provider answered.
     private var language: any LanguageModel {
-        Self.isUITesting ? ScriptedLanguageModel(script: Self.demoScript) : SystemLanguageModel.default
+        if Self.isUITesting { return ScriptedLanguageModel(script: Self.demoScript) }
+        // **DoD-2's swap, in one line.** A different vendor, a different
+        // transport, a different failure taxonomy — and nothing downstream of
+        // here changes, because the library consumes `any LanguageModel` and
+        // never wraps it (tenet 3).
+        if let key = Self.anthropicAPIKey { return ClaudeLanguageModel(name: .sonnet5, auth: .apiKey(key)) }
+        return SystemLanguageModel.default
     }
 
     private var descriptor: ModelDescriptor {
-        Self.isUITesting
-            ? ModelDescriptor(provider: "understudy", model: "scripted")
-            // What the `SystemLanguageModel` convenience initializer defaults to,
-            // spelled out because this path no longer goes through it. Version
-            // stays nil: which *build* answered is genuinely unknown, and a guess
-            // would be a fabrication in an append-only log (§7.8).
-            : ModelDescriptor(provider: "apple", model: "system")
+        if Self.isUITesting { return ModelDescriptor(provider: "understudy", model: "scripted") }
+        // The descriptor moves with the provider: it is what the *log* will say
+        // answered this turn, forever. Unlike Apple's on-device model, Claude's
+        // identity is a version the caller chose, so it is recorded rather than
+        // left nil (§7.8).
+        if Self.anthropicAPIKey != nil {
+            return ModelDescriptor(provider: "anthropic", model: "claude-sonnet-5")
+        }
+        // What the `SystemLanguageModel` convenience initializer defaults to,
+        // spelled out because this path no longer goes through it. Version
+        // stays nil: which *build* answered is genuinely unknown, and a guess
+        // would be a fabrication in an append-only log (§7.8).
+        return ModelDescriptor(provider: "apple", model: "system")
+    }
+
+    /// **The credential never enters the repository.** It is read from the
+    /// launch environment (`SIMCTL_CHILD_ANTHROPIC_API_KEY=… xcrun simctl
+    /// launch …`), so DoD-2 can be demonstrated without a key being committed,
+    /// typed into a file, or pasted into a transcript. Absent, the app falls
+    /// back to the on-device model and the demo still runs.
+    static var anthropicAPIKey: String? {
+        guard let key = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"],
+              !key.isEmpty else { return nil }
+        return key
     }
 
     /// ⚠️ **The chunk boundaries are the test, not the content.**
