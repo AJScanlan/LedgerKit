@@ -7,8 +7,12 @@ SDK `26A5406c`, host OS `26A5406e`, iOS runtime `24A5408d`; Beta 4 deleted, one
 Xcode installed. **M7's last open exit item (the streaming eyeball) is closed**,
 so M7 is now unconditionally complete. **Phase 2 is done and accepted by the owner**; the app runs
 the whole loop, renders Markdown with a paced cadence, and has a UI-test
-drive-through. **Phase 3 next — DoD-1's kill/relaunch GIF and DoD-2's swap**,
-the latter still gated on D53 (PCC entitlement, or Anthropic's next tag).
+drive-through. **Phase 3 is half done: DoD-1 is demonstrated and its GIF is
+recorded** (`Documentation/assets/dod1.gif` — kill mid-stream, relaunch,
+`.interrupted` with the flushed partial, regenerate, switch back to the crashed
+attempt as version 1 of 2). **DoD-2's clip is the remaining Phase 3 item**, to
+be shot on Beta 5 against the Claude package at revision `fd965bf` per D58 —
+**before** any Beta 6/7 upgrade, because that revision is what builds today.
 
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M8 section) · [SPEC.md](./SPEC.md)
 §11 (the sketch and the showpiece switch), §13 DoD-1/DoD-2, §12 (cut lines),
@@ -901,21 +905,69 @@ drives it once.
 
 ### Phase 3 — DoD-1 and DoD-2: the kill, the GIF, the swap
 
-**Status:** ☐ not started
+**Status:** ◧ **DoD-1 done (2026-08-31)**; DoD-2 clip outstanding.
 
 **Goal:** the two Definition-of-Done demonstrations, witnessed and recorded.
 
-- [ ] **The kill/relaunch flow, live:** sqlite persistence, send with the paced
-      script, **kill the app mid-stream** (terminate the process, not the
-      generation), relaunch → the message renders `.interrupted` with the
-      flushed partial (the three-name table read right-to-left, on a screen);
-      Regenerate → new sibling; the switcher reaches the interrupted partial.
-      `RecoveryTests` is this flow's automated sibling — the live run is the
-      same assertions with eyes.
-- [ ] **Record the GIF** (`xcrun simctl io <device> recordVideo`, then convert;
-      keep the raw take). M9 owns the polished cut; M8 proves recordable and
-      banks one usable take. Script the take: short prompt, visible stream,
-      kill at mid-word, relaunch, the interrupted bubble, regenerate, switch.
+- [x] **The kill/relaunch flow, live:** sqlite persistence, send against
+      `SystemLanguageModel.default`, **killed the app mid-stream**
+      (`simctl terminate` — the process, not the generation), relaunch → the
+      message rendered `.interrupted` carrying the flushed partial; Regenerate
+      → new sibling; the switcher reached the interrupted partial. Ran end to
+      end on the iPhone 17 Pro simulator, iOS 27. The log the demo wrote is the
+      proof, and it is exactly the shape §6.2 predicts:
+      `conversationCreated, userMessageAppended, generationStarted, 5×deltaAppended`
+      — **no terminal** — then `generationStarted, activePathChanged` and a
+      second run to `generationEnded`. Nothing repaired anything.
+- [x] **Record the GIF** — `Documentation/assets/dod1.gif` (300×620, 25 s,
+      619 KB) and `dod1.mp4` (600 px, 425 KB). Raw takes deliberately **not**
+      committed (7.3 MB); they are sources, not deliverables.
+
+  **What recording actually taught (all measured, all reusable):**
+
+  - ⚠️ **The on-device model is prefill-dominated, and that governs the take.**
+    Cold: **7.1 s** to first token, then 344 characters in **1.34 s**
+    (~257 ch/s, five ~110-char flushes). Warm: **4.0 s**, then 2.6 s. So the
+    window in which a partial exists *and* no terminal has landed is **1.3 s
+    cold, 2.6 s warm** — no fixed `sleep` hits it. The first attempt killed at
+    6 s and caught **zero deltas**: a correct, faithfully-rendered `.interrupted`
+    with an *empty* partial, which is the weakest possible version of the demo.
+    **Trigger the kill off the log, not a clock** — poll `events` until
+    `deltaAppended >= 4`, then terminate. Two for two after that.
+  - **Warm the model with a throwaway generation before the take**, then wipe
+    the store. ~3 s of the cold 7 s is ANE load and is pure dead air on camera.
+  - ⚠️ **`simctl io recordVideo` discards ~7–9 s of tail on SIGINT.** It cost
+    the first take its final beat (the switch back to version 1), which is why
+    the shipped GIF is two takes spliced. **Hold ~30 s after the last action.**
+  - ⚠️ **A recorder killed uncleanly leaks a host-recording claim** that
+    survives the process dying, `detach`, *and* killing the panel helper —
+    every later start fails `Resource busy: Host recording is already in
+    progress`, naming a process that no longer exists. Only
+    `simctl shutdown` + `boot` clears it. The panel and the recorder otherwise
+    coexist fine; the helper was a red herring for three probes.
+  - ⚠️ **XcodeBuildMCP's `record_sim_video` loses the file** — it ignored
+    `outputFile` on `start` and on `stop` tried to move from `/axe-video-*.mp4`
+    at the filesystem *root*, reporting `SUCCEEDED` while recording. A complete
+    take was lost to it. Use `xcrun simctl io … recordVideo` directly.
+  - **The simulator generates now.** CLAUDE.md's standing note that the iOS
+    simulator reports `.available` and then fails with
+    `SensitiveContentAnalysisML error 15` is **stale as of the Beta 5 / OS
+    update** — every generation in this phase was real, varied, on-device text
+    produced *on the simulator*. Worth re-checking rather than trusting either
+    way; it is the same "availability is advisory" lesson pointing the other
+    direction.
+  - The recording is **variable-frame-rate** (~14.5 fps average, frames emitted
+    on change). Convert to CFR (`-fps_mode cfr -r 24`) before doing any
+    timestamp arithmetic, or contact-sheet indices lie — AVFoundation also
+    reported the duration as 93.6 s against ffprobe's true 77.7 s.
+  - **Compose the prompt off-camera and open on Send.** `simctl pbcopy` +
+    tapping Paste is the only reliable text entry here (the simulator-control
+    `text` action never delivered a keystroke), and it keeps the Paste/AutoFill
+    callout out of the take.
+- [ ] **Crop the status bar out of any future cut.** It carries no information,
+      it shows the black dynamic-island mask, and it is what makes a splice
+      between takes visible (the two takes here are 11 minutes apart). Done for
+      this GIF; keep doing it.
 - [ ] **DoD-2, the swap:** change the one `driver()` line to the D53 provider
       with an explicit descriptor; build; run; one real generation on screen.
       Then swap back. Record what §8 normalization produced if anything failed
@@ -1050,8 +1102,20 @@ Item 2 is **already decided** and awaits only the wording pass.
       `LanguageModelCapabilities.init(capabilities:)` (deprecated at Beta 4) was
       removed — the repo uses `init(_:)` throughout, so nothing breaks.
 4. **Anything Phases 1–3 surface** — logged here as discovered. Candidates the
-   audit primed: DoD-2 wording if D53's spike forces a fallback; any §11
-   sketch drift the demo's API friction exposes.
+   audit primed: any §11 sketch drift the demo's API friction exposes (§7 item 6
+   has two).
+5. **§13 — DoD-2 restated once more, and this time about evidence rather than a
+   vendor** (D58). Rev 10 already conceded that *"the product claim was always
+   the one-line swap, not the vendor"*; rev 11 finishes the thought. The swap is
+   demonstrated across **three** providers — `ScriptedLanguageModel`,
+   `SystemLanguageModel`, and `ClaudeLanguageModel` (verified end to end at
+   Phase 1: a real streamed generation, prefix-stable, correct usage accounting)
+   — and the recorded demonstration uses whichever pair is installable when the
+   camera runs. What is *not* claimed is that any particular vendor's package
+   stays buildable across beta rings: PCC needs an entitlement Apple has not
+   granted, and Anthropic's package trails the SDK by design of its own release
+   cadence. Neither is a property of LedgerKit, which is the thing §13 is
+   supposed to be a definition of done *for*.
 
 ---
 
@@ -1109,7 +1173,7 @@ Item 2 is **already decided** and awaits only the wording pass.
 | F6: init-side prune — mutation caught | Phase 1 mutation log, row 3 | ☑ |
 | F2/F4 comment corrections | diff | ☑ |
 | D53: PCC generates (or fallback decided on evidence) | two spikes recorded in Phase 1; owner deferred to Phase 3 | ☑ |
-| DoD-1: kill/relaunch flow live over sqlite; GIF recorded | Phase 3; `RecoveryTests` as the automated sibling | ☐ |
+| DoD-1: kill/relaunch flow live over sqlite; GIF recorded | Phase 3; `RecoveryTests` as the automated sibling | ☑ **2026-08-31** — `Documentation/assets/dod1.gif` (+ `.mp4`). Killed with `simctl terminate` at 4 durable deltas; the resulting log carries no terminal, and the fold derived `.interrupted` unaided |
 | DoD-2: one-line swap runs against the D53 provider | Phase 3 | ☐ |
 | Throw channel rendered (D55) | `AppModel.present(_:)`'s exhaustive switch + the rendered alert | ☑ |
 | Exhaustive switch keeps no `default` | `MessageBubble.presentation` (5 cases) and `affordance(for:)` (§8's table) | ☑ |
@@ -1126,12 +1190,15 @@ Item 2 is **already decided** and awaits only the wording pass.
 | D50 | **The abandoned-generation remedy**: the store clears `shownPartials` and publishes `.changed` on any throw out of `drive` (D39's "live set moved" half, previously unimplemented); the projection's prune keeps an entry iff classified `.interrupted` **and** present in the store's live set. Shown text visibly shrinks to the durable prefix — owned, and stated in rev 11 item 1 | **Proposed** 2026-08-16 (audit F1); Phase 1 confirms |
 | D51 | Demo architecture: one app model owns the store + the single provider-naming `driver()` line; screens own their projections; `isDeleted` drives navigation | **Proposed** 2026-08-16 |
 | D52 | Database at `Application Support/LedgerKit/demo.sqlite`; the library's protection floor is the demo's whole answer | **Proposed** 2026-08-16 |
-| D53 | DoD-2's provider is PCC, **pending the Phase 1 spike**; on a negative result the fallback (Claude-package ring check, or restate DoD-2) is Alexander's call on the evidence. **Both branches now have evidence.** PCC: entitlement-gated (Apple Small Business Program, applied, no response yet) and failing `ModelManagerError#1046` meanwhile. Claude: **works end to end** — real streamed generation, prefix-stable, correct usage accounting — but its **tagged** releases do not build on Beta 5 (they use the removed `Transcript.CustomSegment`); only the untagged default branch does. So the choice is *when*, not *whether*: wait for either Anthropic's next tag or Apple's entitlement, or pin the demo to a revision. Recommendation: **wait** — Phase 2 needs neither. ☑ **Resolved 2026-08-16 (owner): defer to Phase 3.** No demo pin to an unreleased vendor revision; Phase 2 proceeds on `ScriptedLanguageModel`. If both land by Phase 3 the demo shows **scripted → on-device → Claude → PCC** at one line each, which *demonstrates* DoD-2's claim rather than asserting it; if neither has, pinning a revision for a demo — not a shipped library dependency — is the fallback-to-the-fallback | ⛔️ **Spike ran 2026-08-16 and came back NEGATIVE** — PCC reports `.available` and fails deterministically (`ModelManagerError#1046`), while the on-device control generates on the same host. Evidence is in Phase 1's checklist. **Awaiting Alexander's fallback decision**; Phase 3 cannot demonstrate DoD-2 until it is taken |
+| D53 | DoD-2's provider is PCC, **pending the Phase 1 spike**; on a negative result the fallback (Claude-package ring check, or restate DoD-2) is Alexander's call on the evidence. **Both branches now have evidence.** PCC: entitlement-gated (Apple Small Business Program, applied, no response yet) and failing `ModelManagerError#1046` meanwhile. Claude: **works end to end** — real streamed generation, prefix-stable, correct usage accounting — but its **tagged** releases do not build on Beta 5 (they use the removed `Transcript.CustomSegment`); only the untagged default branch does. So the choice is *when*, not *whether*: wait for either Anthropic's next tag or Apple's entitlement, or pin the demo to a revision. Recommendation: **wait** — Phase 2 needs neither. ☑ **Resolved 2026-08-16 (owner): defer to Phase 3**, then ☑ **closed 2026-08-31 by D58** — the answer is Claude on a revision pin, recorded before the toolchain moves. No demo pin to an unreleased vendor revision; Phase 2 proceeds on `ScriptedLanguageModel`. If both land by Phase 3 the demo shows **scripted → on-device → Claude → PCC** at one line each, which *demonstrates* DoD-2's claim rather than asserting it; if neither has, pinning a revision for a demo — not a shipped library dependency — is the fallback-to-the-fallback | ⛔️ **Spike ran 2026-08-16 and came back NEGATIVE** — PCC reports `.available` and fails deterministically (`ModelManagerError#1046`), while the on-device control generates on the same host. Evidence is in Phase 1's checklist. **Awaiting Alexander's fallback decision**; Phase 3 cannot demonstrate DoD-2 until it is taken |
 | D54 | 4096 budget: short turns for the GIF; `.reduceContext` bubble kept; no compaction wiring — hitting the window renders the bubble, which is correct | **Accepted** 2026-08-16 (owner) |
 | D55 | The throw channel is rendered, not swallowed: alert for `persistenceFailure`, prevented-state for `generationInFlight`, ignore `CancellationError`, render-if-ever-reached for the target errors | **Accepted** 2026-08-16 (owner) |
 | D56 | **The Beta 5 posture.** (a) Two build repairs land as Phase 0's owned exception to "zero repo changes", because no failure inventory exists until the build compiles: `Understudy`'s metadata box → `any ConvertibleToGeneratedContent` (public `Script` vocabulary unchanged), and `GenerationDriver.stopInfo(from:)` reading `GeneratedContent` via `try? String(_:)` instead of a cast that had become a permanent nil. (b) **Beta 4 is retained** until the host tier is genuinely green — the deletion was priced against a condition this host could not yet reach. (c) The manifests and the SDK pin are **verified but not edited**, pending the two §7 sign-offs in §6 item 3.1/3.3, which the owner scheduled for the Phase 0 gate alongside rev 11's drafting. (d) **The OS moves to the Beta 5 train** (owner, 2026-08-16) rather than the toolchain moving back — the only option that lets Phase 0 close, since the device tier, the residue suite, the PCC spike and both surface tripwires are all host-only | **Accepted** 2026-08-16 — (a) landed; (b)(c) in force; (d) owner action pending |
 
 ~~| D57 | **`contextSizeExceeded` must not forward `0` as a measurement.** Apple's `ContextSizeExceeded` carries non-optional `Int`s; LedgerKit's case carries `Int?` precisely so nil can say *not reported* (D17, rev 7). `NormalizeAppleErrors.swift:146` forwards them unchanged, which is right for Apple's on-device model — it reports real numbers — and wrong for any provider that reports none: Anthropic's mapper sends `0`/`0` because the Messages API says neither, so the ledger would record a context window of zero tokens **forever**, in a log that cannot be rewritten. Proposed fix: map `0` → `nil` on that path, since a context size of 0 is not a measurement any model can produce and an overflow with `tokenCount: 0` is self-contradictory. The deprecated-26 path at line 274 already does the equivalent and says why. Classification is unaffected (§8 ignores the payload); this is about what the ledger *claims* | ☑ **Accepted 2026-08-16 (owner) and landed.** `reported(_:)` maps `0` → `nil` on the 27-family path; `contextSizeUnreported` is the test that would have caught it, and the mutation removing the filter fails it. Classification asserted unchanged in the same test, so the fix is visibly about what the ledger *records* rather than what a user sees. **Rev 11 note still owed**: §8's `contextSizeExceeded` paragraph says the fields are optional "because the ledger records what was reported, and non-Apple providers report neither" — true, and now with a named provider that proves it, plus the zero-sentinel rule that makes the optionality real rather than nominal |
+
+| D58 | **DoD-2 is banked as a recording, not as a maintainable dependency.** Neither candidate provider is durably available: PCC is entitlement-gated with no response from Apple, and `ClaudeForFoundationModels` has had a Beta 5 adoption PR open three weeks with no external PRs accepted — while Beta 6/7 are already out, so its *tagged* releases are likely to fall further behind, not catch up. But the swap **works today** on a revision pin, and a recording outlives the dependency that made it. So: **record the DoD-2 clip on Beta 5 before upgrading**, then upgrade freely and drop the pin if it breaks. A fork was considered and declined — private maintenance of a demo dependency inverts the priority, since LedgerKit is the deliverable. Rev 11 restates §13's DoD-2 accordingly (§6 item 5) | **Accepted** 2026-08-31 (owner) |
+| D59 | **The composer dismisses the keyboard on send, and the transcript dismisses it on scroll.** Two one-line changes in `ChatScreen`, both HIG conformance rather than design: `composerFocused = false` in `send()`, and `.scrollDismissesKeyboard(.interactively)` on the transcript. Messages keeps the keyboard up because replies are a line long and the next turn is imminent; an assistant answer is several paragraphs and — measured in Phase 3 — is on screen for far longer than the draft was, so holding the keyboard costs ~40% of the display for the whole time there is something worth reading. Claude and ChatGPT both dismiss. The scroll-dismiss half was the more clearly missing of the two: with a draft typed and `axis: .vertical` giving the field no Return key, the keyboard could previously **only** be dismissed by sending. Made during Phase 3 because both materially degrade the GIF; each is one line and trivially revertible if the owner disagrees | ☑ Landed 2026-08-31; owner review outstanding |
 
 Owner-agreed procedure (not a numbered decision): **Beta 4 is deleted once
 Beta 5 is green** — one toolchain, no CI-selection ambiguity (audit F3).~~
