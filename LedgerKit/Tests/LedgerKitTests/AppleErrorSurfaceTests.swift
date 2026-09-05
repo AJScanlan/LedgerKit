@@ -443,13 +443,22 @@ struct AppleErrorSurfaceTests {
     /// two are deliberately bundled so the second cannot be skipped while the
     /// first is done.
     ///
-    /// **Moved once, 2026-08-16: `26A5388f` → `26A5406c` (Xcode 27 Beta 5).** The
+    /// **Moved 2026-08-16: `26A5388f` → `26A5406c` (Xcode 27 Beta 5).** The
     /// bundling worked exactly as this doc intends — the re-verification found a
     /// removed `Transcript.Segment` case, a removed channel action, a retyped
     /// metadata dictionary that had silently turned two §7.7/§7.8 reads into
     /// permanent nils, and a new `SystemLanguageModel.variant` that narrowed
     /// OQ8's claim. None of that would have been looked for if this line were
     /// cheap to change alone.
+    ///
+    /// **Moved 2026-09-05: `26A5406c` → `26A5419a` (Xcode 27 Beta 6, `27A5252f`;
+    /// host `26A5425a`). The re-verification found *nothing* — `appleErrorSurface`
+    /// and `consumedSurface` both matched unmodified.** Recorded because a null
+    /// result is a real answer and the two moves together are the argument for
+    /// the mechanism: Beta 5 shrank Apple's surface, Beta 6 moved none of it, and
+    /// no amount of reasoning would have predicted which. What separates "nothing
+    /// changed" from "the check is asleep" is the non-vacuity test above
+    /// (``parserIsNotVacuous()``), which is why it is not optional company.
     ///
     /// ⚠️ **One thing this test cannot see, learned the same day:** it pins the
     /// *SDK*, and the SDK can be ahead of the **OS**. Beta 5's SDK declared a
@@ -459,7 +468,7 @@ struct AppleErrorSurfaceTests {
     /// `sw_vers` against the SDK build before suspecting this repo.
     @Test("the SDK this manifest was verified against is the SDK installed")
     func sdkBuildIsPinned() throws {
-        let verified = "26A5406c"
+        let verified = "26A5419a"
         let installed = try #require(sdkBuildVersion)
 
         #expect(
