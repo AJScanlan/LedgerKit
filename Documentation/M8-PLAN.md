@@ -13,8 +13,9 @@ recorded.** DoD-1 (`Documentation/assets/dod1.gif`): kill mid-stream, relaunch,
 attempt as version 1 of 2. DoD-2 (`dod2.gif`): the one-line provider swap run
 against Claude, with the log recording `provider: "anthropic"`. **The DoD-2
 wiring lives on branch `m8-dod2-claude`, not here** — the vendor package is
-still untagged and pinning `main` to a revision is what D58 rules out. **Phase 4
-(rev 11 ratification + alignment) is all that remains of M8.**
+still untagged and pinning `main` to a revision is what D58 rules out. **Phase 4 is done: SPEC rev 11 was ratified at this boundary on
+2026-09-05 (Appendix I, five items in four batches, nothing touching the wire).
+M8 is complete.**
 
 **Companion to:** [ROADMAP.md](./ROADMAP.md) (M8 section) · [SPEC.md](./SPEC.md)
 §11 (the sketch and the showpiece switch), §13 DoD-1/DoD-2, §12 (cut lines),
@@ -1048,25 +1049,25 @@ including the killed ones — stays green.
 
 ### Phase 4 — Wrap-up: rev 11 ratification + alignment
 
-**Status:** ☐ not started
+**Status:** ☑ **COMPLETE 2026-09-05**
 
-- [ ] §6's inventory finalized; draft to a scratch file; item-by-item
+- [x] §6's inventory finalized; draft to a scratch file; item-by-item
       sign-off; land in batches with the per-batch `Sources/**` sweep.
       **The sweep gains two greps** (M7 audit F2/F4, the escapee classes):
       `grep -rn "proposed for rev"` (the code's own forward-looking markers,
       which ratification obsoletes), and a grep for each retired claim's
       **nouns** (e.g. "session cache"), not only its sentence — paraphrases
       escaped the verbatim sweep once already.
-- [ ] Rev 11 ratified at the boundary; Appendix I written (map to rev 10 per
+- [x] Rev 11 ratified at the boundary (2026-09-05); Appendix I written (map to rev 10 per
       the standing appendix pattern).
-- [ ] **Alignment:** ROADMAP M8 struck through against exit criteria — **check
+- [x] **Alignment:** ROADMAP M8 struck through against exit criteria — **check
       the header line explicitly** (stale at two of the last four boundaries;
       accurate at M7's); cut line 1's retirement mirrored in ROADMAP's copy;
       CLAUDE.md status rewritten after ratification (new test counts, Beta 5
       toolchain, the demo's existence, D50's feed change).
-- [ ] Handoffs to M9 (§7) verified against what actually landed; API-friction
+- [x] Handoffs to M9 (§7) verified against what actually landed; API-friction
       findings from Phase 2 folded into M9's review list.
-- [ ] §8 coverage traceability filled; §9/§10 logs closed.
+- [x] §8 coverage traceability filled (all rows closed); §9/§10 logs closed.
 
 ---
 
@@ -1222,7 +1223,7 @@ Item 2 is **already decided** and awaits only the wording pass.
 
 ---
 
-## 8. Coverage traceability (fill at Phase 4)
+## 8. Coverage traceability (filled at Phase 4, 2026-09-05 — all rows closed)
 
 | Obligation | Suite / evidence | Status |
 |---|---|---|
@@ -1241,8 +1242,8 @@ Item 2 is **already decided** and awaits only the wording pass.
 | Throw channel rendered (D55) | `AppModel.present(_:)`'s exhaustive switch + the rendered alert | ☑ |
 | Exhaustive switch keeps no `default` | `MessageBubble.presentation` (5 cases) and `affordance(for:)` (§8's table) | ☑ |
 | One provider-construction line in the app | `grep -rn "GenerationDriver(" Projection/` → 1 | ☑ |
-| Healthy-log property over every demo-written log, killed runs included | existing property suites | ☐ |
-| Rev 11 carried into code (per-batch sweep + the two new greps) | Phase 4 sweep log | ☐ |
+| Healthy-log property over every demo-written log, killed runs included | throwaway audit over the surviving demo store, 2026-09-05 | ☑ **18 events → 0 diagnostics**, six messages all `.complete`. ⚠️ The DoD-1 stores were wiped between takes, so rather than attest the killed half from memory it was **re-derived**: truncating the *app-written* log at every prefix — which is precisely what a kill produces, a log missing its tail — gives **18/18 prefixes clean, 11 reducing to `.interrupted`**. The audit was deliberately not committed: it keys on an absolute simulator container path, and the property it checks is already permanently covered by the corpus truncation sweeps. What it adds is *provenance* — the rows came from a real app, not a fixture |
+| Rev 11 carried into code (per-batch sweep + the two new greps) | Phase 4 sweep log | ☑ **Four escapees the SPEC edit alone would have missed**, three of them in `Sources/`: ROADMAP's OQ8 and OQ9 rows, and the retired absolute asserted in `GenerationDriving.swift:58`, `GenerationDriver.swift:59` and `ConversationStore.swift:1033`. The **noun** grep ("model-identity key") found all of them; the sentence grep would have found only two — which is the M7 audit's lesson paying out. Also caught **myself**: the first draft quoted retired wording in live body text, which is exactly what the M6 Phase 0 finding warns re-reports forever. Rule applied and worth keeping: **body paraphrases, appendices quote** |
 
 ---
 
@@ -1276,6 +1277,7 @@ no rollback. Deletion is rescheduled to after the host tier is genuinely green.
 
 | Date | Phase | Tests | Note |
 |---|---|---|---|
+| 2026-09-05 | **M8 ☑ COMPLETE — all four phases** | **457** (434 + 23) + 6 `ProjectionUITests` | **Both DoD lines demonstrated and recorded** (`assets/dod1.gif`, `dod2.gif`). **SPEC rev 11 ratified** (Appendix I; five items, four batches, nothing touching the wire) — and unusually, *three of five are the spec correcting itself*: two Beta 5 surface changes, and **DoD-1 weakened** because demonstrating it showed the line demanded partial text the system does not promise (a kill before the first flush yields a correct *empty* partial, and on-device that is the **more likely** outcome). The one new item is **D60**: §7.4's flush cadence is also the floor on display granularity — invisible for two milestones because the system had only ever run against one provider, and surfaced the first time DoD-2 was *performed* rather than described. Phase 4's sweep found **four escapees** the SPEC edit alone would have missed, three in `Sources/`; the **noun** grep found all four where the sentence grep would have found two. DoD-2's wiring is quarantined on branch `m8-dod2-claude` per D58 — `ClaudeForFoundationModels` is untagged and forces an iOS 27 floor that must never reach the packages |
 | 2026-08-29 | **Phase 2 ☑ COMPLETE** | 457 (434 + 23) + `ProjectionUITests` ×2 | Skeleton → real app, then well past the plan's scope because the GIF is the deliverable LedgerKit is sold with. Landed: six-screen app over public API only; **Markdown + streaming** via `SwiftStreamingMarkdown` (branch-pinned, seven transitive deps, VoiceOver regression — all recorded in §7 item 7); a **pacer** that decouples display rate from arrival rate (Microsoft's 3 chars / 30 ms), sound only because partials are cumulative; **one view per assistant turn** to stop identity changes lurching the transcript; **Claude-style anchoring** where a trailing spacer trades height with the answer 1:1; **inline `‹ 2 of 3 ›` branch switcher** (DoD-1's mechanism) plus Regenerate on settled messages, whose absence had made siblings reachable only through failure; **rename** from list and toolbar; and a **UI drive-through** on `ScriptedLanguageModel` + throwaway store via `--uitest`. Owner drove it by hand and accepted. §7 gains items 6–7: the API friction (`activeMessages` computed, `siblings(of:)` exclusive) and the dependency costs |
 | 2026-08-16 | **Phase 1 ☑ COMPLETE** | **457** (434 + 23), host + device + deep + simulator | Gate met. **D53 resolved (owner): defer to Phase 3** — neither provider usable today, both expected to become so, and Phase 2 needs neither. **D57 accepted and landed** (zero-count context overflow → nil), found by spiking `ClaudeForFoundationModels`: Anthropic maps request-too-large onto `LanguageModelError.contextSizeExceeded` with `0`/`0`, which LedgerKit would have recorded as a measured zero-token window in an append-only log. The spike also produced §7.3's **first third-party prefix-stability evidence** (0 violations — a data point, not a measurement: 4 snapshots vs rev 9's 412) and independently confirmed Phase 0's `Transcript.CustomSegment` finding, since the package's *tagged* releases break on the same removal |
 | 2026-08-16 | **Phase 1 — at the gate** | **456** (433 + 23), host + device + deep + simulator | F1 landed in three parts (D50.1 store notify, D50.2 prune conjunction, D50.3 attach-path reconciliation) behind four new tests written red-first: all four failed before the fix, three by *hanging* until `.timeLimit`, which is F1 itself. `drive` split into slot-lifecycle + `runToTerminal` so abandonment has one catch rather than one per door. Five mutations, five resolved — row 4 was **initially uncatchable** (a leaked `shownPartials` entry is unreachable through `liveSet`), answered by deriving the invariant *nothing running ⇒ nothing held* and exposing `generationsWithShownPartials` to assert it. F2/F4 comment corrections landed (three "proposed for rev 9" → "landed"; the session-cache prose reworded to allowance-plus-reality, public symbol first). **F7 found and fixed**: the §7.7 residue's `> 100` floor was calibrated on model verbosity and flaked at 74/81 — repaired to a two-measured-value comparison; the residue's *answer* never moved. ⛔️ **D53 negative**: PCC is `.available` and fails deterministically (`ModelManagerError#1046`) while on-device generates on the same host — awaiting the owner's fallback decision |

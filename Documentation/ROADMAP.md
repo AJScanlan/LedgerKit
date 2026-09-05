@@ -251,10 +251,10 @@ The `@MainActor @Observable` read side (§6.2, §7.4, §11). **452 tests green**
 >
 > **Also corrected by measurement:** A2 was not "the field held unparseable text" — Apple's `debugDescription` *is* JSON; the defect was **dictionary-order instability** (three processes, three orderings), the per-process hasher seed reaching a durable audit field. And A3's remedy changed twice — TLC falsified the proposed tombstone, and the adopted `guard` lives in the write transaction because the property is about **logs**, not about one process's memory (D44).
 
-### M8 — `Projection` demo app (the hero)
-The [Projection](../Projection) Xcode app (built from `LedgerKit.xcworkspace`, scheme `Projection`; earlier drafts of this roadmap called it "Scroll"). DoD-1 and DoD-2.
+### ~~M8 — `Projection` demo app (the hero)~~ ✅ **DONE 2026-09-05**
+The [Projection](../Projection) Xcode app (built from `LedgerKit.xcworkspace`, scheme `Projection`; earlier drafts of this roadmap called it "Scroll"). DoD-1 and DoD-2, **both demonstrated and recorded**. **457 tests green** (434 `LedgerKit` + 23 `Understudy`, warning-free, host + iOS 27 simulator) plus **6 `ProjectionUITests`** driving the whole loop against `ScriptedLanguageModel`.
 
-**Build order, decision log (D50–D55) and phase gates: [M8-PLAN.md](./M8-PLAN.md)** (drafted 2026-08-16 from the M7 boundary audit; opens with the **Xcode 27 Beta 5** verification — zero repo changes, so every failure is the beta's — then a hygiene phase carrying the audit's findings, the sharpest being F1: an abandoned generation stuck `.streaming` on an attached projection, the seam between rev 8's "couldn't record" channel and rev 10's read side that neither milestone owned. Amendments open **rev 11**, ratifying at this boundary; M7's one open exit item — the streaming-smoothness eyeball — closes in its Phase 0.)
+**Build order, decision log (D50–D60) and phase gates: [M8-PLAN.md](./M8-PLAN.md)** (drafted 2026-08-16 from the M7 boundary audit; opens with the **Xcode 27 Beta 5** verification — zero repo changes, so every failure is the beta's — then a hygiene phase carrying the audit's findings, the sharpest being F1: an abandoned generation stuck `.streaming` on an attached projection, the seam between rev 8's "couldn't record" channel and rev 10's read side that neither milestone owned. Amendments opened **rev 11**, **ratified at this boundary 2026-09-05** (Appendix I); M7's one open exit item — the streaming-smoothness eyeball — closes in its Phase 0.)
 
 > Not to be confused with [LedgerKit/Sources/LedgerKit/Projection/](../LedgerKit/Sources/LedgerKit/Projection/) — the library's internal observable-projection layer, which is M7.
 
@@ -263,8 +263,9 @@ The [Projection](../Projection) Xcode app (built from `LedgerKit.xcworkspace`, s
 - **Provider swap:** one-line driver-init swap to a **second real provider** (**DoD-2 — restated 2026-08-13 at the M6 boundary audit; rev 10 item**). ✅ **Demonstrated 2026-09-05 across three providers** — `ScriptedLanguageModel`, `SystemLanguageModel` and `ClaudeLanguageModel` — with only the driver-init line and its descriptor changed, and the log recording which answered (`Documentation/assets/dod2.gif`). Rev 11 restates the line on evidence: the product claim was always the one-line swap, not the vendor, and what is **not** claimed is that any vendor's package stays buildable across beta rings (PCC is entitlement-gated; Anthropic's package trails the SDK). Neither is a property of LedgerKit.
 
 **Satisfies:** G8, DoD-1, DoD-2.
-**Exit:** the kill/relaunch GIF is recordable; provider swap compiles & runs with a one-line change.
-**Beta risk:** medium — depends on M6 being beta-stable and on real model availability.
+**Exit:** ✅ the kill/relaunch GIF is recordable — recorded, not merely recordable (`Documentation/assets/dod1.gif`); ✅ provider swap compiles & runs with a one-line change, demonstrated against Claude with the log naming the provider (`dod2.gif`). ✅ Rev 11 ratified. ✅ Every log the demo wrote — including the killed ones — reduces with empty diagnostics.
+**Beta risk:** medium — and it materialized. Phase 0 hit **Beta 5 breaking `Understudy`'s build and, silently, two metadata reads**; the host suite then SIGSEGV'd in dyld because the SDK was ahead of the OS. Both were the beta, not the repo, exactly as the phase was designed to prove — and the fix was an OS update, not a code change.
+**Deferred to M9, deliberately:** the DoD-2 wiring lives on branch `m8-dod2-claude`, not `main`. `ClaudeForFoundationModels` is still untagged, and pinning `main` to a vendor revision is what D58 rules out. Revisit when Anthropic tags a Beta 5-compatible release.
 
 ### M9 — README, ADR-001, tag `0.1.0`
 DoD-3/4/5.
@@ -338,13 +339,13 @@ Cut from the *top* first; never cross the "never cut" line.
 | G8 demo app + one-line provider swap | M6, M8 |
 | G9 conversation index | M4, M5 |
 
-| DoD | Milestone |
-|-----|-----------|
-| 1 kill-mid-stream GIF, partial-as-branch | M8 |
-| 2 one-line provider swap | M6, M8 |
-| 3 crash-fuzz + chaos + hostile + P1–P3 green | M3, M4, M7, M9 |
-| 4 README with "why not the transcript blob?" | M9 |
-| 5 tagged `0.1.0`, ADR-001 committed | M9 |
+| DoD | Milestone | |
+|-----|-----------|---|
+| 1 kill-mid-stream GIF, partial-as-branch | M8 | ✅ **2026-08-31** — `assets/dod1.gif` |
+| 2 one-line provider swap | M6, M8 | ✅ **2026-09-05** — `assets/dod2.gif`, three providers |
+| 3 crash-fuzz + chaos + hostile + P1–P3 green | M3, M4, M7, M9 | green; M9 re-confirms at the tag |
+| 4 README with "why not the transcript blob?" | M9 | ☐ |
+| 5 tagged `0.1.0`, ADR-001 committed | M9 | ☐ |
 
 ---
 
@@ -353,6 +354,9 @@ Cut from the *top* first; never cross the "never cut" line.
 ```
 M0 → M1 → M2 ─┬─ M3 (interleaves with M2)
               └─ M4 → M5 → M6 → M7 → M8 → M9
+                                            ▲    ▲
+                                            │    └── next
+                                            └── done 2026-09-05
 ```
 
 M3 runs *alongside* M2 (the corpus is how you know the reducer is right). M6 is the schedule risk — it's the only milestone the betas can re-open, which is exactly why everything cheap and certain sits in front of it.
