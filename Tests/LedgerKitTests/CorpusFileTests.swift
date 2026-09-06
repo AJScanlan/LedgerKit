@@ -10,7 +10,7 @@ import Testing
 //            degraded outcomes). Never regenerated; only their dumps are.
 //   frozen/  empty until 0.1.0, and a diff is *always* a failure afterwards.
 //
-// Regenerate with:  LEDGERKIT_RECORD=1 swift test --package-path LedgerKit
+// Regenerate with:  LEDGERKIT_RECORD=1 swift test
 
 @Suite("Corpus — on-disk fixtures")
 struct CorpusFileTests {

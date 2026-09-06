@@ -2,10 +2,7 @@
 <Workspace
    version = "1.0">
    <FileRef
-      location = "group:LedgerKit">
-   </FileRef>
-   <FileRef
-      location = "group:Understudy">
+      location = "group:">
    </FileRef>
    <FileRef
       location = "group:Projection/Projection.xcodeproj">

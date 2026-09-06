@@ -66,3 +66,12 @@ fastlane/test_output
 
 # XcodeBuildMCP: pins a machine-specific simulatorId; each machine sets its own.
 .xcodebuildmcp/
+
+# Swift Package Manager, at the repo root since M9's D61 consolidated the two
+# sub-packages. `.swiftpm/xcode/xcshareddata/xcschemes/` is deliberately TRACKED —
+# it is what gives `xcodebuild -scheme LedgerKit` something to find — so this
+# ignores the per-machine siblings rather than the whole directory. Carried
+# forward from the deleted `Understudy/.gitignore`, which owned these rules while
+# that package had its own root.
+.swiftpm/configuration/
+.swiftpm/xcode/package.xcworkspace/

@@ -83,11 +83,11 @@ jobs:
           xcodebuild -version
           echo "macOS SDK $(xcrun --show-sdk-version --sdk macosx) build $(xcrun --show-sdk-build-version --sdk macosx)"
 
-      - name: LedgerKit
-        run: swift test --package-path LedgerKit
-
-      - name: Understudy
-        run: swift test --package-path Understudy
+      # **One invocation since M9's D61**, where this was two. The repo root is
+      # now a single package vending both products, so `swift test` runs
+      # `LedgerKitTests` and `UnderstudyTests` together — 436 + 23.
+      - name: Both suites
+        run: swift test
 
   # ──────────────────────────────────────────────────────────────────────────
   # Tier 2: the same suite on an iOS 27 runtime, where the `.enabled(if:)` tests

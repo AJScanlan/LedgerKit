@@ -8,7 +8,7 @@ evolution safety net that makes the permanent `Payload` encoding survivable.
 Run by `CorpusFileTests`. Regenerate with:
 
 ```bash
-LEDGERKIT_RECORD=1 swift test --package-path LedgerKit
+LEDGERKIT_RECORD=1 swift test
 ```
 
 ## Three directories, three contracts
@@ -138,7 +138,7 @@ touched again:
 
 ```bash
 git switch --detach v0.1.0
-LEDGERKIT_RECORD=1 swift test --package-path LedgerKit   # confirm dev/ is clean at the tag
+LEDGERKIT_RECORD=1 swift test   # confirm dev/ is clean at the tag
 cp -R Tests/LedgerKitTests/Corpus/dev Tests/LedgerKitTests/Corpus/frozen/0.1.0
 ```
 

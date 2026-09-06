@@ -611,21 +611,58 @@ carried out of this phase.
 **Goal:** the repo is consumable and the public API is the one `0.1.0` will carry.
 Ordered so each step's tests run against the previous step's layout.
 
-- [ ] **D61 — root `Package.swift`.** Move `LedgerKit/Sources/LedgerKit` →
-      `Sources/LedgerKit`, `Understudy/Sources/Understudy` → `Sources/Understudy`, tests
-      likewise; delete the two manifests; write the root one (products `LedgerKit`,
+- [x] **D61 — root `Package.swift`. Landed 2026-09-06.** Sources, tests and both
+      `.swiftpm` shared schemes moved to the repo root via `git mv` (118 renames); the two
+      sub-manifests deleted; the root manifest written (products `LedgerKit`,
       `Understudy`; GRDB `from: "7.9.0"`; resources `Corpus`, `Registry`;
-      `swiftLanguageModes: [.v6]`; floors 26). Re-point the workspace and the app's
-      `packageProductDependencies` (treat `project.pbxproj` as load-bearing; back it up).
-      Fix the three path constants (§2). **Verify `ImportBoundaryTests` still *runs*** by
-      temporarily adding `import FoundationModels` to a `Core/` file and watching it
-      fail — a skipped suite after a layout move is exactly D36's dormancy.
-      Add the `Understudy`-must-not-import-LedgerKit sibling test. `swift test` at the
-      root runs both targets; record the count (expect 457 + the new test).
-- [ ] **D61 — consumability proof.** From a throwaway package *outside* the repo,
-      `.package(path:)` at the repo root and import both products; then, after the tag,
-      repeat with `.package(url:from:)`. The first is Phase 2's gate; the second is
-      Phase 4's.
+      `swiftLanguageModes: [.v6]`; floors 26). **`swift test` at the root runs both
+      targets: 436 + 23 = 459** (434 + the two new boundary tests).
+  - **The workspace needed one line, not surgery.** `location = "group:"` — an *empty*
+    location meaning the workspace's own directory — restores the `LedgerKit` and
+    `Understudy` schemes against a root-level manifest. Recorded because it is not
+    guessable and the two obvious spellings (`group:.`, the old `group:LedgerKit`) are
+    wrong.
+  - ⚠️ **The app's hand-patched `packageProductDependencies` needed *no* edit at all** —
+    `project.pbxproj` was untouched by D61. Those entries carry a bare `productName` and
+    resolve against whatever the workspace provides, so vending the same two product
+    names from one package satisfied them unchanged. M7/M8 handoff 1 listed this as the
+    third thing leaning on the packaging decision; it turned out to lean on the *product
+    names*, which did not move. `xcodebuild … -scheme Projection build` →
+    `** BUILD SUCCEEDED **`.
+  - **The three path constants: one moved, two did not.** `ImportBoundaryTests`' three
+    `deletingLastPathComponent()`s still land on the package root — the file's depth
+    below its package never changed — and `CorpusFile.source`'s `#filePath` is
+    file-relative, verified by `LEDGERKIT_RECORD=1 swift test` writing **zero** content
+    changes. Only the FM-confinement *scope* moved (below).
+  - ⚠️ **`ImportBoundaryTests` failed on the first run after the move, and it was right
+    to.** `Sources/` now holds `Understudy`, whose `ScriptedLanguageModel` imports
+    Foundation Models **legitimately** (M3's D11: conform to Apple's real protocols, not
+    an imitation). The confinement rule was always *LedgerKit's*, so the walk is now
+    scoped to `Sources/LedgerKit` — a rule that has to be re-read to be applied to a
+    sibling product was never stated precisely enough.
+  - **Dormancy checked rather than assumed** (D36). Three mutations, and one gave a
+    result worth keeping: `import FoundationModels` in `Core/` fails the suite ✓;
+    `"LedgerKit"` in Understudy's manifest dependencies fails it ✓; but `import
+    LedgerKit` in `Sources/Understudy` **alone** fails the *build*
+    (`unable to resolve module dependency`), so no test runs — which proves the
+    manifest's claim and raises the dormancy question directly. Answered: the realistic
+    violation (manifest dependency **and** import, because somebody wires the dependency
+    in order to write the import) fails **both** tests. Neither is dormant.
+  - Simulator tier: the `LedgerKit` scheme now tests **both** targets, so one
+    `xcodebuild test` runs the whole suite on iOS exactly as `swift test` does on the
+    host — **436 + 23, `TEST SUCCEEDED`**. That is the iOS-tier half of D61's
+    one-command collapse; CI's two `swift test` steps become one in the same spirit.
+- [x] **D61 — consumability proof (path form). Passes.** A throwaway package *outside*
+      the repo declares `.package(path: "/Users/aj/LedgerKit")` and imports **both**
+      products from that one dependency — `ConversationStore`, `ModelDescriptor` and
+      `Script` all resolve, GRDB resolves transitively, `Build complete`. The
+      `.package(url:from: "0.1.0")` form is Phase 4's gate.
+
+      ⚠️ Worth noting how the first attempt failed, because it is evidence *for* D61
+      rather than against: the build got all the way through resolution and both imports,
+      and stopped on `extraneous argument label 'steps:'` — my probe calling
+      `Script(steps:)` where the initializer is `Script(_:)`. Everything D61 changed
+      worked; the only broken thing was the test I wrote to check it.
 - [ ] **D62 — rename. Phase 0 said so; this is not conditional any more.**
       `GenerationID` → `GenerationAttemptID`; `Message.generationID` → `attemptID`;
       **`Payload` case labels stay `generation:`** and **`CodingKeys` stay
