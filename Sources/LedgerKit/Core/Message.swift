@@ -3,34 +3,38 @@ import Foundation
 /// One node of the message tree — derived state, rebuilt by folding the log
 /// (SPEC §6.2). Not `Codable`: the snapshot schema is `FoldedState` (M2/§9),
 /// never these types directly.
+/// Every stored property is `public internal(set)` — read-only to consumers
+/// (M9-PLAN D63); see ``Conversation`` for the reasoning and for why it is
+/// `internal(set)` rather than `private(set)`. ``state`` is the one the module
+/// actually mutates, through ``MessageTree/updateStates(_:)``.
 public struct Message: Sendable, Identifiable, Equatable {
-    public var id: MessageID
-    public var role: Role
+    public internal(set) var id: MessageID
+    public internal(set) var role: Role
     /// Assistant only — I7 binds this 1:1 with `id`.
     ///
     /// Surfaced publicly because the folded layer requires it regardless (it is
     /// how a snapshot resume rebuilds the generation→message routing map), so
     /// projecting it costs nothing and makes a log dump legible by eye.
-    public var attemptID: GenerationAttemptID?
+    public internal(set) var attemptID: GenerationAttemptID?
     /// `nil` ⇒ root-level (child of the virtual root, I6).
-    public var parent: MessageID?
+    public internal(set) var parent: MessageID?
     /// Sibling order = sequence order (SPEC §6.4).
-    public var children: [MessageID]
+    public internal(set) var children: [MessageID]
     /// User messages: always `.complete`.
-    public var state: MessageState
+    public internal(set) var state: MessageState
     /// Assistant only — the *requested* descriptor from `generationStarted`
     /// (SPEC §7.8).
-    public var model: ModelDescriptor?
+    public internal(set) var model: ModelDescriptor?
     /// Assistant only — from `Outcome.completed` (SPEC §7.7); nil otherwise.
-    public var stopInfo: StopInfo?
+    public internal(set) var stopInfo: StopInfo?
     /// Assistant only; sequence order.
-    public var toolRecords: [ToolRecord]
+    public internal(set) var toolRecords: [ToolRecord]
     /// The originating event's envelope timestamp. Display/audit only.
-    public var timestamp: Date
+    public internal(set) var timestamp: Date
     /// The terminal event's envelope timestamp; nil while open and for
     /// `.interrupted` (no terminal exists — I5). Gives
     /// `rateLimited(retryAfter:)` its display instant (SPEC §8).
-    public var terminalTimestamp: Date?
+    public internal(set) var terminalTimestamp: Date?
 
     /// Reducer-side assembly. **Internal on purpose (M4 Phase 0):** this
     /// initializer can express states the domain forbids — a `.user` message

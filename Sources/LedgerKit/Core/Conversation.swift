@@ -3,18 +3,38 @@ import Foundation
 /// A conversation's fully reduced state (SPEC §6.2) — the output of
 /// `classify(fold(log), mapping)`. Derived and rebuildable; the log is the
 /// truth.
+///
+/// ## Read-only to consumers (M9-PLAN D63)
+///
+/// Every stored property here — and on ``Message``, ``QuarantinedEvent`` and
+/// `ConversationSummary` — is `public internal(set)`. M4 Phase 0 made these types
+/// constructible **only** by reducing a log, and then left them mutable
+/// afterwards, so a consumer could still write `message.state = .streaming(…)` —
+/// a state no fold produces — through the back door the internal initializers had
+/// just closed. Tenet 1 says illegal states should be unrepresentable rather than
+/// merely undocumented, and half a door is not a door.
+///
+/// **`internal(set)` rather than `private(set)`, and the tests are why.** The
+/// module legitimately mutates: `overlay(_:live:)` rewrites states through
+/// `MessageTree/updateStates(_:)` from another file, and the test target builds
+/// *deliberately wrong* projections to prove P2's predicates are not vacuous.
+/// `private(set)` was tried and broke both. The invariant that matters is
+/// "consumers cannot forge derived state", which is exactly what `internal(set)`
+/// says — verified from outside the package, where
+/// `message.state = .streaming(partial:)` now fails with *setter is
+/// inaccessible*.
 public struct Conversation: Sendable, Identifiable, Equatable {
-    public var id: ConversationID
-    public var title: String?
+    public internal(set) var id: ConversationID
+    public internal(set) var title: String?
     /// Latest `instructionsChanged`; nil if never set.
-    public var instructions: String?
-    public var messages: MessageTree
+    public internal(set) var instructions: String?
+    public internal(set) var messages: MessageTree
     /// Root-level node → endpoint, the "visible" thread. The virtual root is
     /// excluded — it is not a message (I6).
-    public var activePath: [MessageID]
+    public internal(set) var activePath: [MessageID]
     /// Quarantine residue (SPEC §6.6); empty on healthy logs. For logging and
     /// debug surfaces, not user-facing by default.
-    public var diagnostics: [QuarantinedEvent]
+    public internal(set) var diagnostics: [QuarantinedEvent]
 
     /// The visible thread, resolved to messages in path order (root-level
     /// node → endpoint). Non-optional per node on purpose: I6 plus the
@@ -57,15 +77,15 @@ public struct Conversation: Sendable, Identifiable, Equatable {
 /// `Codable` for the snapshot path only — snapshots must persist accumulated
 /// diagnostics or reduced state would depend on snapshot timing (SPEC §9, P3).
 public struct QuarantinedEvent: Sendable, Equatable, Codable {
-    public var sequence: Int64
+    public internal(set) var sequence: Int64
     /// `nil` if the row was undecodable at the envelope level (§6.6 row 1), or
     /// for a sequence-gap diagnostic (one per contiguous gap, SPEC §6.1). Every
     /// other row carries identity — see §6.6 "Diagnostic identity."
-    public var eventID: EventID?
+    public internal(set) var eventID: EventID?
     /// Typed rather than a bare `String`, so §6.6's inventory is
     /// compiler-checked and fixtures assert cases instead of prose ADR-001
     /// declares non-contractual. The rendered sentence is `description`.
-    public var reason: QuarantineReason
+    public internal(set) var reason: QuarantineReason
 
     /// Reducer-side assembly. **Internal on purpose (M4 Phase 0):** diagnostics
     /// are the reducer's account of what it skipped, and a consumer-fabricated

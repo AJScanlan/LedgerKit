@@ -75,10 +75,10 @@ public struct PersistenceConfiguration: Sendable {
 /// `lastEventAt` reads "last *meaningful* event" — which is what a list
 /// sorts by anyway.
 public struct ConversationSummary: Sendable, Identifiable, Equatable {
-    public var id: ConversationID
-    public var createdAt: Date
-    public var title: String?
-    public var lastEventAt: Date
+    public internal(set) var id: ConversationID
+    public internal(set) var createdAt: Date
+    public internal(set) var title: String?
+    public internal(set) var lastEventAt: Date
 
     /// Store-side assembly. **Internal on purpose (M4 Phase 0):** this is a read
     /// model, so the store is the only thing entitled to mint one — a
