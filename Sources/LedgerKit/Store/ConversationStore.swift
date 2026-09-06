@@ -92,7 +92,7 @@ public actor ConversationStore {
         /// ``cancelGeneration(in:)`` cancels and what ``deleteConversation(_:)``
         /// waits on; a generation the store cannot reach is one the stop button
         /// cannot stop and the delete cannot sequence behind.
-        case running(generation: GenerationID, task: Task<Outcome, Error>)
+        case running(generation: GenerationAttemptID, task: Task<Outcome, Error>)
     }
 
     /// Accumulates stream text until the flush policy says it is worth a
@@ -184,7 +184,7 @@ public actor ConversationStore {
     /// (D50.1). The entry's whole purpose is to describe something still running,
     /// so an exit that left one behind would leak a partial for a dead generation —
     /// which is what the abandon path did until M8 Phase 1.
-    private var shownPartials: [GenerationID: String] = [:]
+    private var shownPartials: [GenerationAttemptID: String] = [:]
     /// Live notification sinks, keyed by subscription token (D38).
     ///
     /// A fan-out list rather than one shared stream because `AsyncStream` has a
@@ -482,7 +482,7 @@ public actor ConversationStore {
     /// This conversation's running generations. At most one in v0.1 (§6.5's
     /// single-flight), which is store *policy* — the log and the overlay both
     /// tolerate more, so nothing here assumes a count.
-    private func liveGenerations(in conversation: ConversationID) -> [GenerationID] {
+    private func liveGenerations(in conversation: ConversationID) -> [GenerationAttemptID] {
         if case .running(let generation, _) = live[conversation] { [generation] } else { [] }
     }
 
@@ -908,7 +908,7 @@ public actor ConversationStore {
     private func confirm(
         _ conversation: ConversationID,
         running task: Task<Outcome, Error>,
-        as generation: GenerationID
+        as generation: GenerationAttemptID
     ) -> Bool {
         let cancelledEarly = if case .reserved(true) = live[conversation] { true } else { false }
         live[conversation] = .running(generation: generation, task: task)
@@ -966,17 +966,17 @@ public actor ConversationStore {
     /// held.** That is the mutation-response rule — when a mutation cannot be
     /// caught, re-derive the property that would break and test *that*, rather
     /// than weakening the claim.
-    var generationsWithShownPartials: Set<GenerationID> { Set(shownPartials.keys) }
+    var generationsWithShownPartials: Set<GenerationAttemptID> { Set(shownPartials.keys) }
 
     /// The generations currently in flight — **M7's `overlay_live` input**, and
     /// P2's third clause: the live set is always a subset of *open* (started,
     /// un-terminated) generations.
     ///
-    /// Keyed by `GenerationID` rather than by conversation because that is what
+    /// Keyed by `GenerationAttemptID` rather than by conversation because that is what
     /// the overlay maps over: `.interrupted → .streaming` for exactly these. A
     /// reservation that has not started yet contributes nothing — there is no
     /// generation in the log to overlay.
-    var liveGenerations: Set<GenerationID> {
+    var liveGenerations: Set<GenerationAttemptID> {
         Set(live.values.compactMap { reservation in
             if case .running(let generation, _) = reservation { generation } else { nil }
         })
@@ -1023,7 +1023,7 @@ public actor ConversationStore {
         movingPath: Bool,
         using driver: some GenerationDriving
     ) async throws -> Outcome {
-        let generation = identifiers.makeGenerationID()
+        let generation = identifiers.makeGenerationAttemptID()
         let assistant = identifiers.makeMessageID()
 
         var records = leading
@@ -1069,7 +1069,7 @@ public actor ConversationStore {
     /// the slot that owns it — the reservation cannot be confirmed before the
     /// handle exists, and the handle must not outlive the confirmation.
     private func run(
-        _ generation: GenerationID,
+        _ generation: GenerationAttemptID,
         from parent: MessageID,
         in conversation: ConversationID,
         using driver: some GenerationDriving
@@ -1119,7 +1119,7 @@ public actor ConversationStore {
     /// choice — the unflushed tail is exactly what a crash costs, and losing it
     /// at the very end would lose a *completed* generation's last words.
     private func drive(
-        _ generation: GenerationID,
+        _ generation: GenerationAttemptID,
         from parent: MessageID,
         in conversation: ConversationID,
         using driver: some GenerationDriving
@@ -1165,7 +1165,7 @@ public actor ConversationStore {
     /// *abandoned* — an abandoned generation and a running one both reduce
     /// `.interrupted` (I5) — but base **plus live set** can, and that conjunction
     /// is exactly what the re-pull reads.
-    private func abandon(_ generation: GenerationID, in conversation: ConversationID) {
+    private func abandon(_ generation: GenerationAttemptID, in conversation: ConversationID) {
         shownPartials[generation] = nil
         notify(.changed(conversation))
     }
@@ -1179,7 +1179,7 @@ public actor ConversationStore {
     /// couldn't-record; every `return` is the one terminal §7.9 makes the type's
     /// grammar.
     private func runToTerminal(
-        _ generation: GenerationID,
+        _ generation: GenerationAttemptID,
         from parent: MessageID,
         in conversation: ConversationID,
         using driver: some GenerationDriving
@@ -1272,7 +1272,7 @@ public actor ConversationStore {
     /// that could drift: the flush-before-terminal rule (§7.4) is not a policy
     /// choice, so it must not be a thing a second caller can forget.
     private func windDown(
-        _ generation: GenerationID,
+        _ generation: GenerationAttemptID,
         in conversation: ConversationID,
         flushing pending: String?,
         as outcome: Outcome
@@ -1330,7 +1330,7 @@ public actor ConversationStore {
     /// so a failed flush leaves its text pending rather than dropping it.
     private func consume(
         _ signals: AsyncStream<GenerationSignal>,
-        of generation: GenerationID,
+        of generation: GenerationAttemptID,
         in conversation: ConversationID
     ) async -> (pending: String?, failure: (any Error)?) {
         var buffer = DeltaBuffer(policy: deltaFlush)
@@ -1535,7 +1535,7 @@ protocol IdentifierSource: Sendable {
     mutating func makeEventID() -> EventID
     mutating func makeConversationID() -> ConversationID
     mutating func makeMessageID() -> MessageID
-    mutating func makeGenerationID() -> GenerationID
+    mutating func makeGenerationAttemptID() -> GenerationAttemptID
 }
 
 extension IDGenerator: IdentifierSource {}

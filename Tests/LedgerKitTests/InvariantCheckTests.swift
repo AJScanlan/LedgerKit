@@ -23,7 +23,7 @@ struct InvariantCheckTests {
     private func node(
         _ id: MessageID,
         role: Role = .user,
-        generationID: GenerationID? = nil,
+        attemptID: GenerationAttemptID? = nil,
         parent: MessageID? = nil,
         children: [MessageID] = [],
         state: FoldedMessageState = .complete(MessageContent(text: "x")),
@@ -33,7 +33,7 @@ struct InvariantCheckTests {
         FoldedMessage(
             id: id,
             role: role,
-            generationID: generationID,
+            attemptID: attemptID,
             parent: parent,
             children: children,
             state: state,
@@ -101,8 +101,8 @@ struct InvariantCheckTests {
     @Test("I7 and §6.2: role-scoped and lifecycle field corruption is detected")
     func fieldCorruption() {
         expectDetected(
-            healthy(messages: [node(Fix.userA, generationID: Fix.genA)]),
-            "a user message carrying a generationID — the back door I7 closes"
+            healthy(messages: [node(Fix.userA, attemptID: Fix.genA)]),
+            "a user message carrying a attemptID — the back door I7 closes"
         )
         expectDetected(
             healthy(messages: [node(Fix.userA, stopInfo: Fix.stopInfo)]),
@@ -114,21 +114,21 @@ struct InvariantCheckTests {
         )
         expectDetected(
             healthy(messages: [
-                node(Fix.userA, role: .assistant, generationID: Fix.genA, state: .cancelled(partial: "x"), stopInfo: Fix.stopInfo)
+                node(Fix.userA, role: .assistant, attemptID: Fix.genA, state: .cancelled(partial: "x"), stopInfo: Fix.stopInfo)
             ]),
             "stopInfo on a non-completed generation"
         )
         expectDetected(
             healthy(messages: [
-                node(Fix.userA, role: .assistant, generationID: Fix.genA, state: .open(partial: ""), terminalTimestamp: Self.stamp)
+                node(Fix.userA, role: .assistant, attemptID: Fix.genA, state: .open(partial: ""), terminalTimestamp: Self.stamp)
             ]),
             "an open generation carrying a terminal timestamp"
         )
         expectDetected(
             healthy(
                 messages: [
-                    node(Fix.userA, role: .assistant, generationID: Fix.genA),
-                    node(Fix.userB, role: .assistant, generationID: Fix.genA, parent: Fix.userA),
+                    node(Fix.userA, role: .assistant, attemptID: Fix.genA),
+                    node(Fix.userB, role: .assistant, attemptID: Fix.genA, parent: Fix.userA),
                 ],
                 rootChildren: [Fix.userA]
             ),
@@ -160,7 +160,7 @@ struct InvariantCheckTests {
     @Test("§6.3: fold → classify correspondence corruption is detected")
     func classificationCorruption() {
         let folded = healthy(messages: [
-            node(Fix.userA, role: .assistant, generationID: Fix.genA, state: .open(partial: "half"))
+            node(Fix.userA, role: .assistant, attemptID: Fix.genA, state: .open(partial: "half"))
         ])
 
         let faithful = classify(folded, mapping: .default)
@@ -188,7 +188,7 @@ struct InvariantCheckTests {
         let streaming = Message(
             id: Fix.userA,
             role: .assistant,
-            generationID: Fix.genA,
+            attemptID: Fix.genA,
             state: .streaming(partial: "half"),
             timestamp: Self.stamp
         )

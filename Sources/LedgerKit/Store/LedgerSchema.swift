@@ -37,5 +37,16 @@ enum LedgerSchema {
     /// `undecodablePayload(kind:)` changed the synthesized snapshot encoding of
     /// diagnostics. Old checkpoints would discard on decode failure anyway;
     /// bumping makes the discard deterministic rather than incidental.
-    static let reducerVersion = 2
+    ///
+    /// 3: M9's D62 renamed `FoldedMessage.generationID` → `attemptID`, and the
+    /// folded layer's `Codable` is **synthesized from property names**, so the
+    /// snapshot encoding moved with it. Exactly the M4 shape, one milestone on,
+    /// and the same reasoning applies: a rename that reads as cosmetic in the
+    /// source is a schema change on disk. ⚠️ **`payloadVersion` deliberately did
+    /// *not* move** — the wire's field key is still `generationID` (ADR-001 R-2
+    /// keys are permanent), and `Registry/tags.json` is byte-identical across
+    /// this change, which is the proof that renaming a Swift type reached no
+    /// encoding. Two versions, opposite directions, one edit touching one of
+    /// them: that is why they were never merged.
+    static let reducerVersion = 3
 }

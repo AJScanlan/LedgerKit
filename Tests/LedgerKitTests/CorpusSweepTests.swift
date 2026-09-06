@@ -70,7 +70,7 @@ struct CorpusSweepTests {
     func resumeAtEverySplit() {
         // The snapshot fast-path is a second reduction path, and rev 3 shipped it
         // untested. Every split is a different reconstruction of the routing map
-        // from `FoldedMessage.generationID`, including splits that land
+        // from `FoldedMessage.attemptID`, including splits that land
         // mid-generation and splits that straddle an interior gap.
         for fixture in Corpus.all {
             let whole = fixture.log.folded()
@@ -184,10 +184,10 @@ struct CrashFuzzTests {
                 let rows = Array(fixture.log.rows.prefix(length))
                 let conversation = Conversation(reducing: rows, loadedFrom: fixture.log.conversation)
 
-                var message: [GenerationID: MessageID] = [:]
-                var partial: [GenerationID: String] = [:]
-                var terminated: Set<GenerationID> = []
-                var order: [GenerationID] = []
+                var message: [GenerationAttemptID: MessageID] = [:]
+                var partial: [GenerationAttemptID: String] = [:]
+                var terminated: Set<GenerationAttemptID> = []
+                var order: [GenerationAttemptID] = []
 
                 for row in rows {
                     guard case .decoded(let event) = row else { continue }

@@ -75,7 +75,7 @@ public final class ConversationProjection {
     /// Internal for ``folded``'s reason — P2's `overlaying:` argument.
     private(set) var classified: Conversation
     /// The folded layer beneath it — needed to route a generation to its message
-    /// when pruning the live set, which is a *folded* property (`generationID`).
+    /// when pruning the live set, which is a *folded* property (`attemptID`).
     ///
     /// Internal rather than private for `ConversationStore.liveGenerations`' reason:
     /// it exists to be **observed**. P2's predicate takes `foldedFrom:` and `live:`,
@@ -83,7 +83,7 @@ public final class ConversationProjection {
     /// from — reading them back off the store instead would check a different pair
     /// and quietly stop testing the projection.
     private(set) var folded: FoldedState
-    private var messageForGeneration: [GenerationID: MessageID] = [:]
+    private var messageForGeneration: [GenerationAttemptID: MessageID] = [:]
     /// What the store says is streaming, keyed by generation, each value the **whole**
     /// partial (D47). Never accumulated here — assigned.
     ///
@@ -268,7 +268,7 @@ public final class ConversationProjection {
     /// **append-only** (§7.3 — `deltaAppended` cannot express anything else), so of
     /// two values for one generation the longer is always the later. UTF-8 count
     /// rather than `Character` count, matching `SnapshotDiff`'s rule one seam over.
-    private func record(_ partial: String, for generation: GenerationID) {
+    private func record(_ partial: String, for generation: GenerationAttemptID) {
         guard partial.utf8.count >= (live[generation]?.utf8.count ?? 0) else { return }
         live[generation] = partial
     }
@@ -323,7 +323,7 @@ public final class ConversationProjection {
     private static func reconciled(
         _ live: LiveSet,
         with storeLive: LiveSet,
-        routing: [GenerationID: MessageID],
+        routing: [GenerationAttemptID: MessageID],
         against classified: Conversation
     ) -> LiveSet {
         live.filter { generation, _ in
@@ -367,10 +367,10 @@ public final class ConversationProjection {
     /// Generation → message, from the **folded** layer.
     ///
     /// `static` so the initializer can call it before `self` is fully formed.
-    private static func routing(in state: FoldedState) -> [GenerationID: MessageID] {
-        var routing: [GenerationID: MessageID] = [:]
+    private static func routing(in state: FoldedState) -> [GenerationAttemptID: MessageID] {
+        var routing: [GenerationAttemptID: MessageID] = [:]
         for message in state.messages.values {
-            guard let generation = message.generationID else { continue }
+            guard let generation = message.attemptID else { continue }
             routing[generation] = message.id
         }
         return routing

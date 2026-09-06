@@ -148,7 +148,7 @@ public struct GenerationRequest: Sendable {
 
     /// Store-side assembly (see the type note).
     ///
-    /// Deliberately carries no `GenerationID`: the store stamps identity onto
+    /// Deliberately carries no `GenerationAttemptID`: the store stamps identity onto
     /// every event it writes, so a driver has nothing to correlate and giving it
     /// the ID would invite it to try.
     init(conversation: ConversationID, instructions: String?, context: [Message]) {

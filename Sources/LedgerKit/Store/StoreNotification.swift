@@ -48,7 +48,7 @@ enum StoreNotification: Sendable, Equatable {
 
     /// A live generation's shown partial advanced to `partial` — **the whole
     /// partial**, not the new suffix (D47).
-    case delta(conversation: ConversationID, generation: GenerationID, partial: String)
+    case delta(conversation: ConversationID, generation: GenerationAttemptID, partial: String)
 
     /// A non-delta event landed. The reader should re-read; this deliberately does
     /// not say *what* changed, because the answer is always "re-reduce", and a

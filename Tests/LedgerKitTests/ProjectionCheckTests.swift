@@ -67,9 +67,9 @@ struct ProjectionEquivalenceTests {
         let classified = classify(folded, mapping: .default)
 
         let ids = folded.messages.keys.sorted { "\($0)" < "\($1)" }
-        var generationOf: [MessageID: GenerationID] = [:]
+        var generationOf: [MessageID: GenerationAttemptID] = [:]
         for id in ids {
-            generationOf[id] = folded.messages[id]?.generationID
+            generationOf[id] = folded.messages[id]?.attemptID
         }
 
         // `genA` is the abandoned generation — started, never terminated — so it is
@@ -132,7 +132,7 @@ struct ProjectionCheckTests {
         let (folded, classified, ids) = fixture
         let live: LiveSet = [Fix.genA: "A valley fol"]
         let projected = mappingStates(of: classified, ids: ids) { message in
-            message.generationID == Fix.genA ? .streaming(partial: "A valley") : message.state
+            message.attemptID == Fix.genA ? .streaming(partial: "A valley") : message.state
         }
 
         let problems = projectionProblems(in: projected, overlaying: classified, foldedFrom: folded, live: live)
@@ -147,7 +147,7 @@ struct ProjectionCheckTests {
         let (folded, classified, ids) = fixture
         let live: LiveSet = [Fix.genB: "A valley fold brings the paper down."]
         let projected = mappingStates(of: classified, ids: ids) { message in
-            message.generationID == Fix.genB ? .streaming(partial: live[Fix.genB] ?? "") : message.state
+            message.attemptID == Fix.genB ? .streaming(partial: live[Fix.genB] ?? "") : message.state
         }
 
         let problems = projectionProblems(in: projected, overlaying: classified, foldedFrom: folded, live: live)

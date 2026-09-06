@@ -84,7 +84,7 @@ struct AllocateOnceTests {
         let survivor = state.messages[Fix.assistantA]
         #expect(survivor?.state == .open(partial: "half an answer"))
         #expect(survivor?.role == .assistant, "the in-flight node must not have become user-authored")
-        #expect(survivor?.generationID == Fix.genA, "and it must still be routable for the rest of the stream")
+        #expect(survivor?.attemptID == Fix.genA, "and it must still be routable for the rest of the stream")
     }
 }
 

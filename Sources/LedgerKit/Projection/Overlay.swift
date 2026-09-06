@@ -36,7 +36,7 @@ import Foundation
 /// A dictionary because the overlay is a **keyed lookup**, never an iteration into
 /// output — the I1 hazard, which does not stop being a hazard on the projection
 /// side of the seam.
-typealias LiveSet = [GenerationID: String]
+typealias LiveSet = [GenerationAttemptID: String]
 
 /// Applies liveness to a classified conversation — §6.3's `overlay_live`.
 ///
@@ -46,7 +46,7 @@ typealias LiveSet = [GenerationID: String]
 /// `classify` already drop the pipeline notation around them; `live:` carries it at
 /// every call site.
 ///
-/// **What it does, exhaustively:** for a message whose `generationID` is in `live`,
+/// **What it does, exhaustively:** for a message whose `attemptID` is in `live`,
 /// replace its state with `.streaming(partial:)` carrying that entry's value.
 /// Everything else — every other message, and everything on the conversation that
 /// is not a message state — passes through untouched. `.streaming` exists *only*
@@ -70,7 +70,7 @@ nonisolated func overlay(_ classified: Conversation, live: LiveSet) -> Conversat
         // reverse. Iterating `live` would put a dictionary's order in charge of
         // which message is visited first, and Swift's hasher seed varies per
         // process (the I1 leak `Reduce/` is forbidden from).
-        guard let generation = message.generationID, let partial = live[generation] else { return nil }
+        guard let generation = message.attemptID, let partial = live[generation] else { return nil }
 
         // **Flipped unconditionally, not only from `.interrupted`** — and the
         // choice is about diagnostics rather than defence.

@@ -90,13 +90,13 @@ extension Conversation {
 extension Message {
 
     /// Projects a folded node. Everything but `state` passes through unchanged —
-    /// including `generationID`, which the folded layer needed for delta routing
+    /// including `attemptID`, which the folded layer needed for delta routing
     /// and which is worth surfacing for audit.
     init(_ folded: FoldedMessage, mapping: RecoverabilityMapping) {
         self.init(
             id: folded.id,
             role: folded.role,
-            generationID: folded.generationID,
+            attemptID: folded.attemptID,
             parent: folded.parent,
             children: folded.children,
             state: MessageState(folded.state, mapping: mapping),

@@ -64,9 +64,9 @@ struct ScriptedIdentifiers: IdentifierSource {
         return MessageID(uuid(messages))
     }
 
-    mutating func makeGenerationID() -> GenerationID {
+    mutating func makeGenerationAttemptID() -> GenerationAttemptID {
         generations += 1
-        return GenerationID(uuid(generations))
+        return GenerationAttemptID(uuid(generations))
     }
 }
 

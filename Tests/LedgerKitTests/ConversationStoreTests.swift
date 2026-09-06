@@ -1745,8 +1745,8 @@ struct StoreChaosTests {
     private func openGenerations(
         of conversation: ConversationID,
         in backing: any PersistenceStore
-    ) async throws -> Set<GenerationID> {
-        var started: Set<GenerationID> = []
+    ) async throws -> Set<GenerationAttemptID> {
+        var started: Set<GenerationAttemptID> = []
         for row in try await backing.events(in: conversation, from: 1) {
             guard case .decoded(let event) = row else { continue }
             switch event.payload {

@@ -94,9 +94,9 @@ public enum QuarantineReason: Sendable, Hashable, Codable {
 
     // MARK: Generation scope (rows 8–10)
 
-    /// Row 8 — this `GenerationID` has already been used. Reuse stays invalid
+    /// Row 8 — this `GenerationAttemptID` has already been used. Reuse stays invalid
     /// after termination: the binding is permanent, not merely current.
-    case generationIDAlreadyUsed(GenerationID)
+    case generationIDAlreadyUsed(GenerationAttemptID)
 
     /// Row 9 — a delta, tool record, **or terminal** naming a generation that
     /// never started. The terminal belongs here rather than under row 10:
@@ -104,15 +104,15 @@ public enum QuarantineReason: Sendable, Hashable, Codable {
     /// rev 5 widened this row precisely because the first-and-only terminal of
     /// an orphaned generation previously fell outside the inventory the
     /// cascade prose claimed contained it.
-    case unknownGeneration(GenerationID)
+    case unknownGeneration(GenerationAttemptID)
 
     /// Row 9 — a delta or tool record after the generation's terminal. A
     /// terminal message's content *and* audit trail are immutable (I4).
-    case generationAlreadyTerminated(GenerationID)
+    case generationAlreadyTerminated(GenerationAttemptID)
 
     /// Row 10 — a second `generationEnded` for one generation (I3). A cancel
     /// racing a natural terminal lands here, benignly: first append wins.
-    case duplicateTerminal(GenerationID)
+    case duplicateTerminal(GenerationAttemptID)
 
     // MARK: Path (row 12)
 

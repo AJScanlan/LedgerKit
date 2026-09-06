@@ -72,7 +72,7 @@ struct ClassifyTests {
         #expect(cancelled.reduced().messages[Fix.assistantA]?.state == .cancelled(partial: "half"))
     }
 
-    @Test("every non-state field passes through, generationID included")
+    @Test("every non-state field passes through, attemptID included")
     func fieldsPassThrough() {
         let log = Log.withCompletedTurn()
         let folded = log.folded()
@@ -81,7 +81,7 @@ struct ClassifyTests {
 
         #expect(message?.id == source?.id)
         #expect(message?.role == .assistant)
-        #expect(message?.generationID == Fix.genA)
+        #expect(message?.attemptID == Fix.genA)
         #expect(message?.parent == Fix.userA)
         #expect(message?.children == source?.children)
         #expect(message?.model == Fix.model)

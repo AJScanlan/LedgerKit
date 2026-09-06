@@ -6,7 +6,7 @@ import Foundation
 //
 // P2 has three clauses, and the spec states them together:
 //
-//   1. for every live `GenerationID`, the projection shows `.streaming` with
+//   1. for every live `GenerationAttemptID`, the projection shows `.streaming` with
 //      partial equal to **the live set's value** for that generation;
 //   2. for everything else the projection equals the fold;
 //   3. the live set is always a subset of *open* (started, un-terminated)
@@ -39,7 +39,7 @@ import Foundation
 // 7") that makes a failure legible.
 
 // `LiveSet` was declared here from M4 until M7 Phase 1, when `Projection/` began
-// shipping the real one. It is the *same* type — `[GenerationID: String]`, the value
+// shipping the real one. It is the *same* type — `[GenerationAttemptID: String]`, the value
 // being the full partial to show — so the harness now speaks the production
 // vocabulary rather than a parallel copy of it. Deleting the duplicate is the only
 // change this file needed to accept `overlay(_:live:)`; no assertion moved.
@@ -84,11 +84,11 @@ func projectionProblems(
     var problems: [String] = []
 
     // generation → message, from the folded layer. This is the same map a
-    // snapshot resume has to rebuild, and the reason `Message.generationID` is
+    // snapshot resume has to rebuild, and the reason `Message.attemptID` is
     // public at all.
-    var messageForGeneration: [GenerationID: MessageID] = [:]
+    var messageForGeneration: [GenerationAttemptID: MessageID] = [:]
     for message in folded.messages.values {
-        guard let generation = message.generationID else { continue }
+        guard let generation = message.attemptID else { continue }
         messageForGeneration[generation] = message.id
     }
 
@@ -125,7 +125,7 @@ func projectionProblems(
             continue
         }
 
-        let generation = folded.messages[id]?.generationID
+        let generation = folded.messages[id]?.attemptID
         if let generation, let partial = live[generation] {
             // Clause 1 — live means `.streaming`, carrying exactly the deltas.
             guard case .streaming(let shown) = overlaid.state else {
@@ -203,7 +203,7 @@ func mappingStates(
 /// predicate that has only ever been shown failing inputs might be one that
 /// nothing can satisfy. This is the control, in the sense `SnapshotDiscardTests`
 /// uses the word.
-func referenceOverlay(ids: [MessageID], generationOf: [MessageID: GenerationID]) -> LiveOverlay {
+func referenceOverlay(ids: [MessageID], generationOf: [MessageID: GenerationAttemptID]) -> LiveOverlay {
     { conversation, live in
         mappingStates(of: conversation, ids: ids) { message in
             guard let generation = generationOf[message.id], let partial = live[generation] else {

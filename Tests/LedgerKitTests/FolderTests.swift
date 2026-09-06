@@ -384,12 +384,12 @@ struct FolderGenerationStartedTests {
         #expect(started().folded().messages[Fix.assistantA]?.model == Fix.model)
     }
 
-    @Test("records generationID on the message — snapshot resume depends on it")
+    @Test("records attemptID on the message — snapshot resume depends on it")
     func recordsGenerationID() {
         // Without this the routing map is unreconstructible from a snapshot and
         // the first delta after a checkpoint quarantines under row 9, diverging
         // replay from resume (P3).
-        #expect(started().folded().messages[Fix.assistantA]?.generationID == Fix.genA)
+        #expect(started().folded().messages[Fix.assistantA]?.attemptID == Fix.genA)
     }
 
     @Test("attaches to the named parent in sibling order")
@@ -437,7 +437,7 @@ struct FolderGenerationStartedTests {
         #expect(state.messages[Fix.assistantB]?.parent == Fix.assistantA)
     }
 
-    @Test("reusing a GenerationID quarantines (row 8)")
+    @Test("reusing a GenerationAttemptID quarantines (row 8)")
     func reusedGenerationID() {
         var log = started()
         log.append(.generationStarted(generation: Fix.genA, message: Fix.assistantB, parent: Fix.userA, model: Fix.model))
@@ -446,7 +446,7 @@ struct FolderGenerationStartedTests {
         #expect(state.messages[Fix.assistantB] == nil, "nothing was created (I2 containment)")
     }
 
-    @Test("a GenerationID stays used after termination — the binding is permanent")
+    @Test("a GenerationAttemptID stays used after termination — the binding is permanent")
     func generationIDStaysUsedAfterTerminal() {
         var log = started()
         log.append(.generationEnded(generation: Fix.genA, outcome: .completed(Fix.stopInfo)))
@@ -461,7 +461,7 @@ struct FolderGenerationStartedTests {
         let state = log.folded()
         #expect(state.reasons == [.messageIDAlreadyUsed(Fix.userA)])
         #expect(state.messages[Fix.userA]?.role == .user, "the existing node is untouched")
-        #expect(state.messages[Fix.userA]?.generationID == nil)
+        #expect(state.messages[Fix.userA]?.attemptID == nil)
     }
 
     @Test("an unknown parent quarantines (row 8)")
@@ -658,7 +658,7 @@ struct FolderGenerationLifecycleTests {
     @Test("P3 down payment: resuming mid-generation equals folding the whole log")
     func resumeEqualsReplay() {
         // Splits inside an open generation, which is exactly where the
-        // generation→message map has to be rebuilt from FoldedMessage.generationID.
+        // generation→message map has to be rebuilt from FoldedMessage.attemptID.
         let log = streaming()
         let split = 3
         let prefix = Array(log.rows.prefix(split))

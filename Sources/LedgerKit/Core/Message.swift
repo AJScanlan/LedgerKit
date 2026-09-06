@@ -11,7 +11,7 @@ public struct Message: Sendable, Identifiable, Equatable {
     /// Surfaced publicly because the folded layer requires it regardless (it is
     /// how a snapshot resume rebuilds the generation→message routing map), so
     /// projecting it costs nothing and makes a log dump legible by eye.
-    public var generationID: GenerationID?
+    public var attemptID: GenerationAttemptID?
     /// `nil` ⇒ root-level (child of the virtual root, I6).
     public var parent: MessageID?
     /// Sibling order = sequence order (SPEC §6.4).
@@ -34,7 +34,7 @@ public struct Message: Sendable, Identifiable, Equatable {
 
     /// Reducer-side assembly. **Internal on purpose (M4 Phase 0):** this
     /// initializer can express states the domain forbids — a `.user` message
-    /// that is `.streaming`, an assistant `generationID` on a user node, a
+    /// that is `.streaming`, an assistant `attemptID` on a user node, a
     /// `stopInfo` on a failure — and tenet 1 says illegal states should be
     /// unrepresentable rather than merely undocumented. The only *public* way to
     /// obtain messages is therefore to reduce a log
@@ -48,7 +48,7 @@ public struct Message: Sendable, Identifiable, Equatable {
     init(
         id: MessageID,
         role: Role,
-        generationID: GenerationID? = nil,
+        attemptID: GenerationAttemptID? = nil,
         parent: MessageID? = nil,
         children: [MessageID] = [],
         state: MessageState,
@@ -60,7 +60,7 @@ public struct Message: Sendable, Identifiable, Equatable {
     ) {
         self.id = id
         self.role = role
-        self.generationID = generationID
+        self.attemptID = attemptID
         self.parent = parent
         self.children = children
         self.state = state

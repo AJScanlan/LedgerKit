@@ -36,18 +36,18 @@ import Testing
 /// Read off the **folded** layer, because openness is a folded property: `classify`
 /// has already turned open generations into `.interrupted` (I5) and could no longer
 /// tell you which ones a live store might legitimately be streaming.
-private func openGenerations(in folded: FoldedState) -> [GenerationID] {
+private func openGenerations(in folded: FoldedState) -> [GenerationAttemptID] {
     folded.messages.values
         .filter(\.state.isOpen)
-        .compactMap(\.generationID)
+        .compactMap(\.attemptID)
         .sorted { "\($0)" < "\($1)" }
 }
 
 /// The text each generation has accumulated in the log so far, keyed for lookup.
-private func foldedText(in folded: FoldedState) -> [GenerationID: String] {
-    var text: [GenerationID: String] = [:]
+private func foldedText(in folded: FoldedState) -> [GenerationAttemptID: String] {
+    var text: [GenerationAttemptID: String] = [:]
     for message in folded.messages.values {
-        guard let generation = message.generationID else { continue }
+        guard let generation = message.attemptID else { continue }
         text[generation] = message.state.text
     }
     return text
@@ -120,7 +120,7 @@ struct OverlayTests {
         let after = try #require(projected.messages[Fix.assistantA])
         #expect(after.id == before.id)
         #expect(after.role == before.role)
-        #expect(after.generationID == before.generationID)
+        #expect(after.attemptID == before.attemptID)
         #expect(after.parent == before.parent)
         #expect(after.children == before.children)
         #expect(after.model == before.model)

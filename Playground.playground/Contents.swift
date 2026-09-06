@@ -28,8 +28,8 @@ let firstQuestion = MessageID(UUID())
 let answer = MessageID(UUID())
 let rateLimited = MessageID(UUID())
 let thanks = MessageID(UUID())
-let generationA = GenerationID(UUID())
-let generationB = GenerationID(UUID())
+let generationA = GenerationAttemptID(UUID())
+let generationB = GenerationAttemptID(UUID())
 
 /// Numbers rows the way the store's write transaction does, so a hand-built log
 /// is shaped like a real one.

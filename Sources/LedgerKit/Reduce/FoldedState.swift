@@ -89,12 +89,12 @@ struct FoldedMessage: Sendable, Equatable, Codable {
     /// Assistant only — I7 binds this 1:1 with `id`.
     ///
     /// Load-bearing for snapshot resume, not merely informational: the fold
-    /// routes `deltaAppended` by `GenerationID`, so without this field the
+    /// routes `deltaAppended` by `GenerationAttemptID`, so without this field the
     /// generation→message map would be unreconstructible from a snapshot and
     /// the first delta after a mid-generation checkpoint would quarantine under
     /// row 9. That divergence between replay and resume is precisely what P3
     /// asserts against.
-    var generationID: GenerationID?
+    var attemptID: GenerationAttemptID?
     /// `nil` ⇒ root-level (child of the virtual root, I6).
     var parent: MessageID?
     /// Sibling order = sequence order (§6.4).
@@ -115,7 +115,7 @@ struct FoldedMessage: Sendable, Equatable, Codable {
     init(
         id: MessageID,
         role: Role,
-        generationID: GenerationID? = nil,
+        attemptID: GenerationAttemptID? = nil,
         parent: MessageID? = nil,
         children: [MessageID] = [],
         state: FoldedMessageState,
@@ -127,7 +127,7 @@ struct FoldedMessage: Sendable, Equatable, Codable {
     ) {
         self.id = id
         self.role = role
-        self.generationID = generationID
+        self.attemptID = attemptID
         self.parent = parent
         self.children = children
         self.state = state

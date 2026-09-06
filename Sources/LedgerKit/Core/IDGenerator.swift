@@ -39,7 +39,7 @@ public struct IDGenerator<RandomSource: RandomNumberGenerator & Sendable>: Senda
     public mutating func makeEventID() -> EventID { EventID(mintV7()) }
     public mutating func makeConversationID() -> ConversationID { ConversationID(mintV7()) }
     public mutating func makeMessageID() -> MessageID { MessageID(mintV7()) }
-    public mutating func makeGenerationID() -> GenerationID { GenerationID(mintV7()) }
+    public mutating func makeGenerationAttemptID() -> GenerationAttemptID { GenerationAttemptID(mintV7()) }
 
     // MARK: - Minting
 

@@ -65,7 +65,7 @@ func invariantProblems(in state: FoldedState) -> [String] {
         // and a user message carrying any of it means an event routed to the
         // wrong node — the shape I7's allocate-once rule exists to prevent.
         if message.role != .assistant {
-            if message.generationID != nil { problems.append("user \(message.id) carries a generationID") }
+            if message.attemptID != nil { problems.append("user \(message.id) carries a generationID") }
             if message.model != nil { problems.append("user \(message.id) carries a model") }
             if message.stopInfo != nil { problems.append("user \(message.id) carries stopInfo") }
             if !message.toolRecords.isEmpty { problems.append("user \(message.id) carries tool records") }
@@ -86,9 +86,9 @@ func invariantProblems(in state: FoldedState) -> [String] {
     }
 
     // I7 — generation ↔ message is 1:1.
-    var bindings: [GenerationID: MessageID] = [:]
+    var bindings: [GenerationAttemptID: MessageID] = [:]
     for message in state.messages.values.sorted(by: { "\($0.id)" < "\($1.id)" }) {
-        guard let generation = message.generationID else { continue }
+        guard let generation = message.attemptID else { continue }
         if bindings[generation] != nil {
             problems.append("generation \(generation) bound to more than one message")
         }
@@ -158,7 +158,7 @@ func invariantProblems(in conversation: Conversation, foldedFrom folded: FoldedS
         }
 
         if message.role != source.role { problems.append("\(source.id) changed role") }
-        if message.generationID != source.generationID { problems.append("\(source.id) changed generationID") }
+        if message.attemptID != source.attemptID { problems.append("\(source.id) changed generationID") }
         if message.parent != source.parent { problems.append("\(source.id) changed parent") }
         if message.children != source.children { problems.append("\(source.id) changed children") }
         if message.model != source.model { problems.append("\(source.id) changed model") }

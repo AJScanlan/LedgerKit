@@ -4,7 +4,7 @@ import Foundation
 ///
 /// **This is deliberately not `FoldedState`.** `FoldedState` is a read model —
 /// shaped for consumers and for snapshot storage. Folding needs bookkeeping no
-/// consumer wants: which message a `GenerationID` routes to, delta text in
+/// consumer wants: which message a `GenerationAttemptID` routes to, delta text in
 /// progress, the path endpoint, and where the sequence run is expected to be.
 /// Keeping them here rather than in the output is what lets the output stay the
 /// clean thing that gets persisted.
@@ -12,7 +12,7 @@ import Foundation
 /// **Every field below must be reconstructible from `FoldedState`**, because a
 /// snapshot is a paused fold and ``init(resuming:after:)`` has to rebuild the
 /// working set from one. That constraint is why `FoldedMessage` carries
-/// `generationID`: without it the routing map would be unrecoverable and the
+/// `attemptID`: without it the routing map would be unrecoverable and the
 /// first delta after a mid-generation checkpoint would quarantine under row 9 —
 /// replay and resume would diverge, which is precisely what P3 asserts against.
 ///
@@ -25,7 +25,7 @@ import Foundation
 /// available: passing locally, flaking in CI.
 struct Folder {
 
-    /// The outcome of resolving a `GenerationID` to a message that can still
+    /// The outcome of resolving a `GenerationAttemptID` to a message that can still
     /// accept content (I4).
     ///
     /// A small enum rather than `Result`, because `Result`'s failure must be an
@@ -41,16 +41,16 @@ struct Folder {
     private var state: FoldedState
 
     /// Routes `deltaAppended` / `toolInvocationRecorded` / `generationEnded` to
-    /// a message. Entries are **never removed** — a `GenerationID` stays used
+    /// a message. Entries are **never removed** — a `GenerationAttemptID` stays used
     /// after termination, so row 8's reuse check outlives the generation.
-    private var generationMessages: [GenerationID: MessageID]
+    private var generationMessages: [GenerationAttemptID: MessageID]
 
     /// Delta text for generations still open. Held aside rather than mutated
     /// into the message's state per delta: appending into an enum payload inside
     /// a dictionary either copies per delta (quadratic) or needs the
     /// move-out-mutate-move-back COW dance. Terminals consume and remove their
     /// entry; whatever remains at ``finish()`` belongs to an open generation.
-    private var partials: [GenerationID: String]
+    private var partials: [GenerationAttemptID: String]
 
     /// The active path's tip. `nil` means the **virtual root**, which is what
     /// makes auto-extend (§6.4) one uniform comparison with no special case for
@@ -97,9 +97,9 @@ struct Folder {
     /// one must terminate rather than spin forever.
     private static func reconstructRouting(
         from state: FoldedState
-    ) -> ([GenerationID: MessageID], [GenerationID: String]) {
-        var generationMessages: [GenerationID: MessageID] = [:]
-        var partials: [GenerationID: String] = [:]
+    ) -> ([GenerationAttemptID: MessageID], [GenerationAttemptID: String]) {
+        var generationMessages: [GenerationAttemptID: MessageID] = [:]
+        var partials: [GenerationAttemptID: String] = [:]
         var visited: Set<MessageID> = []
         // Reversed so `popLast` yields siblings in order: depth-first, sibling
         // order preserved, identical to the recursive traversal it replaces.
@@ -107,7 +107,7 @@ struct Folder {
 
         while let id = stack.popLast() {
             guard visited.insert(id).inserted, let message = state.messages[id] else { continue }
-            if let generation = message.generationID {
+            if let generation = message.attemptID {
                 generationMessages[generation] = id
                 if case .open(let partial) = message.state { partials[generation] = partial }
             }
@@ -289,7 +289,7 @@ struct Folder {
     }
 
     private mutating func applyTerminal(
-        _ generation: GenerationID,
+        _ generation: GenerationAttemptID,
         _ outcome: Outcome,
         timestamp: Date
     ) -> QuarantineReason? {
@@ -328,7 +328,7 @@ struct Folder {
     /// **Guards, none of which mutate** — I2 containment means a quarantined
     /// start leaves the tree exactly as it was:
     ///
-    /// 1. A `GenerationID` already in ``generationMessages`` ⇒
+    /// 1. A `GenerationAttemptID` already in ``generationMessages`` ⇒
     ///    ``QuarantineReason/generationIDAlreadyUsed(_:)`` (row 8). The map keeps
     ///    terminated generations, so reuse stays invalid *after* the generation
     ///    ended — the binding is permanent, not merely current.
@@ -353,7 +353,7 @@ struct Folder {
     /// ``partials`` is deliberately untouched — an absent buffer reads as empty,
     /// and ``finish()`` materializes `.open(partial:)` from whatever accumulated.
     private mutating func applyGenerationStarted(
-        _ generation: GenerationID,
+        _ generation: GenerationAttemptID,
         _ message: MessageID,
         parent: MessageID?,
         model: ModelDescriptor,
@@ -375,7 +375,7 @@ struct Folder {
             FoldedMessage(
                 id: message,
                 role: .assistant,
-                generationID: generation,
+                attemptID: generation,
                 parent: parent,
                 state: .open(partial: ""),
                 model: model,
@@ -413,7 +413,7 @@ struct Folder {
     /// The shared row-9 gate for deltas and tool records: the generation must
     /// exist *and* still be open. A terminal message's content and audit trail
     /// are both immutable (I4).
-    private func resolveOpen(_ generation: GenerationID) -> Resolution {
+    private func resolveOpen(_ generation: GenerationAttemptID) -> Resolution {
         guard let messageID = generationMessages[generation] else {
             return .rejected(.unknownGeneration(generation))
         }

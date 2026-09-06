@@ -39,10 +39,10 @@ public struct LedgerEvent: Sendable, Identifiable, Equatable {
         /// positional destructure has no such check, and `Payload` is what
         /// export and tooling consumers destructure. Labels are wire-neutral:
         /// the tags live in `Kind`, the field keys in `CodingKeys`.
-        case generationStarted(generation: GenerationID, message: MessageID, parent: MessageID?, model: ModelDescriptor)
-        case deltaAppended(generation: GenerationID, text: String)
-        case toolInvocationRecorded(generation: GenerationID, record: ToolRecord)
-        case generationEnded(generation: GenerationID, outcome: Outcome)
+        case generationStarted(generation: GenerationAttemptID, message: MessageID, parent: MessageID?, model: ModelDescriptor)
+        case deltaAppended(generation: GenerationAttemptID, text: String)
+        case toolInvocationRecorded(generation: GenerationAttemptID, record: ToolRecord)
+        case generationEnded(generation: GenerationAttemptID, outcome: Outcome)
         /// User messages only — an edit naming an assistant message
         /// quarantines (SPEC §6.1, §6.6 row 11).
         case messageEdited(original: MessageID, replacement: MessageID, content: String)
@@ -181,19 +181,19 @@ extension LedgerEvent.Payload: Codable {
             self = .instructionsChanged(try container.decodeIfPresent(String.self, forKey: .instructions))
         case .generationStarted:
             self = .generationStarted(
-                generation: try container.decode(GenerationID.self, forKey: .generationID),
+                generation: try container.decode(GenerationAttemptID.self, forKey: .generationID),
                 message: try container.decode(MessageID.self, forKey: .messageID),
                 parent: try container.decodeIfPresent(MessageID.self, forKey: .parent),
                 model: try container.decode(ModelDescriptor.self, forKey: .model)
             )
         case .deltaAppended:
             self = .deltaAppended(
-                generation: try container.decode(GenerationID.self, forKey: .generationID),
+                generation: try container.decode(GenerationAttemptID.self, forKey: .generationID),
                 text: try container.decode(String.self, forKey: .text)
             )
         case .toolInvocationRecorded:
             self = .toolInvocationRecorded(
-                generation: try container.decode(GenerationID.self, forKey: .generationID),
+                generation: try container.decode(GenerationAttemptID.self, forKey: .generationID),
                 record: try container.decode(ToolRecord.self, forKey: .record)
             )
         case .generationEnded:
@@ -201,7 +201,7 @@ extension LedgerEvent.Payload: Codable {
             // generation is identifiable, an undecodable outcome must still
             // land as a terminal — a lost terminal is not contained loss; it
             // would forge `.interrupted` (I5).
-            let generationID = try container.decode(GenerationID.self, forKey: .generationID)
+            let generationID = try container.decode(GenerationAttemptID.self, forKey: .generationID)
             let outcome: Outcome
             do {
                 outcome = try container.decode(Outcome.self, forKey: .outcome)

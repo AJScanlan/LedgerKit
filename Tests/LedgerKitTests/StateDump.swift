@@ -77,7 +77,7 @@ enum StateDump {
             message.role.rawValue,
             describe(message.state),
         ]
-        if let generation = message.generationID { parts.append("gen=\(generation)") }
+        if let generation = message.attemptID { parts.append("gen=\(generation)") }
         if let model = message.model {
             parts.append("model=\(model.provider)/\(model.model)/\(model.version ?? "—")")
         }

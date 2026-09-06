@@ -261,7 +261,7 @@ struct ColdOpenTests {
         for turn in 0..<generations {
             let user = MessageID(uuid(0x100_000 + turn))
             let assistant = MessageID(uuid(0x200_000 + turn))
-            let generation = GenerationID(uuid(0x300_000 + turn))
+            let generation = GenerationAttemptID(uuid(0x300_000 + turn))
             log.append(.userMessageAppended(message: user, content: "q\(turn)", parent: parent))
             log.append(.generationStarted(generation: generation, message: assistant, parent: user, model: Fix.model))
             for _ in 0..<deltas {
@@ -297,7 +297,7 @@ struct ColdOpenTests {
         var tail = history
         let user = MessageID(uuid(0x400_001))
         let assistant = MessageID(uuid(0x400_002))
-        let generation = GenerationID(uuid(0x400_003))
+        let generation = GenerationAttemptID(uuid(0x400_003))
         tail.append(.userMessageAppended(message: user, content: "one more", parent: lastAssistant))
         tail.append(.generationStarted(generation: generation, message: assistant, parent: user, model: Fix.model))
         tail.append(.deltaAppended(generation: generation, text: "half an ans"))

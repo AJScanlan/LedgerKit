@@ -4,24 +4,29 @@ import FoundationModels
 // A minimal `Tool`, needed only because `LanguageModelSession.ToolCallError`
 // carries an `any Tool` and Phase 1.5 found that error type unhandled.
 //
-// ⚠️ **This file deliberately does not import LedgerKit, and that is a finding
-// rather than a style choice.**
+// ✅ **The constraint this file was written under is gone as of M9's D62**, and
+// the history is worth keeping because it is what bought the rename.
 //
-// `@Generable` expands to code referring to `GenerationID` *unqualified* — and
-// **LedgerKit ships a public `GenerationID` of its own** (ADR-002's identifier
-// set). In any file importing both modules the name is ambiguous, so the macro
-// fails to compile with an error pointing into an expansion the author never
-// wrote:
+// Through M8, LedgerKit shipped a public `GenerationID` — and so does Foundation
+// Models. `@Generable` expands to code referring to that name **unqualified**, so
+// in any file importing both modules the macro failed to compile, with an error
+// pointing into an expansion its author never wrote:
 //
 //     error: 'GenerationID' is ambiguous for type lookup in this context
 //     error: cannot assign value of type 'GenerationID' to type 'ObjectIdentifier'
 //
-// That lands on **consumers**, not just on this test: any app using `@Generable`
-// — which is the ordinary way to declare tool arguments — in a file that also
-// imports LedgerKit hits it. The workaround is exactly what this file does:
-// keep `@Generable` types in a file that does not import LedgerKit. Recorded for
-// rev 9 / M9's naming review, because the alternative is renaming a core public
-// identifier type and that is not a decision to take in passing.
+// That landed on **consumers**, not merely on this test: `@Generable` is the
+// ordinary way to declare tool arguments. The workaround was to keep such types
+// in a file that does not import LedgerKit — which is why this one still doesn't,
+// though it no longer has to.
+//
+// D62 renamed the type to `GenerationAttemptID`, and the fix was verified the way
+// the problem was found: from a throwaway *consumer* package importing both
+// modules, with a `@Generable` struct and both identifiers named side by side.
+// It compiles. **The file split is retained anyway** — this file has no need of
+// LedgerKit, so importing it to prove a point would be the artificial half of the
+// demonstration, and a `Tool` stub is exactly where a future reader would
+// reintroduce the problem if the name ever drifted back.
 
 /// Arguments for ``StubTool``. `Tool` with `Arguments == String` is explicitly
 /// *unavailable* ("Use `@Generable` struct instead"), so this is the smallest

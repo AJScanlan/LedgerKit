@@ -17,7 +17,7 @@ private enum Fold {
     static let conversation = ConversationID(UUID(uuidString: "01980E5A-0000-7000-8000-0000000000A0")!)
     static let user = MessageID(UUID(uuidString: "01980E5A-0000-7000-8000-0000000000A1")!)
     static let assistant = MessageID(UUID(uuidString: "01980E5A-0000-7000-8000-0000000000A2")!)
-    static let generation = GenerationID(UUID(uuidString: "01980E5A-0000-7000-8000-0000000000A3")!)
+    static let generation = GenerationAttemptID(UUID(uuidString: "01980E5A-0000-7000-8000-0000000000A3")!)
     static let event = EventID(UUID(uuidString: "01980E5A-0000-7000-8000-0000000000A4")!)
 
     static let timestamp = Date(timeIntervalSince1970: 1_784_979_047.371)
@@ -71,7 +71,7 @@ private enum Fold {
                 assistant: FoldedMessage(
                     id: assistant,
                     role: .assistant,
-                    generationID: generation,
+                    attemptID: generation,
                     parent: user,
                     state: .open(partial: "A valley fol"),
                     model: ModelDescriptor(provider: "apple", model: "on-device", version: "27.0"),

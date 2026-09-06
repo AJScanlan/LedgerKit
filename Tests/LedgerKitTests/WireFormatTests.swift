@@ -18,7 +18,7 @@ enum Wire {
     static let conversationID = ConversationID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000B")!)
     static let messageID = MessageID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000C")!)
     static let parentID = MessageID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000D")!)
-    static let generationID = GenerationID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000E")!)
+    static let generationID = GenerationAttemptID(UUID(uuidString: "01980E5A-0000-7000-8000-00000000000E")!)
 
     static let model = ModelDescriptor(provider: "apple", model: "on-device", version: "27.0")
 

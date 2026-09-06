@@ -55,7 +55,7 @@ public struct ConversationID: LedgerIdentifier {
 
 /// Identity of a node in the message tree.
 ///
-/// Distinct from `GenerationID` on purpose: I7 binds them 1:1 in v0.1, so every
+/// Distinct from `GenerationAttemptID` on purpose: I7 binds them 1:1 in v0.1, so every
 /// call site holds both and swapping them must not compile.
 public struct MessageID: LedgerIdentifier {
     public let uuid: UUID
@@ -66,7 +66,39 @@ public struct MessageID: LedgerIdentifier {
 ///
 /// The key for I3 (single termination), I4 (generation-scoped bounds), and I5
 /// (interruption synthesis). Also the key of the store's live set (§7.4).
-public struct GenerationID: LedgerIdentifier {
+///
+/// ## Why "Attempt", when everything around it says "generation"
+///
+/// **The name is collision-driven, not concept-driven** (M9-PLAN D62), and the
+/// distinction explains the vocabulary you will notice nearby. It was
+/// `GenerationID` through M8. Foundation Models ships its own `GenerationID`,
+/// and `@Generable` expands to code referring to it **unqualified** — so any
+/// consumer file importing both modules failed to compile *inside a macro
+/// expansion its author never wrote*:
+///
+/// ```
+/// error: 'GenerationID' is ambiguous for type lookup in this context
+/// ```
+///
+/// Since `@Generable` is the ordinary way to declare tool arguments, that landed
+/// on real apps, not just on this repo's tests. Re-verified on Xcode 27 Beta 6
+/// before the rename was taken.
+///
+/// **"Attempt" is I7's own word** rather than an evasion: a generation attempt is
+/// 1:1 with a `MessageID` in v0.1 and would become N:1 under continuation-resume
+/// (§12), which is precisely the concept this identifier keys.
+///
+/// ⚠️ **The vocabulary is deliberately layered, not uniform.** The *type* says
+/// `GenerationAttempt` because Apple owns the shorter name; the **wire and the
+/// events** say `generation` (`generationStarted`, `deltaAppended(generation:)`,
+/// and the permanent `"generationID"` field key — ADR-001 R-2), because that is
+/// the domain noun and it is fixed forever; and **`Message`** says
+/// ``Message/attemptID``, because in a message's context "attempt" is
+/// unambiguous and I7 says a message has exactly one. Renaming the wire key to
+/// match the type would have been a permanent commitment bought with nothing:
+/// `Registry/tags.json` is byte-identical across this rename, which is the proof
+/// that a Swift type name reaches no encoding.
+public struct GenerationAttemptID: LedgerIdentifier {
     public let uuid: UUID
     public init(_ uuid: UUID) { self.uuid = uuid }
 }

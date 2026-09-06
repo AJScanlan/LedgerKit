@@ -26,14 +26,14 @@ struct IdentifiersTests {
             let event: EventID
             let conversation: ConversationID
             let message: MessageID
-            let generation: GenerationID
+            let generation: GenerationAttemptID
         }
 
         let original = Envelope(
             event: EventID(uuid),
             conversation: ConversationID(UUID()),
             message: MessageID(UUID()),
-            generation: GenerationID(UUID())
+            generation: GenerationAttemptID(UUID())
         )
         let decoded = try JSONDecoder().decode(
             Envelope.self, from: try JSONEncoder().encode(original)
@@ -49,13 +49,13 @@ struct IdentifiersTests {
 
     @Test("Same UUID in two ID types are not interchangeable values")
     func distinctIdentityPerType() {
-        // I7 pairs a MessageID with a GenerationID; they must never collide in
+        // I7 pairs a MessageID with a GenerationAttemptID; they must never collide in
         // a dictionary keyed by one of them.
         var seen: Set<MessageID> = []
         seen.insert(MessageID(uuid))
 
         #expect(seen.contains(MessageID(uuid)))
-        // GenerationID(uuid) is not even expressible as a lookup here — that is
+        // GenerationAttemptID(uuid) is not even expressible as a lookup here — that is
         // the point. This test documents the intent; the compiler enforces it.
     }
 }
