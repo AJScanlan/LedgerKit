@@ -537,10 +537,10 @@ against the store's current shape, and CI can survive a second Xcode.
       — four live decisions, including the one D60 that rev 11 amended §7.4 for — along
       with the procedure paragraph it meant to retire. Moved to cover the paragraph
       alone.
-- [ ] **D59's verdict (F6)** — still `☑ Landed 2026-08-31; owner review outstanding`.
-      Cannot be recorded without the owner: the keyboard-dismissal behaviour shipped in
-      both DoD recordings without objection, but *shipped unremarked* is not *reviewed*,
-      and inferring a sign-off is the one thing a decision log must not do.
+- [x] **D59's verdict (F6) — accepted by the owner 2026-09-06.** Both keyboard-dismissal
+      changes stand; M8-PLAN's status cell records the acceptance and its date. Held open
+      rather than inferred from the behaviour having shipped in both DoD recordings,
+      because a decision log that reads silence as assent stops being evidence.
 - [x] **ENHANCEMENTS entry 1** gains M7's pricing evidence *against* (F22) — and M8's
       too, since the demo's branch pager also declined a whole-tree walk. Two consumers
       have now not wanted it; the honest reading is that **export is not merely the
@@ -598,8 +598,9 @@ against the store's current shape, and CI can survive a second Xcode.
 
 **Review gate:** documents aligned ☑; TLC re-calibrated with `_none`/`_tombstone` failing
 and `_guard` passing ☑ (and the re-transcription shown unnecessary, with the reasoning
-recorded); suites green ☑ — nothing here moved a test; **CI loop still to be verified
-against two Xcodes, with the owner** ☐; **D59's verdict outstanding** ☐.
+recorded); suites green ☑ — nothing here moved a test; **D59 accepted 2026-09-06** ☑;
+**CI (D72) still to be verified against two Xcodes, with the owner** ☐ — the one item
+carried out of this phase.
 
 ---
 
@@ -836,10 +837,10 @@ the demo's dependency costs (M8 handoff 7 — not spec matter).
 |---|---|---|
 | D61 | **Packaging: one root `Package.swift`, two products, one repo.** There is no root manifest at all, so a tag on today's layout resolves to nothing — a DoD-5 failure; split repos double release ceremony for a pair that move together. `Understudy`'s no-LedgerKit rule becomes a target-graph fact *plus* a boundary test. Costs: every `--package-path` idiom, three path constants, the workspace, the app's hand-patched dependencies. ⚠️ **Argument (iii) corrected:** a consumer taking `Understudy` alone does not *link* LedgerKit but must still *name* it in their manifest — the README must not claim otherwise | **Accepted** 2026-09-05 (owner) |
 | D62 | **`GenerationID` → `GenerationAttemptID`; `Message.generationID` → `attemptID`; `Payload` labels and `CodingKeys` unchanged.** Wire-neutral, and `tags.json` staying byte-identical is the proof. Keeps ADR-002's four-type scheme; "attempt" is I7's concept. ⚠️ Carries a `reducerVersion` bump, because `FoldedMessage`'s synthesized snapshot encoding moves with the property name | **Accepted** 2026-09-05 — **condition verified live on Beta 6 at Phase 0** |
-| D63 | **Derived state is `private(set)`** on `Conversation`, `Message`, `QuarantinedEvent`, `ConversationSummary` — closing the mutation back door M4 Phase 0's internal initializers left open | **Proposed** 2026-09-05 |
+| D63 | **Derived state is `private(set)`** on `Conversation`, `Message`, `QuarantinedEvent`, `ConversationSummary` — closing the mutation back door M4 Phase 0's internal initializers left open. Blast radius is small by construction (no public API *consumes* a `Conversation`, so today a consumer can only mislead themselves locally) and the cost is zero — which is the argument for doing it now rather than the argument against bothering: it is free today and source-breaking after the tag | **Accepted** 2026-09-06 (owner) |
 | D64 | **`MessageTree.versions(of:)` replaces `siblings(of:)` (deleted, not kept beside it); `ModelDescriptor.appleSystem`; `activeMessages` stays computed** — the audit's precompute remedy reversed on inspection of the overlay, and the drafted "keep both methods" reversed because `siblings`' own doc advertises the use case it cannot serve | **Accepted** 2026-09-05 (owner), amended from the draft |
 | D65 | **ADR-003 file protection closes by documentation, no knob** | **Proposed** 2026-09-05 |
-| D66 | **License: MIT** | **Proposed** 2026-09-05 |
+| D66 | **License: MIT.** GRDB and SwiftStreamingMarkdown are MIT; Apache-2.0 is Apple's convention for `swift-*` but not the third-party Swift ecosystem's, and MIT is the least friction for a library that wants adopting | **Accepted** 2026-09-06 (owner) |
 | D67 | **Tag `0.1.0` (no prefix); freeze before tagging; against the SDK current at Phase 4; SemVer caveat in the README** | **Proposed** 2026-09-05 |
 | D68 | **D60 has no library action; the demo pacer is optional polish** | **Proposed** 2026-09-05 |
 | D69 | **DoD-2 branch merges only behind a vendor tag that builds on the SDK current at Phase 4**; otherwise cited, not merged. ⚠️ Phase 0 found `ClaudeForFoundationModels` now tags `0.1.0`–`0.1.4`, so D58's "untagged" objection is gone and **only buildability remains open** — evaluated at Phase 4, not before, since the SDK will likely move again | **Proposed** 2026-09-05; input changed at Phase 0 |
