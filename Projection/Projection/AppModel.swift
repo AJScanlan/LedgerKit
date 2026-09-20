@@ -114,11 +114,11 @@ final class AppModel {
     private var descriptor: ModelDescriptor {
         Self.isUITesting
             ? ModelDescriptor(provider: "understudy", model: "scripted")
-            // What the `SystemLanguageModel` convenience initializer defaults to,
-            // spelled out because this path no longer goes through it. Version
-            // stays nil: which *build* answered is genuinely unknown, and a guess
-            // would be a fabrication in an append-only log (§7.8).
-            : ModelDescriptor(provider: "apple", model: "system")
+            // The library's own constant since M9 (D64.2). This path holds an
+            // `any LanguageModel`, so it cannot reach the `SystemLanguageModel`
+            // convenience initializer's default — and hand-spelling durable wire
+            // strings twice is how one model comes to look like two.
+            : .appleSystem
     }
 
     /// ⚠️ **The chunk boundaries are the test, not the content.**

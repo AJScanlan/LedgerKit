@@ -114,15 +114,20 @@ struct ChatScreen: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Self.messageSpacing) {
                     ForEach(messages) { message in
-                        let versions = versions(of: message, in: projection.conversation)
+                        // `versions(of:)` is the library's since M9 (D64) — this
+                        // screen is where the friction was found, so it is also
+                        // the check that the replacement actually fits. The local
+                        // copy it replaced had to special-case the virtual root
+                        // itself; this does not.
+                        let versions = projection.conversation.messages.versions(of: message.id)
                         MessageBubble(
                             message: message,
-                            versionIndex: versions.firstIndex(of: message.id) ?? 0,
+                            versionIndex: versions.firstIndex { $0.id == message.id } ?? 0,
                             versionCount: versions.count,
                             onRegenerate: { await model.regenerate(message.id, in: conversation) },
                             onSelectVersion: { index in
                                 guard versions.indices.contains(index) else { return }
-                                Task { await model.switchBranch(to: versions[index], in: conversation) }
+                                Task { await model.switchBranch(to: versions[index].id, in: conversation) }
                             }
                         )
                         .id(message.id)
@@ -244,29 +249,6 @@ struct ChatScreen: View {
         // was.
         composerFocused = false
         Task { await model.send(text, in: conversation) }
-    }
-
-    /// Every version of a message, in sibling order, **including the message
-    /// itself** — what a `‹ 2 of 3 ›` pager needs.
-    ///
-    /// ⚠️ **API friction worth recording for M9's review.** `siblings(of:)`
-    /// deliberately *excludes* the message — matching the English word, and its
-    /// doc even says "non-empty exactly when a branch switcher is warranted" — so
-    /// the one consumer the method anticipates cannot use it directly. Building a
-    /// pager needs the inclusive, ordered set *and* the current message's index
-    /// in it, which forces reaching past `siblings(of:)` to `parent` +
-    /// `children(of:)`, and special-casing the virtual root through
-    /// `rootChildren` (I6). Nothing here is wrong; it is a missing convenience
-    /// that the library's own documentation implies exists.
-    private func versions(of message: Message, in conversation: Conversation) -> [MessageID] {
-        if let parent = message.parent {
-            conversation.messages.children(of: parent).map(\.id)
-        } else {
-            // Root-level messages are children of the virtual root, which is not
-            // a message and so has no `children(of:)` to ask (I6). An edited
-            // first message legitimately has root-level siblings.
-            conversation.messages.rootChildren
-        }
     }
 
     /// The most recent user message — the thing the answer is an answer *to*,

@@ -125,6 +125,34 @@ struct GenerationDriverTests {
         #expect(driver("hello").model == descriptor)
     }
 
+    /// **The two spellings of the on-device model must stay one spelling**
+    /// (M9-PLAN D64.2).
+    ///
+    /// `ModelDescriptor.appleSystem` exists because these strings are durable wire
+    /// data — they ride `generationStarted` and outlive the process — and they were
+    /// hand-written in two places before M9: this initializer's default, and the
+    /// demo's `AppModel`, which holds an `any LanguageModel` and so cannot reach
+    /// the default at all.
+    ///
+    /// ⚠️ **The failure this prevents is silent.** A typo in either spelling
+    /// produces a log in which one model appears as two, and *nothing* reports it:
+    /// branch-compare simply stops grouping, forever, in rows already written.
+    /// There is no decode error to catch, because both spellings are valid.
+    @Test("the SystemLanguageModel convenience defaults to ModelDescriptor.appleSystem")
+    func onDeviceConvenienceUsesTheSharedDescriptor() async {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+
+        let defaulted = GenerationDriver(model: SystemLanguageModel.default)
+        #expect(defaulted.model == .appleSystem)
+
+        // And the constant says what §7.8 says it says. Spelled out rather than
+        // compared to another constant, so this fails if the *value* drifts and
+        // not merely if the two drift apart.
+        #expect(ModelDescriptor.appleSystem.provider == "apple")
+        #expect(ModelDescriptor.appleSystem.model == "system")
+        #expect(ModelDescriptor.appleSystem.version == nil, "which build answered is unknown; a guess would be a fabrication")
+    }
+
     /// §7.7's mapping, 1:1 and total.
     ///
     /// ⚠️ **The output side is asserted loosely on purpose.** The framework does

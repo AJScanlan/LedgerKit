@@ -105,7 +105,7 @@ public actor GenerationDriver: GenerationDriving {
     /// forcing an explicit descriptor everywhere identity is unknowable.
     public init(
         model: SystemLanguageModel,
-        descriptor: ModelDescriptor = ModelDescriptor(provider: "apple", model: "system"),
+        descriptor: ModelDescriptor = .appleSystem,
         tools: [any Tool] = [],
         toolRecording: ToolRecordingPolicy = .metadataOnly
     ) {

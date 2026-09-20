@@ -77,7 +77,7 @@ struct CorpusTests {
         )
         #expect(conversation.activePath == [Fix.userA, Fix.assistantB], "the visible thread is the regeneration")
         #expect(
-            conversation.messages.siblings(of: Fix.assistantB).map(\.id) == [Fix.assistantA],
+            conversation.messages.versions(of: Fix.assistantB).map(\.id) == [Fix.assistantA, Fix.assistantB],
             "the branch switcher can reach the abandoned partial"
         )
     }

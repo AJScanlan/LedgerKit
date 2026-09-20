@@ -190,9 +190,10 @@ struct RecoveryTests {
 
         // The new response is on the path…
         #expect(projection.conversation.activeMessages.last?.state == .complete(MessageContent(text: "A valley fold.")))
-        // …and the crashed attempt is a *sibling* of it, still holding its partial.
-        let siblings = projection.conversation.messages.siblings(of: interrupted.id)
-        #expect(siblings.count == 1, "the regeneration should be the interrupted message's sibling")
+        // …and the crashed attempt is a *version* of it, still holding its partial.
+        let versions = projection.conversation.messages.versions(of: interrupted.id)
+        #expect(versions.count == 2, "the interrupted attempt and its regeneration are two versions of one answer")
+        #expect(versions.contains { $0.id == interrupted.id }, "and the interrupted one is still reachable")
         #expect(projection.conversation.messages[interrupted.id]?.state == .interrupted(partial: "A valley "),
                 "the partial must survive regeneration, not be replaced by it")
 

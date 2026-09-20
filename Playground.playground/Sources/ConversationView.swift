@@ -22,13 +22,15 @@ public struct ConversationView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(line(for: message)).font(.body.monospaced())
 
-                // Non-empty exactly when a branch switcher is warranted — a
-                // regenerate leaves the old response here as a sibling, which is
+                // **`count > 1` is the branch-switcher predicate** — `versions(of:)`
+                // is inclusive, so a lone message reports one version rather than
+                // zero. A regenerate leaves the old response in this set, which is
                 // how "the interrupted partial survives as its own branch" falls
                 // out of the model (§6.4).
-                let siblings = conversation.messages.siblings(of: message.id)
-                if !siblings.isEmpty {
-                    Text("↔︎ \(siblings.count) other branch\(siblings.count == 1 ? "" : "es")")
+                let versions = conversation.messages.versions(of: message.id)
+                if versions.count > 1 {
+                    let index = versions.firstIndex { $0.id == message.id } ?? 0
+                    Text("‹ \(index + 1) of \(versions.count) ›")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

@@ -111,7 +111,7 @@ let conversation = Conversation(reducing: log.rows, loadedFrom: conversationID)
 // or a *newer* LedgerKit wrote this log (§6.5's healthy-log property).
 print("diagnostics: \(conversation.diagnostics.map { $0.description })")
 print("active path: \(conversation.activeMessages.count) messages")
-print("branches at the answer: \(conversation.messages.siblings(of: answer).count)")
+print("versions of the answer: \(conversation.messages.versions(of: answer).count)")
 
 let view = ConversationView(conversation: conversation)
 PlaygroundPage.current.liveView = UIHostingController(rootView: view)

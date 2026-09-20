@@ -19,7 +19,7 @@ struct FoldedState: Sendable, Equatable, Codable {
     /// Latest `instructionsChanged`; nil if never set.
     var instructions: String?
     /// Keyed storage only. The tree's *read* API (`children(of:)`,
-    /// `siblings(of:)`) is a consumer convenience and lives on `MessageTree`,
+    /// `versions(of:)`) is a consumer convenience and lives on `MessageTree`,
     /// which the classify layer builds — nothing in the fold needs it, so
     /// duplicating it here would be duplication without purpose.
     var messages: [MessageID: FoldedMessage]

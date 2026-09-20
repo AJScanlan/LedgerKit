@@ -125,7 +125,9 @@ struct ClassifyTests {
         let tree = log.reduced().messages
         #expect(tree.rootChildren == [Fix.userA])
         #expect(tree.children(of: Fix.userA).map(\.id) == [Fix.assistantA, Fix.assistantB])
-        #expect(tree.siblings(of: Fix.assistantA).map(\.id) == [Fix.assistantB])
+        // For a non-root message the version set *is* its parent's children —
+        // asserted together so the equivalence is visible rather than implied.
+        #expect(tree.versions(of: Fix.assistantA).map(\.id) == tree.children(of: Fix.userA).map(\.id))
         #expect(tree[Fix.assistantB]?.role == .assistant)
     }
 

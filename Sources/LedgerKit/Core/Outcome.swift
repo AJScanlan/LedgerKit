@@ -97,6 +97,36 @@ public struct TokenUsage: Sendable, Codable, Equatable {
 /// across models (SPEC §7.8). Rides `generationStarted`; the resolved identity
 /// lands in `StopInfo` at completion.
 public struct ModelDescriptor: Sendable, Codable, Hashable {
+
+    /// Apple's on-device model — `provider: "apple"`, `model: "system"`,
+    /// `version: nil`.
+    ///
+    /// **The one descriptor LedgerKit may supply for you** (M9-PLAN D64.2), and
+    /// not a hole in OQ8's reasoning: model identity is underivable from the
+    /// *protocol*, but `SystemLanguageModel` is a concrete type whose provider
+    /// and model are exactly what its name says. Every other provider must supply
+    /// its own, because nothing reachable through `any LanguageModel` exposes one
+    /// (SPEC §7.8).
+    ///
+    /// **`version` stays nil, decided rather than deferred.** Which *build* of
+    /// the on-device model answered is genuinely unknown, and a guess would be a
+    /// fabrication in an append-only log. Beta 5 added `SystemLanguageModel.variant`,
+    /// but its only public payload is a human-readable `displayName`, and §8's
+    /// standing rule refuses human-readable detail as durable data (rev 11).
+    ///
+    /// ## Why this is a constant rather than two string literals
+    ///
+    /// These strings are **durable wire data** — they ride `generationStarted`
+    /// and outlive every process that wrote them. Before M9 they were spelled by
+    /// hand in two places (the `SystemLanguageModel` convenience initializer's
+    /// default, and the demo's `AppModel`, which cannot reach that default
+    /// because it holds an `any LanguageModel`). Two spellings of one model is
+    /// one typo away from a log in which the same model looks like two, and no
+    /// test would have caught it — branch-compare would simply, quietly, stop
+    /// grouping. A test now asserts the convenience initializer's default **is**
+    /// this value.
+    public static let appleSystem = Self(provider: "apple", model: "system")
+
     public var provider: String
     public var model: String
     public var version: String?

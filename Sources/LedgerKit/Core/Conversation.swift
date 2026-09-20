@@ -41,6 +41,31 @@ public struct Conversation: Sendable, Identifiable, Equatable {
     /// reducer's clamping guarantee that every `activePath` entry resolves,
     /// so per-element optionality at render sites would advertise a state the
     /// domain forbids. The `compactMap` is a defensive backstop, not policy.
+    ///
+    /// ## Computed, and **hoist it out of a SwiftUI body**
+    ///
+    /// This walks the path on every access, so evaluating it inside a `body` —
+    /// `ForEach(projection.conversation.activeMessages)` — re-resolves the whole
+    /// thread on every pass. Bind it once instead:
+    ///
+    /// ```swift
+    /// let messages = projection.conversation.activeMessages
+    /// ForEach(messages) { message in … }
+    /// ```
+    ///
+    /// **Stored rather than computed was considered at M9 and rejected** (D64.3).
+    /// The audit proposed precomputing it in `classify`, which reads as the
+    /// obvious fix and is wrong: `overlay(_:live:)` rewrites message states
+    /// through ``MessageTree/updateStates(_:)`` on every delta, so a stored array
+    /// would be a second copy that goes stale against its own tree the moment a
+    /// generation streams — trading a cheap walk for a cache-invalidation
+    /// problem, in a type whose whole claim is that it is derived. The cost is
+    /// also theoretical rather than measured: the walk is one dictionary lookup
+    /// per message on the visible path.
+    ///
+    /// Hoisting is what the demo does, and Apple's own guidance says derived
+    /// collections belong on the model rather than recomputed per pass — which is
+    /// exactly what binding it once achieves without the staleness.
     public var activeMessages: [Message] {
         activePath.compactMap { messages[$0] }
     }

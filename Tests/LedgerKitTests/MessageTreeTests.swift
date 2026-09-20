@@ -59,22 +59,53 @@ struct MessageTreeTests {
         #expect(tree.children(of: Self.unknown).isEmpty)
     }
 
-    @Test("siblings exclude the message itself")
-    func siblingsExcludeSelf() {
-        #expect(tree.siblings(of: Self.response).map(\.id) == [Self.failedResponse])
-        #expect(tree.siblings(of: Self.failedResponse).map(\.id) == [Self.response])
+    @Test("versions include the message itself, in sibling order")
+    func versionsAreInclusiveAndOrdered() {
+        // Both orderings asserted from both members, because "inclusive" and
+        // "ordered" are separable and only the pair pins the pager's display.
+        #expect(tree.versions(of: Self.response).map(\.id) == [Self.response, Self.failedResponse])
+        #expect(tree.versions(of: Self.failedResponse).map(\.id) == [Self.response, Self.failedResponse])
     }
 
-    @Test("root-level messages have siblings via the virtual root (I6) — the edited-first-message case")
-    func rootSiblingsViaVirtualRoot() {
-        #expect(tree.siblings(of: Self.rootOriginal).map(\.id) == [Self.rootEdited])
-        #expect(tree.siblings(of: Self.rootEdited).map(\.id) == [Self.rootOriginal])
+    @Test("root-level messages have versions via the virtual root (I6) — the edited-first-message case")
+    func rootVersionsViaVirtualRoot() {
+        #expect(tree.versions(of: Self.rootOriginal).map(\.id) == [Self.rootOriginal, Self.rootEdited])
+        #expect(tree.versions(of: Self.rootEdited).map(\.id) == [Self.rootOriginal, Self.rootEdited])
     }
 
-    @Test("a lone message has no siblings — the branch-switcher predicate is isEmpty")
-    func loneMessageHasNoSiblings() {
-        #expect(tree.siblings(of: Self.followUp).isEmpty)
-        #expect(tree.siblings(of: Self.unknown).isEmpty)
+    @Test("a lone message is its own only version — the pager predicate is count > 1")
+    func loneMessageIsItsOwnOnlyVersion() {
+        #expect(tree.versions(of: Self.followUp).map(\.id) == [Self.followUp])
+        // The one case that is genuinely empty: an ID the tree does not hold.
+        // Distinct from "one version", which is what a lone message has —
+        // conflating them is how a pager ends up rendering `‹ 1 of 0 ›`.
+        #expect(tree.versions(of: Self.unknown).isEmpty)
+    }
+
+    /// **The property that replaced `siblings == versions − self`, and is stronger
+    /// than it was** (D64): a version set belongs to a *position*, not to the
+    /// member you asked about. Every member of a group must therefore report the
+    /// identical set.
+    ///
+    /// The old subtraction property could be satisfied by an implementation that
+    /// computed the group differently per member — which is exactly the bug a
+    /// pager would show as the index jumping when you page. This cannot.
+    @Test("a version set is a property of the position: every member reports the same set")
+    func versionsAreAPropertyOfThePosition() {
+        var checked = 0
+        for id in [Self.rootOriginal, Self.rootEdited, Self.response, Self.failedResponse, Self.followUp] {
+            let group = tree.versions(of: id)
+            #expect(group.contains { $0.id == id }, "\(id) must appear in its own version set")
+            for member in group {
+                #expect(
+                    tree.versions(of: member.id).map(\.id) == group.map(\.id),
+                    "\(member.id) reports a different set than \(id), which share a position"
+                )
+                checked += 1
+            }
+        }
+        // Non-vacuity, bound on the measured value (2+2+2+2+1 = 9).
+        #expect(checked == 9, "the sweep checked \(checked) pairs, which cannot be right")
     }
 
     @Test("dangling child references drop silently — absence, not error (I2 posture)")

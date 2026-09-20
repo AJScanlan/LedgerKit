@@ -74,15 +74,36 @@ public struct MessageTree: Sendable, Equatable {
         }
     }
 
-    /// The *other* branches at this message's position — its parent's
-    /// children excluding the message itself, sibling-ordered. For root-level
-    /// messages the parent is the virtual root (I6), so the group is
-    /// `rootChildren`: an edited first message legally has root-level
-    /// siblings (SPEC §6.4).
+    /// Every version of this message — **including itself** — sibling-ordered
+    /// (= sequence order, SPEC §6.4). What a `‹ 2 of 3 ›` branch pager needs.
     ///
-    /// Non-empty exactly when a branch switcher is warranted; a lone message
-    /// has no siblings, matching the English word.
-    public func siblings(of messageID: MessageID) -> [Message] {
+    /// "Versions" because that is what siblings at one position *are* in this
+    /// model: alternatives produced by editing a user message (`messageEdited`)
+    /// or by regenerating an assistant one, each retained rather than
+    /// overwritten. For root-level messages the parent is the virtual root (I6),
+    /// so the group is ``rootChildren`` — an edited first message legally has
+    /// root-level versions.
+    ///
+    /// Returns the empty array for an ID the tree does not hold; otherwise the
+    /// result **always contains `messageID`**, so
+    /// `versions(of: id).firstIndex { $0.id == id }` is non-nil in fact even
+    /// though the type cannot say so. A lone message yields exactly itself, so
+    /// **a pager is warranted precisely when `count > 1`**.
+    ///
+    /// ## This replaced `siblings(of:)` at M9 (D64), which is worth recording
+    ///
+    /// The old method returned the *other* branches — this minus self — and its
+    /// own documentation claimed it was "non-empty exactly when a branch
+    /// switcher is warranted". Then M8 built the branch switcher, and it could
+    /// not use it: a pager needs the **inclusive, ordered** set *and* the
+    /// current message's index in it, so the demo reached past `siblings(of:)`
+    /// to `parent` + ``children(of:)`` and special-cased the virtual root
+    /// itself. Shipping both would have left two methods differing by one
+    /// element, the wrong one matching the English word and the right one
+    /// matching the use case — so the exclusive form is gone rather than kept
+    /// for symmetry. Removing a method is free exactly once, and this is that
+    /// moment.
+    public func versions(of messageID: MessageID) -> [Message] {
         guard let message = self[messageID] else { return [] }
         let group: [MessageID]
         if let parent = message.parent {
@@ -90,6 +111,6 @@ public struct MessageTree: Sendable, Equatable {
         } else {
             group = rootChildren
         }
-        return group.filter { $0 != messageID }.compactMap { self[$0] }
+        return group.compactMap { self[$0] }
     }
 }

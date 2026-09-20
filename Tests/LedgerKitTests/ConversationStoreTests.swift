@@ -360,7 +360,9 @@ struct StoreTreeVerbTests {
 
         #expect(read.activePath == [Fix.userA, Fix.assistantA, replacement])
         #expect(read.messages[replacement]?.parent == Fix.assistantA)
-        #expect(read.messages.siblings(of: replacement).map(\.id) == [Fix.userB])
+        // Sequence order, so the original precedes its edit — the order a
+        // `‹ 1 of 2 ›` pager walks.
+        #expect(read.messages.versions(of: replacement).map(\.id) == [Fix.userB, replacement])
         #expect(read.messages[Fix.userB] != nil, "the original branch is retained, not replaced")
     }
 
@@ -625,7 +627,7 @@ struct StoreGenerationTests {
         #expect(read.activePath == [Fix.userA, Fix.assistantB])
         // The old response survives as a sibling — DoD-1's shape, falling out of
         // the model rather than being a feature.
-        #expect(read.messages.siblings(of: Fix.assistantB).map(\.id) == [Fix.assistantA])
+        #expect(read.messages.versions(of: Fix.assistantB).map(\.id) == [Fix.assistantA, Fix.assistantB])
     }
 
     @Test("regenerate is exactly respond on the target's parent")
