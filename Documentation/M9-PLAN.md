@@ -580,11 +580,14 @@ against the store's current shape, and CI can survive a second Xcode.
       carry, so a concurrent edit here would collide. The other two parts stay open and
       are independent of that: an **app-build step** (the app is what Beta 5 broke first,
       and CI does not build it) and **`LEDGERKIT_DEVICE=1` when `CI_RUNNER` is set**.
-      ⚠️ **The selection bug is live on this host right now** — Beta 5 and Beta 6 both
-      report SDK major 27, glob order puts Beta 5 first, and `-gt` keeps it, so CI would
-      select **Beta 5** and `sdkBuildIsPinned` would pass against a stale pin. Beta 5 is
-      therefore **still installed**, so the loop can be tested against two Xcodes when
-      this is picked up.
+      ⚠️ **Update 2026-09-20: Beta 5 is gone from `/Applications`, so the two-Xcode
+      window has closed.** Only Beta 6 remains, which means the selection tie is no
+      longer reproducible on this host and D72's loop cannot be verified here until a
+      second 27-family Xcode is installed again. The *bug* is unchanged and still real —
+      `-gt` on the SDK major keeps the first glob match, so any host with two 27 betas
+      selects the older one and `sdkBuildIsPinned` then passes against a stale pin, which
+      is a green run that verified nothing. Recorded because the plan previously said
+      Beta 5 was being kept for exactly this, and that is no longer true.
 - [x] **ADR-003 self-contradiction (F19):** the "Why GRDB fits" `ValueObservation` bullet
       struck, with a pointer to the document's own "Settled at M7" section. Kept as a
       strike rather than deleted — GRDB was chosen partly *for* a feature later turned
@@ -606,7 +609,10 @@ carried out of this phase.
 
 ### Phase 2 — The breaking changes, while they are free
 
-**Status:** ☐ not started.
+**Status:** ☑ **done 2026-09-06.** All six decisions landed — D61, D62, D63, D64, D66,
+D70 — plus the sweep and the mutation pass. **438 + 23 green** on host and simulator; the
+demo builds; `ProjectionUITests` 6/6; an outside-the-repo consumer resolves both products
+from one dependency.
 
 **Goal:** the repo is consumable and the public API is the one `0.1.0` will carry.
 Ordered so each step's tests run against the previous step's layout.
@@ -680,7 +686,23 @@ Ordered so each step's tests run against the previous step's layout.
       `LEDGERKIT_RECORD=1 swift test` and confirm the only `dev/` churn is the field
       name. A snapshot whose version did not move with its schema is a stale checkpoint
       that *decodes*, which is the one failure mode discard-on-mismatch cannot catch.
-- [ ] **D63 — `private(set)`** across the four derived types. Demo still builds.
+- [x] **D63 — read-only to consumers. Landed 2026-09-06**, and the spelling is
+      `public internal(set) var`, not `private(set)`. **The tests chose it.** `public let`
+      was tried first and the *library* built fine — then the test target failed, because
+      `ProjectionCheckTests` mutates `title` and `diagnostics` to build **deliberately
+      wrong** projections, which is exactly what proves P2's predicates are not vacuous;
+      and `overlay(_:live:)` rewrites states through `updateStates` from another file,
+      which `private(set)` also forbids. Both are legitimate in-module needs. The
+      invariant that matters is *consumers cannot forge derived state*, and
+      `internal(set)` says that and nothing more.
+
+      **Evidence better than the plan expected.** The draft said "none can assert a
+      compile failure, so the evidence is the diff plus a one-line note". From the
+      outside-the-repo consumer package, both the title rewrite and
+      `message.state = .streaming(partial:)` now fail with **`setter is inaccessible`** —
+      the exact forgery D63 exists to prevent, refused at the boundary that matters.
+      `MessageContent.text` stays `public var` (no invariant to violate; previews need
+      it). Demo builds unchanged, which was the stated acceptance test.
 - [ ] **D64 — `versions(of:)` in, `siblings(of:)` out.** Tests: inclusive (the message
       is always a member); ordered (matches `children(of: parent)`, or `rootChildren` at
       root level); root-level via `rootChildren`; unknown ID → empty.
@@ -695,19 +717,47 @@ Ordered so each step's tests run against the previous step's layout.
       convenience init and by `AppModel`; a test asserts the convenience init's default
       **is** the constant, so the two spellings cannot drift into naming one model twice.
       `activeMessages` doc comment: the hoist advice (D64.3).
-- [ ] **D66 — `LICENSE`** (MIT) at the root; `Package.swift` needs nothing.
-- [ ] **D70 — app target 27, gate removed.** `ProjectionUITests` green.
-- [ ] Sweep `Sources/**`, SPEC, ADRs, ROADMAP, CLAUDE.md for the old names and the
-      `--package-path` idiom (D71's scope). SPEC's illustrative names follow in rev 12
-      (item 6), not here.
-- [ ] Mutation pass, the standing rule: drop `versions(of:)`'s root-level branch (test
-      must fail); reorder its result (test must fail); make `appleSystem` differ from the
-      convenience default (test must fail).
+- [x] **D66 — `LICENSE` (MIT) at the root.** Landed 2026-09-06.
+- [x] **D70 — app target 27, gate removed. Landed 2026-09-06**; `ProjectionUITests`
+      6/6. Twelve deployment-target settings moved (6 iOS, 6 macOS across app, tests and
+      UI tests); `RootView` deleted; the app enters at the store-open gate, which was
+      always the inner and the honest one. **Nine now-redundant `@available(macOS 27.0,
+      iOS 27.0, *)` attributes removed with it** — at a 27 target they are no-ops
+      asserting a floor that no longer exists, and a stale marker is a false statement.
+      The floor-evidence question was answered before moving anything (see D70).
+- [x] **Sweep (D71's scope), and the one genuinely stale item was an *instruction*.**
+      CLAUDE.md still told future sessions to work around the `GenerationID` collision by
+      keeping `@Generable` types out of files importing LedgerKit — retired, with the
+      deliberate layering recorded so nobody "tidies" it into uniformity. ADR-002's M1
+      decisions and ROADMAP's M1 record name the old type and method: **annotated with a
+      pointer rather than rewritten**, because they are records of what was decided then
+      and rewriting a record makes the change log lie (Appendix E's precedent). Live
+      `--package-path` sites collapsed to plain `swift test`; the historical plan records
+      keep the commands they were actually run with. SPEC's occurrences are illustrative
+      names and belong to rev 12 item 6 at Phase 4.
+- [x] **Mutation pass — four injected, four caught**, each reverted: drop
+      `versions(of:)`'s root-level branch (**7** tests fail), reverse its order (**6**),
+      restore exclusivity (**19**), make `appleSystem` differ from the convenience
+      default (**2**). Plus D61's three boundary mutations, one of which produced the
+      result worth keeping (the compiler catches it before any test can).
 
-**Review gate:** suites green on both substrates at the new layout; the outside-the-repo
-consumer resolves both products; demo builds and its UI tests pass; every breaking
-change has its test and its mutation logged; Alexander signs off the API diff — this is
-the last review before those names are permanent.
+**Review gate:** ☑ suites green on **both substrates** (438 + 23 on host and on the iOS
+27 simulator); ☑ demo builds and `ProjectionUITests` 6/6; ☑ every breaking change has its
+test and its mutation logged (seven mutations across D61 and D64, all caught); ☑ the
+outside-the-repo consumer resolved both products **during** the phase — `.package(path:)`
+importing `LedgerKit` and `Understudy`, a `@Generable` type beside both identifiers, and
+`setter is inaccessible` on the forgery D63 forbids; ☐ **Alexander signs off the API
+diff** — the last review before those names are permanent.
+
+⚠️ **One gate item could not be *re-run* at the end of the phase: the host disk is full**
+(119 GiB of 119 GiB, ~0.5 GiB free), and a fresh consumer build needs more than that. The
+proof is not missing — it was run against this exact surface as each decision landed, and
+the only change since is documentation. But it should be re-run once there is space,
+because "verified as we went" is weaker than "verified at the end" and the difference is
+the kind this plan is usually careful about. Candidates measured, none deleted: the
+**redundant iOS runtime `24A5408d` is 16 GiB** (the simulators run `24A5423a`),
+`DerivedData` 2.2 GiB, `XcodeBuildMCP` 2.4 GiB. The repo's own `.build` was cleared
+(623 MiB, regenerates in ~11 s) and was not enough.
 
 ---
 
@@ -892,3 +942,4 @@ the demo's dependency costs (M8 handoff 7 — not spec matter).
 | 2026-09-05 | **Plan drafted** at the M8 boundary | 457 (434 + 23) + 6 `ProjectionUITests` | Drafted from the M8 boundary audit (F1–F40). Twelve decisions proposed (D61–D72), all awaiting owner sign-off. One audit recommendation reversed during drafting (F26 → D64.3: a stored `activeMessages` goes stale under the overlay). Phase 0 is Beta 6/7 and decides D62; Phase 2 carries every breaking change; the tag waits for the SDK current at Phase 4, not the calendar |
 | 2026-09-05 | **Phase 0 done** — Xcode 27 Beta 6 (`27A5252f`), SDK `26A5419a`, host `26A5425a`, iOS runtime `24A5423a` | **457 green** (434 + 23) host incl. device + deep · 434 green iOS sim · 6 `ProjectionUITests` · app builds | **The beta moved nothing.** Exactly one failure before the pin moved, and it *was* the pin; both surface manifests matched unmodified; all four §14 residues re-confirmed. §6 item 7 is empty and recorded as such. Git hygiene done (F34/F40): `main` +20 and `M9` pushed, `M8` tag pushed (it was missing too), `M8` branch deleted. **D62 fires** — the `@Generable` collision reproduces on Beta 6 in a *consumer* package. Four decisions signed off: D61 (with argument (iii) corrected — you don't *link* LedgerKit, but you do name it), D62 (`GenerationAttemptID` / `attemptID`; payload labels and `CodingKeys` deliberately unchanged; carries a `reducerVersion` bump), D64.1 amended (**delete** `siblings(of:)` rather than keep both), D70 (with the floor-evidence question answered rather than assumed). New findings: **F41** (two iOS runtimes, one device set, resolves to the newer — milder than it looked) and **F42** (CLAUDE.md's `consumedSurface` counts were stale at 4/7 where the manifest pins 3/6 — a *third* instance of D71's class, and the first where the stale thing was a **number** rather than prose, which is worse because a number invites someone to "fix" the manifest to match the doc). **D69's input changed**: the Claude package now tags `0.1.0`–`0.1.4`, so D58's untagged objection is gone and only buildability remains. ⚠️ Beta 5 **not** deleted: D72's selection loop needs two Xcodes present |
 | 2026-09-05 | **Phase 1 — documents, the Formal model** (CI deferred to the owner) | 457 green, unchanged — nothing here moved a test | **The Formal model needed no re-transcription, and why is the finding.** F30 reasoned from the diff (M8 restructured `drive`) but the restructure sits entirely inside the region the model collapses: `abandon(_:in:)` writes `shownPartials` and `notify`, neither of which is a model variable, and `release` is unchanged — so an abandonment and a termination are the same transition. All four configs reproduce exactly (377/586/954/1044; `none` and `tombstone` still FAIL `NoOrphanRows`), and `pcal.trans` output was byte-identical. **A model is stale when its abstraction stops matching, not when the code changes.** M8-PLAN's 17 unticked boxes ticked after verifying each against source; F5's `~~` turned out to strike **four live decisions** (D57–D60), not just the retired paragraph; D53 and D56 status cells contradicted their own decision cells. ROADMAP's M9 section rewritten from a four-bullet sketch; its target line restated on D67. F9 corrected in both places. ADR-003's `ValueObservation` bullet struck against its own M7 section. ENHANCEMENTS 1 now carries evidence *against* from two consumers. ⚠️ Outstanding: **D59's verdict** (needs the owner — shipped unremarked is not reviewed) and **CI's D72** (owner is mid-change; Beta 5 kept installed so the loop can be tested against two Xcodes) |
+| 2026-09-06 | **Phase 2 — every breaking change** (D61, D62, D63, D64, D66, D70) | **438 + 23 green** on host *and* iOS 27 simulator · demo builds · `ProjectionUITests` 6/6 | **The API is the one `0.1.0` will carry.** Net public delta: `GenerationID` → `GenerationAttemptID`, `Message.generationID` → `attemptID`, `siblings(of:)` → the inclusive `versions(of:)`, `+ModelDescriptor.appleSystem`, and every stored property on the four derived types now `public internal(set)`. Three results worth keeping. **D61's third path constant needed no change** — `project.pbxproj` was untouched, because the app's hand-patched dependencies lean on *product names*, which did not move; the workspace needed one line (`location = "group:"`). **`public let` was too tight for D63** — the library built and the *tests* failed, because they mutate derived state to build the wrong projections that prove P2 is not vacuous; `internal(set)` states the real invariant. **A mutation that the compiler catches first is still a result** — `import LedgerKit` inside Understudy fails the build, not the boundary suite, so the dormancy question had to be asked and answered separately. Seven mutations, seven caught. ⚠️ Carried out: a pre-existing intermittent in `ProjectionTests` (1 in ~10 full runs, flagged as its own task); D72's two-Xcode window **closed** when Beta 5 was removed; and the host disk is full, so the consumer proof awaits space for a final re-run |
