@@ -877,6 +877,67 @@ the kind this plan is usually careful about. Candidates measured, none deleted: 
 **Review gate:** README read cold by Alexander; every snippet compiles; DoD-4's four
 named items present.
 
+#### DRAFT — the pre-1.0 caveat (D67, DoD-5). Awaiting sign-off; not yet landed.
+
+Drafted 2026-09-20 at the Phase 0 re-run, because the API-freeze review found that this
+is the **only** home for a decision nothing else in the repo states: which public enums a
+consumer may `switch` exhaustively. D67 had it as one sentence ("minor versions may break
+source"), which is a disclaimer rather than a contract — it tells an app author to expect
+breakage without telling them what to avoid. The split below is the contract.
+
+> ## Versioning before 1.0
+>
+> LedgerKit is pre-1.0, and the two things it guarantees across versions are **not the
+> same thing**.
+>
+> **Source compatibility follows SemVer's pre-1.0 rules.** A minor bump (`0.1` → `0.2`)
+> may break your build. Public names, signatures and enum cases are still moving.
+>
+> **Wire compatibility does not.** An event log written by any released version reads in
+> every later one, whatever the version numbers say. That promise is governed by
+> [ADR-001](Documentation/ADR/ADR-001-event-encoding.md) — a discriminator registry where
+> tags are never reused and retired tags stay reserved forever — and enforced by a
+> version-frozen fixture corpus that CI replays on every run. Your users' conversation
+> history is not the part that is in flux.
+>
+> ### Which enums you may switch exhaustively
+>
+> Swift lets you `switch` over a public enum with no `default`, and a library that later
+> adds a case breaks that switch. LedgerKit therefore splits its public enums in two, and
+> the split is itself a promise.
+>
+> **Stable — switch exhaustively; no `default` needed.** `MessageState`,
+> `Recoverability`, `Role`, `Outcome`, `Status`. These describe closed domains, and they
+> are *designed* so that growth lands somewhere else: new information attaches to
+> `Message` or extends `MessageContent` rather than adding a case. `MessageState`'s
+> five-case switch is the API this library is built around, and it is meant to keep
+> compiling.
+>
+> **Growable — write a `default`.** `Payload`, `QuarantineReason`, `LedgerError`, and
+> `GenerationError` with its nested `ModelUnavailability`, `UnsupportedFeature` and
+> `TransportFailure`. These are open taxonomies of things the world does, and they are
+> expected to grow: `Payload` gains kinds as the ledger learns to record more (tool-call
+> pairs, compaction), `QuarantineReason` gains one whenever a new corruption becomes
+> distinguishable from an existing one, and `GenerationError` already ships
+> `unrecognized` as its floor precisely so an unanticipated provider failure has
+> somewhere to land.
+>
+> Switch only the stable set and a minor bump will not break *those* switches. Switch the
+> growable set exhaustively and expect to revisit it.
+
+**Why this belongs in the README and not the SPEC.** The SPEC governs semantics; this is
+a statement about *Swift source evolution*, which is a packaging concern. Rev 12 item 5
+already names the README as DoD-5's home — this is the text that fills it. ⚠️ **Two
+claims here must be re-checked before it lands**, because both are forward-looking and
+the rest of this plan is unusually strict about that: (i) that `Payload` really will grow
+— §12 names `compactionRecorded` at v0.3 and a tool started/ended pair at v0.2, the
+latter conditional on OQ2; and (ii) that the stable five genuinely have nowhere left to
+grow, which is an argument SPEC §-line 220 and §8's `unsupported*` grouping both make,
+but which no test enforces. If (ii) is to be a promise rather than an intention, the
+honest mechanism is a test asserting each stable enum's case count, failing loudly when
+someone adds one — the same shape as `Wire`'s exhaustive inventory, which already makes
+deleting a case a compile error.
+
 ---
 
 ### Phase 4 — Rev 12, ADR-001 Accepted, the freeze, the tag
@@ -924,7 +985,11 @@ non-empty.
 3. **Tenet 6** — "Swift 6 language mode, strict concurrency", not a point release (F14).
 4. **§12** — the target restated on evidence: tagged against the SDK current at the tag;
    "before GA" was a proxy (D67, F15).
-5. **§13 DoD-5** — the README named as the home of the pre-1.0 caveat (F17).
+5. **§13 DoD-5** — the README named as the home of the pre-1.0 caveat (F17). **The text
+   is drafted** (Phase 3, "DRAFT — the pre-1.0 caveat"), and it turned out to carry a
+   decision D67's one-liner did not: *which public enums a consumer may switch
+   exhaustively*. Nothing else in the repo states it, and it is a promise `0.1.0` makes
+   whether or not anyone writes it down — which is the argument for writing it down.
 6. **Illustrative names** — whatever Phase 2 lands: `GenerationAttemptID` (if D62 fires),
    `versions(of:)` beside `siblings(of:)` where §6.4 mentions the branch switcher,
    `ModelDescriptor.appleSystem` in §11's driver line, `private(set)` shown in §6.2's
