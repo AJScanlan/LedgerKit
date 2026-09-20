@@ -1,0 +1,11 @@
+# Swift Package Index build configuration.
+#
+# `documentation_targets` is the whole of the DocC hosting story: SPI regenerates
+# and hosts the catalogs on every push to the default branch (at most once every
+# 24 hours), which is why this repository does not depend on swift-docc-plugin.
+# A plugin dependency would be resolved by every consumer of the package to buy
+# a preview command that Xcode's Product ▸ Build Documentation already provides.
+version: 1
+builder:
+  configs:
+    - documentation_targets: [LedgerKit, Understudy]

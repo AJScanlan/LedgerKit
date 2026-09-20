@@ -56,7 +56,7 @@ public struct Conversation: Sendable, Identifiable, Equatable {
     /// **Stored rather than computed was considered at M9 and rejected** (D64.3).
     /// The audit proposed precomputing it in `classify`, which reads as the
     /// obvious fix and is wrong: `overlay(_:live:)` rewrites message states
-    /// through ``MessageTree/updateStates(_:)`` on every delta, so a stored array
+    /// through `MessageTree.updateStates(_:)` on every delta, so a stored array
     /// would be a second copy that goes stale against its own tree the moment a
     /// generation streams — trading a cheap walk for a cache-invalidation
     /// problem, in a type whose whole claim is that it is derived. The cost is

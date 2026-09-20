@@ -121,10 +121,15 @@ public struct Script: Sendable, ExpressibleByArrayLiteral, ExpressibleByStringLi
         /// tool's `Arguments` type; the framework decodes it, so a mismatch
         /// surfaces as the framework's own error rather than as silence.
         ///
-        /// - Parameter id: Correlates the call with its output. Defaults to the
-        ///   tool's name, which is deterministic and unique for the ordinary
-        ///   one-call-per-tool script — **give distinct ids when one script calls
-        ///   the same tool twice**, or the two exchanges cannot be told apart.
+        /// - Parameters:
+        ///   - name: The tool's name, as registered on the session.
+        ///   - arguments: JSON for the tool's `Arguments` type.
+        ///   - id: Correlates the call with its output. Defaults to the tool's
+        ///     name, which is deterministic and unique for the ordinary
+        ///     one-call-per-tool script — **give distinct ids when one script
+        ///     calls the same tool twice**, or the two exchanges cannot be told
+        ///     apart.
+        ///   - tokenCount: Tokens to report for this step, for usage assertions.
         public static func callTool(
             _ name: String,
             arguments: String,

@@ -911,7 +911,19 @@ the kind this plan is usually careful about. Candidates measured, none deleted: 
       README) moves to a `VERSIONING.md` with a three-line summary; whether **Status**
       should carry the test count and the M0–M8 record as a credibility signal (left out
       as it can read as self-congratulatory).
-- [ ] **DocC (ENHANCEMENTS 2) — stretch.** Two articles if time allows: the recovery
+- [x] **DocC (ENHANCEMENTS 2) — done 2026-09-20, and it went wider than "stretch"
+      because the assembly was as cheap as ENHANCEMENTS predicted.** Two catalogs:
+      `Sources/LedgerKit/LedgerKit.docc` (landing page + three articles —
+      `WhyNotPersistTheTranscript`, `HandlingMessageStates`,
+      `RecoveringFromInterruption`) and `Sources/Understudy/Understudy.docc`, which
+      assumes no LedgerKit, per §10.1's gateway-drug positioning. Hosting is
+      `.spi.yml`; **no `swift-docc-plugin` dependency**, because SPM has no dev-only
+      dependency and every consumer would resolve it to buy a preview command Xcode
+      already provides. ⚠️ **`docbuild` found four dangling symbol links in existing
+      public doc comments** — three at internal symbols, one malformed — which nothing
+      in this repo had ever checked. Fixed; both catalogs build warning-free. The
+      original stretch wording follows.
+- [ ] ~~**DocC (ENHANCEMENTS 2) — stretch.**~~ Two articles if time allows: the recovery
       story written against `RecoveryTests.killMidStreamRecoversAsInterrupted` (M7
       handoff 4's unflushed-tail arithmetic), and the transcript-blob argument shared with
       the README. `Understudy` gets its own catalog or nothing. **Cut first if Phase 4 is

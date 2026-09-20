@@ -6,7 +6,7 @@ import Foundation
 /// Every stored property is `public internal(set)` — read-only to consumers
 /// (M9-PLAN D63); see ``Conversation`` for the reasoning and for why it is
 /// `internal(set)` rather than `private(set)`. ``state`` is the one the module
-/// actually mutates, through ``MessageTree/updateStates(_:)``.
+/// actually mutates, through `MessageTree.updateStates(_:)`.
 public struct Message: Sendable, Identifiable, Equatable {
     public internal(set) var id: MessageID
     public internal(set) var role: Role

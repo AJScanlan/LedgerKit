@@ -60,7 +60,7 @@ public enum GenerationError: Error, Sendable, Equatable {
     /// The app asked this model for something it does not do.
     ///
     /// Groups Apple's four `unsupported*` cases, which before SPEC rev 6 fell
-    /// through to ``unrecognized`` — the floor whose job is to be loud about
+    /// through to ``GenerationError/unrecognized(description:)`` — the floor whose job is to be loud about
     /// what the taxonomy failed to anticipate, quietly absorbing four cases it
     /// had in fact been shown. Grouped rather than lifted because all four
     /// classify `.terminal` and three of four are configuration errors.

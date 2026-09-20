@@ -57,7 +57,8 @@ it goes, say so in the doc comment.
 
 ## 2. DocC catalog
 
-**Status:** deferred at the M4 audit · **Natural slot:** M9, alongside the README
+**Status:** ☑ **DONE at M9 Phase 3 (2026-09-20)**, alongside the README · was
+deferred at the M4 audit
 
 The doc comments across both packages are already launch-post quality; a DocC
 catalog is mostly assembly, not writing. Worth including:
@@ -71,8 +72,30 @@ catalog is mostly assembly, not writing. Worth including:
 - **`Understudy` gets its own catalog** — it is the gateway-drug product and is
   useful to any Foundation Models app; its docs should not assume LedgerKit.
 
-No code changes required; the `///` comments are DocC-ready. Budget one pass
-for `- Parameters:`/`- Returns:` formalization on the public surface.
+~~No code changes required; the `///` comments are DocC-ready.~~ **Both claims
+were nearly right, and the exceptions are the finding.** Three of the four
+bullets above shipped (the recovery article, the transcript article, and the
+showpiece as `HandlingMessageStates`; `Understudy` got its own catalog). But
+"no code changes required" was false in a way worth recording:
+
+⚠️ **`xcodebuild docbuild` is a link checker, and nothing else in this repo was
+one.** Building the catalogs surfaced **four dangling symbol links** that had sat
+in public doc comments unnoticed — three pointing at *internal* symbols DocC
+cannot resolve from public documentation (`MessageTree.updateStates(_:)` twice,
+`PersistenceStore` once) and one malformed relative link
+(``unrecognized`` from inside `unsupported(_:)`). In 3,616 lines of doc comment
+across 196 public declarations, nothing would ever have caught them. All four are
+fixed; the internal ones are now plain code font, which is the honest rendering.
+
+The budgeted `- Parameters:` pass turned out to be **one** declaration:
+`Script.Step.callTool`, whose singular `- Parameter id:` made DocC expect all
+four documented. Both catalogs now build warning-free.
+
+**No `swift-docc-plugin` dependency, deliberately.** SPM has no dev-only
+dependency, so adding the plugin would make every consumer resolve a package to
+buy a preview command that Xcode's Product ▸ Build Documentation already
+provides. Hosting is `.spi.yml`'s `documentation_targets`, which the Swift
+Package Index regenerates on push.
 
 ## 3. Third-party `GenerationDriving` testability
 

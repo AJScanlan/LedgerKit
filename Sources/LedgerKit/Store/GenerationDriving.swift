@@ -46,7 +46,7 @@ import Foundation
 /// a scripted double in LedgerKit's own tests from M5 Phase 3.
 ///
 /// `Sendable` because the store actor calls across its isolation boundary — the
-/// same reasoning as ``PersistenceStore``, and tenet 6 forbids buying it with
+/// same reasoning as `PersistenceStore`, and tenet 6 forbids buying it with
 /// `@unchecked`.
 public protocol GenerationDriving: Sendable {
 
