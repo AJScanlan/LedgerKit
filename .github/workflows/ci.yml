@@ -85,7 +85,7 @@ jobs:
 
       # **One invocation since M9's D61**, where this was two. The repo root is
       # now a single package vending both products, so `swift test` runs
-      # `LedgerKitTests` and `UnderstudyTests` together — 436 + 23.
+      # `LedgerKitTests` and `UnderstudyTests` together — 438 + 23.
       - name: Both suites
         run: swift test
 

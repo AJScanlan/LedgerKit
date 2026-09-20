@@ -17,7 +17,7 @@ inherited handoffs) · the **M8 boundary audit** (2026-09-05).
 **Baseline:** M0–M8 done; **457 tests green** (434 `LedgerKit` + 23 `Understudy`,
 warning-free; six skips in a bare run: 2 `LEDGERKIT_RECORD`, 3 `LEDGERKIT_DEVICE`,
 1 `LEDGERKIT_DEEP`). SPEC **rev 11 ratified 2026-09-05**.
-**Toolchain — current as of Phase 0 (2026-09-05):** Xcode 27 **Beta 6** (`27A5252f`),
+**Toolchain — ⚠️ SUPERSEDED 2026-09-20 by the GA re-run (§5a); the paragraph below records the Beta 6 pass. Current is Xcode 27.0 GA `27A266a` / SDK `26A425` / host `26A428` / Swift 6.4 / iOS runtime `24A434`.** As of Phase 0 (2026-09-05): Xcode 27 **Beta 6** (`27A5252f`),
 macOS 27.0 SDK `26A5419a`, host macOS `26A5425a`, iOS runtime `24A5423a`. Note this is
 **Beta 6 + macOS Beta 8**, not the Beta 7 this plan was drafted against, and the host is
 *ahead* of the SDK — the safe direction. (Was Beta 5 / `27A5237l` / SDK `26A5406c` /
@@ -419,7 +419,11 @@ breaking changes. Phase 3 is the README. Phase 4 is rev 12, ADR-001, the freeze,
 
 ### Phase 0 — Toolchain: Xcode 27 Beta 6 + macOS 27 Beta 8 (zero repo changes, priced exception)
 
-**Status:** ☑ **done 2026-09-05.** **457 green** (434 `LedgerKit` + 23 `Understudy`) on
+> **☑ RE-RUN 2026-09-20 against Xcode 27.0 GA — see §5a below.** The original pass
+> (Beta 6) is preserved verbatim underneath, because it is the record of what was
+> checked then, not a statement about the current toolchain.
+
+**Status (Beta 6 pass):** ☑ **done 2026-09-05.** **457 green** (434 `LedgerKit` + 23 `Understudy`) on
 the host across device *and* deep tiers, 434 green on the iOS 27 simulator, app builds,
 UI tests run. **Exactly one failure before the pin moved, and it was the pin.** No repo
 change beyond the pin and CLAUDE.md's toolchain lines.
@@ -513,6 +517,90 @@ such**; ☑ F23's result recorded and D62 decided; ⚠️ **Beta 5 deliberately 
 yet** — Phase 1's D72 needs two Xcodes present to verify the selection loop, and deleting
 it now closes the only window (the plan filed the deletion here and the verification
 there, which cannot both happen).
+
+---
+
+### Phase 5a — Phase 0 re-run: Xcode 27.0 **GA** (2026-09-20)
+
+**Status:** ☑ **done.** **461 green** (438 `LedgerKit` + 23 `Understudy`) on the host
+across device *and* deep tiers, 461 green on the iOS 27 GA simulator, app builds,
+`ProjectionUITests` 6/6, and the consumer proof re-run in both directions.
+**Exactly one failure before the pin moved, and it was the pin** — the third firing,
+and the second consecutive null result.
+
+**Why it happened between phases rather than at Phase 4:** D67 says "re-run Phase 0 if
+the SDK moved", and macOS 27 GA shipped mid-milestone. The handover written the same
+morning predicted the failure by name.
+
+**Toolchain — current:** Xcode **27.0 GA** (`27A266a`), macOS 27.0 SDK **`26A425`**
+(was `26A5419a`), host macOS 27.0 **`26A428`** (was `26A5425a`), **Swift 6.4**
+(was 6.3), iOS runtime **`24A434`** (was `24A5423a`). Host is **ahead** of the SDK
+(`26A428` > `26A425`) — the safe direction; M8's dyld SIGSEGV was the reverse.
+
+- [x] **The pinned surface moved nothing.** `appleErrorSurface` (9 types),
+      `consumedSurface` (all 3 declarations), `dispositionsAreStated` and
+      `parserIsNotVacuous` all passed **unmodified**. Beta→GA is the largest step in the
+      cycle and it moved least, which no reasoning predicts — the argument for the
+      tripwire, third time running.
+- [x] **Every M6-PLAN §2a citation re-read against the GA interface and confirmed**:
+      `streamResponse(to:options:)` still neither `async` nor `throws` (plus the 27
+      `contextOptions:`/`metadata:` overloads), `isResponding` still a synchronous
+      `var`, `LanguageModelSession` still a `final public class`,
+      `ResponseStream.Snapshot` still `{content, rawContent, transcriptEntries, usage}`,
+      `Transcript.TextSegment` still `{id: String, content: String}` (D34's premise),
+      all four §7.1 constructors public, `Usage`/`Input`/`Output` unchanged.
+- [x] **Two GA facts found outside the pinned subset, neither requiring action.**
+      `SystemLanguageModel.Adapter` is `obsoleted: 27.0` — which *strengthens*
+      `Adapter.AssetError`'s `.unreachable` disposition, since a 27 target cannot
+      construct an Adapter at all — and `Transcript.StructuredSegment.source` is
+      `deprecated: 27.0, renamed: "schemaName"`, unread by v0.1.
+- [x] ⚠️ **A limit of the mechanism, newly exposed: the baseline was destroyed.** The
+      host was rebuilt for GA, so **no beta SDK survives** and the Beta 6 interface
+      cannot be diffed against GA. Only the *manifest* could be compared — and it was
+      enough. **This is the argument for checking manifests into the repo** rather than
+      relying on a local SDK diff. State the conclusion precisely: "unchanged since
+      Beta 6" is a claim about **the pinned subset**, not about the framework, and
+      whether the two facts above landed at GA or earlier is **locally undecidable**.
+- [x] **All four §14 residues re-measured on GA hardware** (not carried forward, per the
+      handover — all four are properties of a substrate that was replaced):
+  - **§7.7, input total inclusive of cached** — `input.total=74 cached=0 output.total=7
+    reasoning=0 usage.total=81`, and `74 + 7 == 81`, so the cache is counted once.
+  - **N3, the on-device budget** — **still 4096** (`contextSize=4096`,
+    `tokenCount=6095`). ⚠️ It took **three** ~2k turns to exhaust here where Beta 6 took
+    two; the *budget* is the contractual fact and the turn count is prompt-dependent.
+    CLAUDE.md's "two ~2k turns" was corrected to say so.
+  - **§7.3, provider revisions** — **0 across 112 snapshots** of 4 generations.
+    Cumulative M6 + Beta 6 + GA: **772 snapshots, zero revisions.** Unreachable
+    end-to-end; the fail-loud path stays, because the API still permits it.
+  - **§7.2, `concurrentRequests` thrown** — green unflagged, as always.
+- [x] **Simulator tier on the GA runtime** — 438 + 23 passed, `TEST SUCCEEDED`. ⚠️ **F41
+      recurs**: two iOS 27.0 runtimes are installed again (`24A5390f`, `24A434`) sharing
+      one `SimRuntime.iOS-27-0`. Resolved the same way — the booted device reports
+      `SIMULATOR_RUNTIME_BUILD_VERSION=24A434`, the **newer**; pinned by UDID anyway.
+- [x] `xcodebuild … -scheme Projection build` → `** BUILD SUCCEEDED **` (also the
+      `SwiftStreamingMarkdown` branch-pin network resolve passing, first try).
+      `ProjectionUITests` **6/6, 0 failures**.
+- [x] **Phase 2's one open gate item is closed.** The consumer proof that the full disk
+      blocked was re-run end-to-end on GA + Swift 6.4 (195 GiB free now): the positive
+      half builds both products from one dependency with a `@Generable` type beside both
+      identifiers, and the **negative** half fails with exactly the two
+      `cannot assign to property: … setter is inaccessible` errors D63 promises. So
+      "verified at the end" now holds, not merely "verified as we went".
+- [x] CLAUDE.md's toolchain lines — the one repo exception, as at M8 and at the Beta 6
+      pass. Test counts corrected **436/457 → 438/461** while there (Phase 2 added four
+      and the line was never moved).
+- [x] ⚠️ **D72's local verification window stays closed** — it closed at Phase 2 when
+      Beta 5 was removed, and the rebuild did not reopen it: **one** Xcode is installed,
+      so the tie case (two Xcodes of one major, strict `-gt` keeping the first glob
+      match) still cannot be staged locally and D72's fix must be reasoned or exercised
+      on CI. One thing verified rather than assumed in the meantime: the loop is **safe**
+      against the dangling `/Applications/Xcode.app` symlink the rebuild left behind,
+      because `[ -d "$developer" ] || continue` rejects it before `xcrun` is ever run.
+
+**Review gate:** ☑ both suites green on GA across host, device, deep and simulator tiers;
+☑ app builds and UI tests pass; ☑ pin moved **after** re-verification, not before;
+☑ consumer proof green in both directions; ☐ **Alexander signs off the API diff** — still
+the last open item before `0.1.0`'s names are permanent, and now the only one.
 
 ---
 
@@ -1085,4 +1173,5 @@ time, and CLAUDE.md is explicit that a filtered green run is not evidence here.
 | 2026-09-05 | **Plan drafted** at the M8 boundary | 457 (434 + 23) + 6 `ProjectionUITests` | Drafted from the M8 boundary audit (F1–F40). Twelve decisions proposed (D61–D72), all awaiting owner sign-off. One audit recommendation reversed during drafting (F26 → D64.3: a stored `activeMessages` goes stale under the overlay). Phase 0 is Beta 6/7 and decides D62; Phase 2 carries every breaking change; the tag waits for the SDK current at Phase 4, not the calendar |
 | 2026-09-05 | **Phase 0 done** — Xcode 27 Beta 6 (`27A5252f`), SDK `26A5419a`, host `26A5425a`, iOS runtime `24A5423a` | **457 green** (434 + 23) host incl. device + deep · 434 green iOS sim · 6 `ProjectionUITests` · app builds | **The beta moved nothing.** Exactly one failure before the pin moved, and it *was* the pin; both surface manifests matched unmodified; all four §14 residues re-confirmed. §6 item 7 is empty and recorded as such. Git hygiene done (F34/F40): `main` +20 and `M9` pushed, `M8` tag pushed (it was missing too), `M8` branch deleted. **D62 fires** — the `@Generable` collision reproduces on Beta 6 in a *consumer* package. Four decisions signed off: D61 (with argument (iii) corrected — you don't *link* LedgerKit, but you do name it), D62 (`GenerationAttemptID` / `attemptID`; payload labels and `CodingKeys` deliberately unchanged; carries a `reducerVersion` bump), D64.1 amended (**delete** `siblings(of:)` rather than keep both), D70 (with the floor-evidence question answered rather than assumed). New findings: **F41** (two iOS runtimes, one device set, resolves to the newer — milder than it looked) and **F42** (CLAUDE.md's `consumedSurface` counts were stale at 4/7 where the manifest pins 3/6 — a *third* instance of D71's class, and the first where the stale thing was a **number** rather than prose, which is worse because a number invites someone to "fix" the manifest to match the doc). **D69's input changed**: the Claude package now tags `0.1.0`–`0.1.4`, so D58's untagged objection is gone and only buildability remains. ⚠️ Beta 5 **not** deleted: D72's selection loop needs two Xcodes present |
 | 2026-09-05 | **Phase 1 — documents, the Formal model** (CI deferred to the owner) | 457 green, unchanged — nothing here moved a test | **The Formal model needed no re-transcription, and why is the finding.** F30 reasoned from the diff (M8 restructured `drive`) but the restructure sits entirely inside the region the model collapses: `abandon(_:in:)` writes `shownPartials` and `notify`, neither of which is a model variable, and `release` is unchanged — so an abandonment and a termination are the same transition. All four configs reproduce exactly (377/586/954/1044; `none` and `tombstone` still FAIL `NoOrphanRows`), and `pcal.trans` output was byte-identical. **A model is stale when its abstraction stops matching, not when the code changes.** M8-PLAN's 17 unticked boxes ticked after verifying each against source; F5's `~~` turned out to strike **four live decisions** (D57–D60), not just the retired paragraph; D53 and D56 status cells contradicted their own decision cells. ROADMAP's M9 section rewritten from a four-bullet sketch; its target line restated on D67. F9 corrected in both places. ADR-003's `ValueObservation` bullet struck against its own M7 section. ENHANCEMENTS 1 now carries evidence *against* from two consumers. ⚠️ Outstanding: **D59's verdict** (needs the owner — shipped unremarked is not reviewed) and **CI's D72** (owner is mid-change; Beta 5 kept installed so the loop can be tested against two Xcodes) |
-| 2026-09-06 | **Phase 2 — every breaking change** (D61, D62, D63, D64, D66, D70) | **438 + 23 green** on host *and* iOS 27 simulator · demo builds · `ProjectionUITests` 6/6 | **The API is the one `0.1.0` will carry.** Net public delta: `GenerationID` → `GenerationAttemptID`, `Message.generationID` → `attemptID`, `siblings(of:)` → the inclusive `versions(of:)`, `+ModelDescriptor.appleSystem`, and every stored property on the four derived types now `public internal(set)`. Three results worth keeping. **D61's third path constant needed no change** — `project.pbxproj` was untouched, because the app's hand-patched dependencies lean on *product names*, which did not move; the workspace needed one line (`location = "group:"`). **`public let` was too tight for D63** — the library built and the *tests* failed, because they mutate derived state to build the wrong projections that prove P2 is not vacuous; `internal(set)` states the real invariant. **A mutation that the compiler catches first is still a result** — `import LedgerKit` inside Understudy fails the build, not the boundary suite, so the dormancy question had to be asked and answered separately. Seven mutations, seven caught. ⚠️ Carried out: a pre-existing intermittent in `ProjectionTests` (1 in ~10 full runs, flagged as its own task); D72's two-Xcode window **closed** when Beta 5 was removed; and the host disk is full, so the consumer proof awaits space for a final re-run |
+| 2026-09-06 | **Phase 2 — every breaking change** (D61, D62, D63, D64, D66, D70) | **438 + 23 green** on host *and* iOS 27 simulator · demo builds · `ProjectionUITests` 6/6 | **The API is the one `0.1.0` will carry.** Net public delta: `GenerationID` → `GenerationAttemptID`, `Message.generationID` → `attemptID`, `siblings(of:)` → the inclusive `versions(of:)`, `+ModelDescriptor.appleSystem`, and every stored property on the four derived types now `public internal(set)`. Three results worth keeping. **D61's third path constant needed no change** — `project.pbxproj` was untouched, because the app's hand-patched dependencies lean on *product names*, which did not move; the workspace needed one line (`location = "group:"`). **`public let` was too tight for D63** — the library built and the *tests* failed, because they mutate derived state to build the wrong projections that prove P2 is not vacuous; `internal(set)` states the real invariant. **A mutation that the compiler catches first is still a result** — `import LedgerKit` inside Understudy fails the build, not the boundary suite, so the dormancy question had to be asked and answered separately. Seven mutations, seven caught. ⚠️ Carried out: a pre-existing intermittent in `ProjectionTests` (1 in ~10 full runs, flagged as its own task); D72's two-Xcode window **closed** when Beta 5 was removed; and the host disk is full, so the consumer proof awaits space for a final re-run — **discharged 2026-09-20**, see the row below |
+| 2026-09-20 | **Phase 0 re-run** — Xcode **27.0 GA** (`27A266a`), SDK `26A425`, host `26A428`, Swift **6.4**, iOS runtime `24A434` | **461 green** (438 + 23) host incl. device + deep · **461 green** iOS 27 GA sim · 6 `ProjectionUITests` · app builds · consumer proof green both directions | **GA moved nothing in the pinned surface** — the largest step in the cycle moving least, and the tripwire's third firing with a third distinct outcome (Beta 5 *shrank*, Beta 6 *nothing*, GA *nothing*). Exactly one failure before the pin moved, and it *was* the pin; `parserIsNotVacuous` passed beside it, which is what makes the null a result. Every M6-PLAN §2a citation re-read and confirmed against the GA interface. All four §14 residues **re-measured** rather than carried: budget still **4096** (though three ~2k turns to exhaust, not two — the turn count is prompt-dependent and CLAUDE.md now says so), §7.7 inclusive (`74+7==81`), **0 revisions in 112 snapshots** (cumulative **772**, still zero). ⚠️ **New limit found: the baseline was destroyed.** The rebuild left no beta SDK, so GA could be compared only against *the manifest* — which is the argument for checking manifests in, and means "unchanged since Beta 6" is a claim about the **pinned subset**, not the framework. Two GA facts outside it, neither actionable: `SystemLanguageModel.Adapter` is `obsoleted: 27.0` (strengthening `AssetError`'s `.unreachable`), `Transcript.StructuredSegment.source` renamed `schemaName`. **F41 recurs** (two iOS 27.0 runtimes; booted device is the newer, pinned by UDID). **Phase 2's open gate item discharged**: consumer proof re-run on GA, positive half builds and negative half fails with the two `setter is inaccessible` errors. Still open: **the API diff sign-off** |

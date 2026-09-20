@@ -460,6 +460,29 @@ struct AppleErrorSurfaceTests {
     /// changed" from "the check is asleep" is the non-vacuity test above
     /// (``parserIsNotVacuous()``), which is why it is not optional company.
     ///
+    /// **Moved 2026-09-20: `26A5419a` → `26A425` (Xcode 27.0 **GA**, `27A266a`;
+    /// host macOS 27.0 `26A428`; Swift 6.4).** The largest step in the cycle —
+    /// beta to release — and the pinned surface moved **nothing**: both manifests
+    /// matched unmodified and all four §14 residues re-confirmed on GA hardware.
+    /// Three firings now, and the outcomes are Beta 5 *shrank*, Beta 6 *nothing*,
+    /// GA *nothing*, which is precisely the distribution no reasoning predicts.
+    ///
+    /// ⚠️ **This firing exposed a limit of the mechanism.** The host was rebuilt
+    /// for macOS 27 GA, so **no beta SDK survives on the machine** — the Beta 6
+    /// interface cannot be diffed against GA, only *this manifest* can. That is
+    /// the whole argument for checking the manifest into the repo rather than
+    /// trusting a local diff: the manifest was the only surviving baseline, and
+    /// it did its job. A consequence worth stating plainly — "unchanged since
+    /// Beta 6" is a claim about **the pinned subset**, not about the framework.
+    ///
+    /// Two GA facts found outside the pinned subset, neither requiring action:
+    /// `SystemLanguageModel.Adapter` is now `obsoleted: 27.0` (which *strengthens*
+    /// `Adapter.AssetError`'s `.unreachable` disposition — a 27 target cannot
+    /// construct an Adapter at all), and `Transcript.StructuredSegment.source` is
+    /// `deprecated: 27.0, renamed: "schemaName"` (v0.1 records text deltas only,
+    /// so no structured segment is read). Whether either landed at GA or earlier
+    /// in the beta cycle **cannot be determined locally**, for the reason above.
+    ///
     /// ⚠️ **One thing this test cannot see, learned the same day:** it pins the
     /// *SDK*, and the SDK can be ahead of the **OS**. Beta 5's SDK declared a
     /// `Transcript.Response.init` the Beta 4-era runtime did not export, which
@@ -468,7 +491,7 @@ struct AppleErrorSurfaceTests {
     /// `sw_vers` against the SDK build before suspecting this repo.
     @Test("the SDK this manifest was verified against is the SDK installed")
     func sdkBuildIsPinned() throws {
-        let verified = "26A5419a"
+        let verified = "26A425"
         let installed = try #require(sdkBuildVersion)
 
         #expect(
