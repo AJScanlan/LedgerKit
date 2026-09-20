@@ -932,11 +932,27 @@ claims here must be re-checked before it lands**, because both are forward-looki
 the rest of this plan is unusually strict about that: (i) that `Payload` really will grow
 — §12 names `compactionRecorded` at v0.3 and a tool started/ended pair at v0.2, the
 latter conditional on OQ2; and (ii) that the stable five genuinely have nowhere left to
-grow, which is an argument SPEC §-line 220 and §8's `unsupported*` grouping both make,
-but which no test enforces. If (ii) is to be a promise rather than an intention, the
-honest mechanism is a test asserting each stable enum's case count, failing loudly when
-someone adds one — the same shape as `Wire`'s exhaustive inventory, which already makes
-deleting a case a compile error.
+grow, which is an argument SPEC §-line 220 and §8's `unsupported*` grouping both make.
+
+☑ **(ii) now has a test — `PublicAPIStabilityTests` (2026-09-20) — and writing it
+produced a result worth more than the test.** This paragraph originally predicted a
+case-count assertion would be needed "because no test enforces" the promise. Mutation
+testing showed that framing was wrong: injecting `MessageState.paused` is caught **first**
+by `GenerationDriver.visibleText`, then by `APISketchTests`' §11 showpiece; injecting
+`Outcome.abandoned` is caught **first** by `Outcome.encode(to:)`, because a new case needs
+a wire tag. **The compiler already rejects an added case for all five.** Repairing the
+earlier sites does make the new file the one that fails — it was confirmed to be the
+backstop — but it is never the first line, and it adds no *detection*.
+
+What it adds is the **reason**. Every incidental catch fails for a local cause — an
+encoder wants a tag, a helper wants a branch — so an author repairing them is never told
+they broke a documented promise to consumers; they fix three switches and ship. This is
+the only site whose failure says so, and the only one that does not evaporate if a stable
+enum stops being `Codable` or a driver helper is refactored away. ⚠️ **It is defeatable
+by adding `default:`**, which no mechanism in Swift can prevent — hence the loud warning
+in the file. Recorded this way because a mutation caught by something else is a result,
+and the honest response is to state the property that remains rather than to claim the
+coverage.
 
 ---
 
