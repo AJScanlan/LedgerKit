@@ -659,7 +659,7 @@ Ordered so each step's tests run against the previous step's layout.
     host — **436 + 23, `TEST SUCCEEDED`**. That is the iOS-tier half of D61's
     one-command collapse; CI's two `swift test` steps become one in the same spirit.
 - [x] **D61 — consumability proof (path form). Passes.** A throwaway package *outside*
-      the repo declares `.package(path: "/Users/aj/LedgerKit")` and imports **both**
+      the repo declares `.package(path: "<repo root>")` and imports **both**
       products from that one dependency — `ConversationStore`, `ModelDescriptor` and
       `Script` all resolve, GRDB resolves transitively, `Build complete`. The
       `.package(url:from: "0.1.0")` form is Phase 4's gate.
@@ -866,6 +866,149 @@ non-empty.
 **Considered and not amended (record so the next audit does not re-derive):** D60/§7.4
 (already an owned limit — D68); `activeMessages` (a convenience, not a contract — D64.3);
 the demo's dependency costs (M8 handoff 7 — not spec matter).
+
+---
+
+## 6a. Machine handover — written 2026-09-20, before this partition is wiped
+
+**macOS 27 GA is out and the host is being rebuilt.** Everything below exists only
+because it was on *that* machine; the repo is the only thing that survives, so it is
+recorded here rather than in anyone's memory.
+
+### What was at risk, and what was done
+
+- ⚠️ **`m8-dod2-claude` was not on the remote** — one commit, `5a45798 feat(projection):
+  prove DoD-2 by swapping the provider to Claude`, and the *only* copy of DoD-2's wiring
+  (D58, D69). **Pushed 2026-09-20.** Every branch and tag now resolves on the server;
+  verified with `git ls-remote`, not with a local tracking ref, because a stale
+  `origin/…` ref reports "0 ahead" for work the server has never seen.
+- All M9 work (Phases 0–2) was already pushed on `M9`. Nothing else was outstanding.
+
+### Prerequisites a fresh machine needs (none of which are in the repo)
+
+| Needed for | What | How |
+|---|---|---|
+| The Formal model | `~/.tla/tla2tools.jar` (2.2 MB) | [tlaplus releases](https://github.com/tlaplus/tlaplus/releases); also needs `export PATH="/opt/homebrew/bin:$PATH"`, because bare `java` on macOS is the stub |
+| XcodeBuildMCP | `.xcodebuildmcp/config.yaml` | **Gitignored on purpose** — it pins a machine-specific `simulatorId` UUID. Recreate with `xcodebuildmcp setup`, and keep it in sync with the MCP `session_set_defaults` store **by hand**: the two stores disagree and neither repairs the other |
+| Device-tier tests | Apple Intelligence enabled and a model downloaded | `LEDGERKIT_DEVICE=1 swift test` reports *skipped*, not failed, without it |
+| Simulator tier | An iOS 27 runtime + a booted device | Address it **by UDID**, not `OS=27.0`, if two runtimes of one version are ever installed again (F41) |
+
+⚠️ **Nothing tracked hardcodes a machine-specific value** — checked before the wipe. The
+simulator UDID used throughout Phase 2 appears in no committed file.
+
+### Phase 0 must be re-run, and that is the mechanism working
+
+`sdkBuildIsPinned` currently pins **`26A5419a`** (Xcode 27 Beta 6). On a GA toolchain it
+will **fail immediately**, which is exactly what it is for — D67 already says "re-run
+Phase 0 if the SDK moved", and this is that clause firing earlier than the plan expected
+(it anticipated it at Phase 4, not between phases).
+
+**Run Phase 0's checklist again in full, and expect a different answer than last time.**
+Beta 5 → Beta 6 moved nothing; a **beta → GA** step is the largest surface change in the
+cycle and is the one most likely to shrink something. ⚠️ Two standing warnings apply with
+full force: a surface can **shrink** (Beta 5 removed `Transcript.Segment.custom`), and a
+null result is only a result if `parserIsNotVacuous` passes beside it. Also re-check the
+host/SDK train rule — an SDK ahead of the OS SIGSEGVs the test process in dyld, and the
+stack points at innocent LedgerKit code.
+
+**Things to re-measure rather than carry forward**, because all four are properties of a
+substrate that is being replaced: the on-device context budget (4096 on Beta 6), the
+prefill latencies in CLAUDE.md's demo-timing note, whether the simulator generates, and
+the §7.3 revision count. The residue suite re-asks all of these by design.
+
+### The consumability proof, which lived only in a scratchpad
+
+Phase 2's gate used a throwaway package **outside** the repo; Phase 4's gate repeats it
+with `.package(url:from: "0.1.0")`. It was never committed, so here is the whole thing:
+
+```swift
+// Package.swift
+// swift-tools-version: 6.3
+import PackageDescription
+
+let package = Package(
+    name: "ConsumerProof",
+    platforms: [.macOS(.v26)],
+    products: [.library(name: "ConsumerProof", targets: ["ConsumerProof"])],
+    dependencies: [.package(path: "<repo root>")],          // Phase 4: .package(url:from: "0.1.0")
+    targets: [
+        .target(name: "ConsumerProof", dependencies: [
+            .product(name: "LedgerKit", package: "LedgerKit"),
+            .product(name: "Understudy", package: "LedgerKit"),
+        ])
+    ],
+    swiftLanguageModes: [.v6]
+)
+```
+
+```swift
+// Sources/ConsumerProof/Proof.swift
+import Foundation
+import FoundationModels
+import LedgerKit
+import Understudy
+
+// D62: a @Generable type in a file that also imports LedgerKit. Did not compile
+// before the rename — the macro expands to an unqualified `GenerationID`.
+@Generable
+struct ProbeArguments { var value: String }
+
+public enum Proof {
+    // D61: both products, one package dependency.
+    public static func store(at url: URL) throws -> ConversationStore {
+        try ConversationStore(persistence: .sqlite(at: url))
+    }
+    public static let script = Script([.emit("hello")])
+
+    // D62: both identifiers coexist, unambiguously.
+    public static let ours: LedgerKit.GenerationAttemptID? = nil
+    public static let apples: FoundationModels.GenerationID? = nil
+
+    // D64: the shared descriptor, and the inclusive version set.
+    public static let descriptor = ModelDescriptor.appleSystem
+    public static func pager(_ c: Conversation, _ id: MessageID) -> String {
+        let versions = c.messages.versions(of: id)
+        let index = versions.firstIndex { $0.id == id } ?? 0
+        return versions.count > 1 ? "‹ \(index + 1) of \(versions.count) ›" : ""
+    }
+}
+```
+
+**D63's half is a build that must FAIL.** Add this, confirm `setter is inaccessible`
+twice, then delete it — a consumer being *unable* to forge derived state is the property,
+so the passing case proves nothing:
+
+```swift
+func mutate(_ c: inout Conversation, _ m: inout Message) {
+    c.title = "rewritten"                       // error: setter is inaccessible
+    m.state = .streaming(partial: "forged")     // error: setter is inaccessible
+}
+```
+
+⚠️ **It needs ~600 MB of free disk.** Phase 2's final re-run was blocked by a full host,
+which is the one gate item still open — see Phase 2's review gate.
+
+### The open flake, in case the task chip does not survive
+
+`ProjectionTests`' *"a terminal flips the message to .complete and drops the live entry"*
+failed **once in ~10 full-suite runs** (under `LEDGERKIT_RECORD=1`), then passed 6
+consecutive full runs and 3 filtered. **Both** assertions failed together —
+`assistant.state == .complete(…)` and `projection.live.isEmpty` — at
+`ProjectionTests.swift:120-121`.
+
+It is **not** the M7-style proxy-condition bug: the test already spins on the assertion's
+actual precondition via `waitForLastMessage(of:toReach:)`, and `spin(until:)` has no
+timeout of its own, so a `.timeLimit` cancellation would have *thrown* rather than failing
+two `#expect`s.
+
+**Unverified hypothesis:** returning from the `async` spin is a MainActor suspension
+point, so between the spin's last successful check and the re-read two lines later the
+projection's feed can run and re-apply the overlay — a queued `.delta` for the generation
+that just terminated would flip the message back to `.streaming` and repopulate `live`.
+If that holds, the interesting question is not the test but why
+`reconciled(_:with:routing:against:)` (D50.3) does not already cover it — which would
+make it a library bug. Reproduce under load with full runs; filtered runs pass every
+time, and CLAUDE.md is explicit that a filtered green run is not evidence here.
 
 ---
 
