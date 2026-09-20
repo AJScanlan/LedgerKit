@@ -12,7 +12,6 @@ import SwiftUI
 // `projection.conversation`, which is a fold of the log plus liveness — so there
 // is no second copy of the truth to fall out of sync with the first.
 
-@available(macOS 27.0, iOS 27.0, *)
 struct ChatScreen: View {
 
     let model: AppModel

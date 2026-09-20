@@ -15,6 +15,11 @@ Foundation mints only UUIDv4, and §6.1 calls for UUIDv7 on `EventID`.
 
 ## Decisions
 
+> **Naming note (M9).** These decisions were taken at M1 and are recorded as taken, so
+> they say `GenerationID`. That type is **`GenerationAttemptID`** since M9 Phase 2 — a
+> collision with Foundation Models, not a change of concept; see §6. The four-type
+> scheme, the one-minting-path rule and everything else below are unaffected.
+
 ### 1. Four distinct types, not a shared `UUID` alias
 
 I7 binds `GenerationID ↔ MessageID` 1:1 in v0.1, so call sites routinely hold both,

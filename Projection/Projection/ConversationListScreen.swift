@@ -15,7 +15,6 @@ import SwiftUI
 // free. Choosing the stack would have to be undone the first time this app runs
 // anywhere but a phone.
 
-@available(macOS 27.0, iOS 27.0, *)
 struct ConversationListScreen: View {
 
     let model: AppModel
@@ -169,7 +168,6 @@ struct ConversationListScreen: View {
 
 /// One row. Takes the two fields it renders — the narrow-input rule, which for
 /// value types is what keeps a row from invalidating on unrelated changes.
-@available(macOS 27.0, iOS 27.0, *)
 private struct ConversationRow: View {
 
     let title: String?

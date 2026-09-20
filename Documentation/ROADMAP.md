@@ -64,7 +64,7 @@ The event log and derived-state vocabulary. This is API surface *forever* (§6.1
 
 ~~- `LedgerEvent` + the ten-kind `Payload` enum, `Outcome`, `ToolRecord`, `StopInfo`, `ModelDescriptor` (§6.1).~~
 
-~~- Derived state: `Conversation`, `Message`, `MessageState` (5 cases), `Content` (struct, not `String` — §6.2 additive-headroom), `QuarantinedEvent`.~~ *(plus `MessageTree`'s read API: optional subscript, `children(of:)`, exclusive `siblings(of:)` with virtual-root support, `Conversation.activeMessages`)*
+~~- Derived state: `Conversation`, `Message`, `MessageState` (5 cases), `Content` (struct, not `String` — §6.2 additive-headroom), `QuarantinedEvent`.~~ *(plus `MessageTree`'s read API: optional subscript, `children(of:)`, exclusive `siblings(of:)` with virtual-root support, `Conversation.activeMessages`. **`siblings(of:)` was replaced by the inclusive `versions(of:)` at M9 Phase 2, D64** — the branch switcher it was written for could not use it.)*
 
 ~~- `GenerationError`, `Recoverability`, `RequiredAction` (§8) — note `Recoverability` is **not** `Codable` (derived, never persisted).~~
 

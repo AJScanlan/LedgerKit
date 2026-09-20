@@ -5,38 +5,35 @@ import SwiftUI
 struct ProjectionApp: App {
     var body: some Scene {
         WindowGroup {
-            RootView()
-        }
-    }
-}
-
-/// **Two gates, and they fail for different reasons** — which is why they are two
-/// views rather than one state machine.
-///
-/// The availability gate is a *build target* fact: the app deploys to 26
-/// (matching the package floor — see CLAUDE.md's "never bump a package floor to
-/// 27") while `GenerationDriver` and `ScriptedLanguageModel` are 27-only. It has
-/// to be the outer one, because everything inside is a type that does not exist
-/// below 27.
-struct RootView: View {
-    var body: some View {
-        if #available(macOS 27.0, iOS 27.0, *) {
             LedgerRootView()
-        } else {
-            ContentUnavailableView(
-                "Needs iOS 27",
-                systemImage: "exclamationmark.triangle",
-                description: Text("Foundation Models' session API is 27-only.")
-            )
         }
     }
 }
 
-/// Opens the store once, and says why if it cannot — a *runtime* fact, distinct
-/// from the OS one above: "this device's disk is unhappy today" is a different
-/// sentence from "this OS cannot run the app", and collapsing them would tell a
-/// user on iOS 26 that their storage failed.
-@available(macOS 27.0, iOS 27.0, *)
+// **There was a second gate here until M9 (D70), and deleting it is the point.**
+//
+// The app used to deploy to 26 — matching the package floor — and then refuse to
+// run below 27 at launch, because `GenerationDriver` and `ScriptedLanguageModel`
+// are 27-only. So it shipped a build configuration it could not use, and the
+// only thing the gate demonstrated was its own vacuity.
+//
+// ⚠️ **The packages stay at 26, and this changes nothing about that.** The
+// question worth asking before moving the app was: if the app goes to 27, what
+// still evidences the *packages'* 26 floor? Checked rather than assumed — the
+// package builds do, and always did. SPM compiles LedgerKit at
+// `arm64-apple-macos26.0` from the manifest's `.macOS(.v26)`, and the simulator
+// tier at `arm64-apple-ios26.0-simulator`; both are commands CI already runs.
+// The app was never the evidence, which is exactly why moving it costs nothing.
+// Had the answer come out the other way, D70 would have been wrong.
+
+/// Opens the store once, and says why if it cannot — a **runtime** fact.
+///
+/// This was the *inner* of two gates until D70 removed the outer OS one. The
+/// distinction it drew still matters and is worth keeping written down: "this
+/// device's disk is unhappy today" is a different sentence from "this OS cannot
+/// run the app", and collapsing them would have told a user on iOS 26 that their
+/// storage had failed. With the deployment target at 27 the second sentence is
+/// no longer reachable, so only the honest one remains.
 private struct LedgerRootView: View {
 
     @State private var state: OpenState = .opening

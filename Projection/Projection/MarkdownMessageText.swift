@@ -232,7 +232,6 @@ final class StreamingPartialSource: StreamedMarkdownSource {
 /// replacement for it, and it retires on the first *displayed* character — not
 /// the first *arrived* one, which would leave a gap while the pacer holds text
 /// back.
-@available(macOS 27.0, iOS 27.0, *)
 struct AssistantMarkdown: View {
 
     static let config = MarkdownRenderConfig.default

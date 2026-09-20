@@ -13,13 +13,11 @@ import SwiftUI
 // they end up differing.
 
 /// A conversation the user asked to rename, and what it is called now.
-@available(macOS 27.0, iOS 27.0, *)
 struct RenameRequest: Identifiable, Equatable {
     let id: ConversationID
     let currentTitle: String?
 }
 
-@available(macOS 27.0, iOS 27.0, *)
 extension View {
 
     /// Presents the rename alert whenever `request` is non-nil.
@@ -37,7 +35,6 @@ extension View {
     }
 }
 
-@available(macOS 27.0, iOS 27.0, *)
 private struct RenameConversationModifier: ViewModifier {
 
     @Binding var request: RenameRequest?

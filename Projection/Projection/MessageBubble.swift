@@ -22,7 +22,6 @@ import SwiftUI
 //
 // This is the layer most worth arguing about, so it is kept small and separate.
 
-@available(macOS 27.0, iOS 27.0, *)
 struct MessageBubble: View {
 
     let message: Message

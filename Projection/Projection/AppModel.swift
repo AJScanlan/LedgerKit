@@ -16,7 +16,6 @@ import Understudy
 
 /// The store, the provider line, and the error channel — everything a screen
 /// needs that outlives the screen.
-@available(macOS 27.0, iOS 27.0, *)
 @MainActor
 @Observable
 final class AppModel {
