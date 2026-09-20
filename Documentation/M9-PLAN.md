@@ -851,7 +851,7 @@ the kind this plan is usually careful about. Candidates measured, none deleted: 
 
 ### Phase 3 — README (DoD-4) and, if the budget allows, DocC
 
-**Status:** ☐ not started.
+**Status:** ◐ **README drafted and signed off 2026-09-20**; GIFs and DocC outstanding.
 
 **Goal:** the document a stranger reads first, written against the shipped layout.
 
@@ -866,8 +866,51 @@ the kind this plan is usually careful about. Candidates measured, none deleted: 
       own short section, no LedgerKit assumed); requirements (Xcode 27, floors 26,
       27-gated `Session/`); the privacy floor sentence (D65); **pre-1.0 caveat** (D67);
       license.
-- [ ] Every code block in the README is pasted from something that builds; note the
-      source file beside each in a comment.
+- [x] **README landed 2026-09-20, signed off**, with five deviations from the outline
+      above — recorded rather than silent, because the outline was the plan and this
+      was not it. Checked first against how TCA, `swift-dependencies` and GRDB are
+      actually structured; the consistent pattern is *positioning → motivation → code →
+      reference → install*, with installation late in all three (nobody installs what
+      they are not yet sold on).
+  1. **"Why not just persist `session.transcript`?" moved above the quickstart**, from
+     #5 to #1. It *is* the positioning — the question the reader is already asking in
+     their own words — and `swift-dependencies` builds its whole structure on answering
+     that at #3. Leading with the quickstart risks a reader seeing a store, a `send` and
+     a switch, concluding "chat wrapper, I already have a transcript", and leaving
+     before the argument. §2's five failures are a **table** so the argument scans in
+     ten seconds; developers spend well under a minute deciding.
+  2. **Recoverability table moved down** into the message-states section, immediately
+     after the `switch` that consumes it. At #4 it sat between the quickstart and the
+     argument, interrupting the persuasion arc with reference material.
+  3. **Four sections added** that the outline lacked and all three exemplars have:
+     badges, a nav line, **Documentation** (SPEC + the three ADRs — a real
+     differentiator here), and **Status**.
+  4. **"What LedgerKit does not do" added** — §2's boundary map. A trust signal, it
+     prevents mis-adoption, and it sets up the provider swap: the reason swapping is one
+     line is precisely that LedgerKit refuses to abstract over providers.
+  5. **Branching section added.** The outline had no home for edit / regenerate /
+     `versions(of:)`, and "is linear" is one of the five failures the README has just
+     claimed — asserting a differentiator and never demonstrating it is the weakest
+     shape available.
+- [x] Every code block in the README is pasted from something that builds; the source
+      file is named beside each in a comment. `setInstructions`, `versions(of:)`,
+      `GenerationDriver`'s convenience init, `Message: Identifiable` and the three ADR
+      filenames were each re-read against source rather than recalled.
+  - ⚠️ **Verifying the prose caught a false claim, which is the argument for the rule.**
+    The draft said LedgerKit "does not set a file-protection class". It does —
+    `SQLitePersistenceStore.swift:134` applies `.completeUntilFirstUserAuthentication`
+    on the iOS family. The Privacy section now states that, names ADR-003's two owned
+    gaps (`-wal`/`-shm` protected on the *next* open; directory protection belongs to
+    the app), and adds §9's honest note that append-only storage and erasure are
+    **structurally opposed**, with message-level redaction out of scope until v0.2's
+    crypto-shredding-vs-log-rewrite decision. The corrected passage is a stronger trust
+    signal than the false one would have been.
+- [ ] **GIFs.** Two `TODO(gif)` slots remain (`dod1.gif`, `dod2.gif`); both assets exist
+      in `Documentation/assets/`. Deferred deliberately at drafting time.
+- [ ] Open questions left with the owner at sign-off: whether **Versioning** (long for a
+      README) moves to a `VERSIONING.md` with a three-line summary; whether **Status**
+      should carry the test count and the M0–M8 record as a credibility signal (left out
+      as it can read as self-congratulatory).
 - [ ] **DocC (ENHANCEMENTS 2) — stretch.** Two articles if time allows: the recovery
       story written against `RecoveryTests.killMidStreamRecoversAsInterrupted` (M7
       handoff 4's unflushed-tail arithmetic), and the transcript-blob argument shared with
