@@ -330,6 +330,34 @@ choose the string before anyone has run it. A static constant later is additive.
 
 ---
 
+## Item 13 — §10: P2 clause 3 must be checked continuously (NEW, 2026-09-28)
+
+**Proposed** — append to §10's P2 description:
+
+> ⚠️ **Clause 3 must be evaluated continuously, not at chosen moments.** P2 is a
+> predicate over a projection's state, so a test evaluates it where it decides to —
+> and a violation that opens for a few scheduler hops and then heals is invisible to
+> every such call site while still having put a wrong frame on screen. That is not
+> hypothetical: it is how a real defect survived (M9, 2026-09-28) in which a `.delta`
+> arriving after its generation's terminal re-entered the live set and flipped a
+> `.complete` message to `.streaming` until the next re-pull. The projection therefore
+> carries a running count of clause-3 violations that the suite asserts is zero, which
+> is what makes the property a *check* rather than a sample.
+
+**Why.** Rev 10 already scoped clause 1 after finding it tautological against a live
+store; this is the same kind of correction one clause over, and from the same cause —
+**a property stated over a snapshot says nothing about the frames between snapshots.**
+Worth binding in §10 because the next person to add a projection property will
+otherwise reach for the snapshot form again.
+
+⚠️ This is the item §12 of this draft said would exist "only if the diagnosis produces a
+claim worth binding". It did: the claim is about how P2 is *evaluated*, which is §10's
+subject, and it is independent of the particular bug.
+
+- [ ] Signed off
+
+---
+
 ## Ratification checklist (D67 order)
 
 1. [ ] Every item above signed off

@@ -190,6 +190,13 @@ struct RecoveryTests {
 
         // The new response is on the path…
         #expect(projection.conversation.activeMessages.last?.state == .complete(MessageContent(text: "A valley fold.")))
+        // **P2 clause 3, continuously.** This is the assertion the original failure
+        // needed: it read as `.complete != .streaming`, which points at rendering,
+        // when the defect was a finished generation sitting in the live set. Naming
+        // it here means a regression fails as itself.
+        #expect(projection.liveSetAnomalies == 0,
+                "a finished generation entered the live set; the overlay then rendered it as streaming")
+
         // …and the crashed attempt is a *version* of it, still holding its partial.
         let versions = projection.conversation.messages.versions(of: interrupted.id)
         #expect(versions.count == 2, "the interrupted attempt and its regeneration are two versions of one answer")

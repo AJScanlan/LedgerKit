@@ -100,6 +100,15 @@ public final class ConversationProjection {
     /// Internal: it exists to be tested, like `ConversationStore.liveGenerations`.
     private(set) var overlayApplications = 0
 
+    /// How many times ``apply()`` saw a live generation whose message had already
+    /// classified to a terminal state — P2 clause 3 violated at runtime.
+    ///
+    /// **Must be zero.** Non-zero means something put a finished generation into the
+    /// live set, and the overlay then rendered a completed message as `.streaming`.
+    /// Internal so the suite can assert it; see ``apply()`` for why it is counted
+    /// rather than trapped.
+    private(set) var liveSetAnomalies = 0
+
     /// Attaches to a conversation and reduces it once.
     ///
     /// **`async throws` because attaching is genuinely both.** It reads the log, so
@@ -269,6 +278,37 @@ public final class ConversationProjection {
     /// two values for one generation the longer is always the later. UTF-8 count
     /// rather than `Character` count, matching `SnapshotDiff`'s rule one seam over.
     private func record(_ partial: String, for generation: GenerationAttemptID) {
+        // **A generation the fold says has ended is not live, whatever a
+        // notification still in flight says** — tenet 2, applied at the one place
+        // entries entered the live set without consulting the log.
+        //
+        // ⚠️ **Found by a real failure, not by reading** (2026-09-28). Without this,
+        // `live` could hold a generation whose message had already classified to a
+        // terminal state, which is **P2 clause 3 violated at runtime** — and the
+        // overlay, correctly, renders what the live set says, so a `.complete`
+        // message flipped back to `.streaming` on screen. `reconciled(_:with:…)`
+        // prunes on exactly this condition, but it runs only on `.changed`; the
+        // `.delta` path had no equivalent, so anything arriving after the pruning
+        // re-pull resurrected the entry until the *next* re-pull healed it.
+        // `reconciled`'s doc claimed that could not happen, on FIFO-ordering
+        // grounds; the trace disagreed, which is why the invariant is now enforced
+        // where entries are created rather than argued from delivery order.
+        //
+        // **Not the read-side repair `overlay(_:live:)` warns against.** That
+        // warning is about rendering: given a live set, show it faithfully rather
+        // than second-guess it, so a store defect surfaces instead of hiding. This
+        // is upstream of rendering — it is about what may *enter* the set — and it
+        // is the same category of rule as the length guard below.
+        //
+        // ⚠️ **The `nil` case must record**, and that is not an oversight: a
+        // generation whose start this projection has not folded yet has no message
+        // and no state, and it is exactly the just-started generation the store's
+        // live set exists to make live before any delta arrives. Rejecting it would
+        // reintroduce the flash of `.interrupted` that ``repull()`` documents.
+        if let message = messageForGeneration[generation],
+           let state = classified.messages[message]?.state {
+            guard case .interrupted = state else { return }
+        }
         guard partial.utf8.count >= (live[generation]?.utf8.count ?? 0) else { return }
         live[generation] = partial
     }
@@ -310,10 +350,21 @@ public final class ConversationProjection {
     /// now reconcile through this one function rather than one of them remembering
     /// to.
     ///
-    /// A stale queued `.delta` cannot resurrect a dropped entry: a generation's
-    /// deltas all precede the `.changed` that retires it (FIFO per subscriber,
-    /// `notify` synchronous with the state change), so by the time this drops an
-    /// entry there is nothing behind it.
+    /// ⚠️ **This used to claim that a stale queued `.delta` could not resurrect a
+    /// dropped entry**, reasoning from FIFO delivery per subscriber and `notify`
+    /// being synchronous with the state change. **A trace falsified it**
+    /// (2026-09-28): a `.delta` was recorded *after* a re-pull had already dropped
+    /// its generation and published the terminal view, flipping a `.complete`
+    /// message back to `.streaming` on screen until the next re-pull healed it.
+    ///
+    /// The reasoning was sound about the *stream* and wrong about the *invariant*:
+    /// ordering of deliveries does not by itself constrain what `record(_:for:)`
+    /// may put into the set, and this function — the only pruner — runs on
+    /// `.changed` alone. So the invariant is now enforced where entries are
+    /// created (see ``record(_:for:)``) rather than argued from delivery order, and
+    /// ``apply()`` counts violations continuously so a regression is named rather
+    /// than mistaken for a rendering bug. Kept as a correction rather than deleted:
+    /// the deleted version would have taken the lesson with it.
     ///
     /// - Parameters:
     ///   - live: The shown live set — at attach this *is* `storeLive`, since nothing
@@ -352,6 +403,28 @@ public final class ConversationProjection {
     }
 
     private func apply() {
+        // **P2 clause 3, checked continuously instead of at chosen moments.**
+        //
+        // ⚠️ This exists because the snapshot form missed a real defect. P2 is
+        // evaluated where a test decides to evaluate it, and the violation this
+        // counts opened for a few scheduler hops and then healed on the next
+        // re-pull — so every P2 call site saw a satisfying input while the screen
+        // had already shown the wrong thing. A brief invariant violation in a
+        // read side is still a wrong frame, and a frame is the product.
+        //
+        // Counted rather than trapped: the reducer's no-trapping discipline is
+        // about the fold, but the same argument applies harder here — crashing an
+        // app's UI over a transient bookkeeping disagreement would be a worse bug
+        // than the one being reported. Tests assert this is zero, which turns a
+        // timing-dependent flake into a named, deterministic failure the run it
+        // happens in.
+        for (generation, _) in live {
+            guard let message = messageForGeneration[generation],
+                  let state = classified.messages[message]?.state
+            else { continue }   // not folded yet — legitimately live, see `record`
+            if case .interrupted = state { continue }
+            liveSetAnomalies += 1
+        }
         conversation = overlay(classified, live: live)
         overlayApplications += 1
     }

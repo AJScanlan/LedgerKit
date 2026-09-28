@@ -1309,11 +1309,71 @@ bug** — and `0.1.0` should not be tagged on an unexplained race in
 `ConversationProjection`, because the read side is what apps actually consume. Two
 instances, two files, one shape.
 
-**Phase 4 gate item (new):** explain or fix this before the tag. The cheap first
-experiment is to instrument `record(_:for:)` / `reconciled(_:with:routing:against:)`
-to log every state transition for one message and run the suite until it reproduces;
-a transition *out of* a terminal state is the smoking gun, and it is a property that
-could then be asserted permanently rather than spun on.
+### ☑ DIAGNOSED AND FIXED 2026-09-28 — it was a library bug, in the projection
+
+**Root cause.** `record(_:for:)` added entries to the live set with **no check against
+the folded state**, and `reconciled(_:with:routing:against:)` — the only pruner — runs
+on `.changed` alone. So a `.delta` arriving after the re-pull that retired its
+generation put a *finished* generation back into `live`, and `overlay(_:live:)` then
+did exactly what it documents: rendered what the live set said, flipping `.complete`
+back to `.streaming` until the next re-pull healed it.
+
+**That is P2 clause 3 violated at runtime** — the live set is not a subset of open
+generations — which is what the overlay's own comment predicts ("the only way to reach
+this line with a terminal message is a store that failed to unregister"). The
+diagnosis narrowed it to the projection rather than the store: `notify` yields
+synchronously per subscriber and `consume` fully drains before `windDown` appends the
+terminal, so the store's ordering is correct.
+
+**Evidence, in the order it was obtained** (each step corrected the previous reading,
+which is why all three are recorded):
+
+1. Instrumenting the test printed the failing view: message `0020` was
+   `.streaming("A valley fold.")` with `live = [0040: "A valley fold."]`, while the
+   active path and the version set were **both correct**. So it was never a path or
+   ordering bug — only the state.
+2. A first trace *looked* like it showed the sequence, and ⚠️ **was unusable**: tests
+   run in parallel and the instrumentation carried no projection identity, so lines
+   from different projections interleaved. Nearly drew a conclusion from it. Recorded
+   because it is the most plausible way to get this kind of hunt wrong.
+3. A **low-volume anomaly detector** — one print, firing only on the violation — gave
+   the definitive line, with message identity:
+   `gen=0040 msg=0020 classified=complete("A valley fold.") liveCount=1`. Print volume
+   matters: the verbose version was a Heisenbug and stopped reproducing for 30 runs.
+
+**The fix.** One guard in `record(_:for:)`: a generation the fold says has ended is not
+live, whatever a notification still in flight says (tenet 2). ⚠️ The `nil` case
+deliberately still records — a generation whose start is not folded yet is exactly the
+just-started generation the store's live set exists to make live before any delta, and
+rejecting it would reintroduce the flash of `.interrupted` that `repull()` documents.
+
+⚠️ **This is not the read-side repair `overlay(_:live:)` argues against.** That warning
+is about *rendering*: given a live set, show it faithfully so a store defect surfaces
+rather than hides. This is upstream of rendering — what may *enter* the set — and it is
+the same category of rule as `record`'s existing never-shorten guard.
+
+**Verification.** Baseline was 1 failure in every 4–10 full runs. After the fix:
+**40 consecutive full-suite runs, 0 failures.** Mutation test: removing the guard
+reproduces on run 8 of 25, and the new assertion fires beside the original one.
+
+**Coverage lesson, and it generalizes.** ⚠️ **P2's snapshot form could not have caught
+this.** P2 is evaluated where a test chooses to evaluate it, and this violation opened
+for a few scheduler hops and then healed — so every existing call site saw a satisfying
+input while the screen had already shown a wrong frame. `ConversationProjection` now
+carries `liveSetAnomalies`, incremented in `apply()` whenever a live generation's
+message has already classified to a terminal state, and the suite asserts it is zero.
+That converts a timing-dependent flake into a **named, deterministic** failure in
+whichever run the window opens — and it is why the original failure read as
+`.complete != .streaming`, pointing at rendering, when the defect was bookkeeping.
+
+**Also corrected:** `reconciled`'s doc asserted that a stale queued `.delta` *could
+not* resurrect a dropped entry, reasoning from FIFO delivery. The trace falsified it.
+The claim is kept as a correction rather than deleted, because deleting it would take
+the lesson with it.
+
+⚠️ **The older ~1-in-10 `ProjectionTests` flake below is very likely the same root
+cause** — same shape, same spin-then-reassert, same self-healing. It did not reproduce
+during this hunt, so that is stated as a likelihood rather than a claim.
 
 ### The open flake, in case the task chip does not survive
 
