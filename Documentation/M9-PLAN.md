@@ -1266,6 +1266,48 @@ func mutate(_ c: inout Conversation, _ m: inout Message) {
 ⚠️ **It needs ~600 MB of free disk.** Phase 2's final re-run was blocked by a full host,
 which is the one gate item still open — see Phase 2's review gate.
 
+### ⚠️ SECOND INSTANCE FOUND 2026-09-28 — this is now a Phase 4 gate item
+
+**A different test, in a different file, failed the same way**, which turns the
+hypothesis below from plausible into corroborated and makes it a **blocker on the
+tag** rather than a curiosity. `RecoveryTests`' *"the interrupted partial survives as
+a sibling, and regenerate works over it"* failed at `RecoveryTests.swift:192`:
+
+```
+Expectation failed: projection.conversation.activeMessages.last?.state
+                    == .complete(MessageContent(text: "A valley fold."))
+```
+
+**Why this is stronger evidence than the first instance.** That test spins on
+*exactly* the condition it then asserts — `spin(until:)` on
+`…last?.state == .complete(…)`, then the identical read two lines later — so it is
+**not** the M7 proxy-condition bug, and cannot be explained away as a badly chosen
+precondition. The spin *succeeded*, and then the same expression was false. That is
+`.complete` walking **backwards**, which is precisely what the live-set and
+"a shown partial never shortens" rules (D47, D50.3) exist to forbid.
+
+Frequency here: **1 failure in 4 full runs**, then 3 consecutive clean runs. Worse
+than the ~1-in-10 recorded below, same class.
+
+**Mechanism this points at.** Between the spin's last check and the re-read, the
+`await` is a MainActor suspension point, so the projection's feed can run and
+re-apply the overlay. A `.delta` for the *regeneration* landing after that
+generation's terminal `.changed` would flip the just-completed message back to
+`.streaming`. The existing rules prevent shown *text* from shortening; what is not
+obviously prevented is **state** regressing when a stale `.delta` arrives after a
+terminal.
+
+⚠️ **If that is what is happening it is a library bug in the read side, not a test
+bug** — and `0.1.0` should not be tagged on an unexplained race in
+`ConversationProjection`, because the read side is what apps actually consume. Two
+instances, two files, one shape.
+
+**Phase 4 gate item (new):** explain or fix this before the tag. The cheap first
+experiment is to instrument `record(_:for:)` / `reconciled(_:with:routing:against:)`
+to log every state transition for one message and run the suite until it reproduces;
+a transition *out of* a terminal state is the smoking gun, and it is a property that
+could then be asserted permanently rather than spun on.
+
 ### The open flake, in case the task chip does not survive
 
 `ProjectionTests`' *"a terminal flips the message to .complete and drops the live entry"*

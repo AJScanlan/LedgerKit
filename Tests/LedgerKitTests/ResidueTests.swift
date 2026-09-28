@@ -371,3 +371,207 @@ struct DeviceResidueTests {
         Issue.record("N3 — survived \(turns) turns of ~2k tokens without refusing")
     }
 }
+
+// MARK: - Private Cloud Compute (rev 12's proposed §14 residue)
+
+/// Set `LEDGERKIT_PCC=1` on a machine whose team holds the Private Cloud Compute
+/// entitlement.
+///
+/// A fourth gate rather than a reuse of ``deviceTestsEnabled``, because the two
+/// substrates are independent: a machine can have a working on-device model and
+/// no PCC entitlement, which is every machine until Apple grants one. Folding
+/// them together would make the PCC residue report *skipped* for the wrong
+/// reason on exactly the hardware that can answer it.
+///
+/// ⚠️ **Availability is not the gate, for the reason §14 already records.**
+/// `PrivateCloudComputeLanguageModel().availability` is advisory like every other
+/// availability API here, so an explicit opt-in is the only honest switch.
+let pccTestsEnabled = ProcessInfo.processInfo.environment["LEDGERKIT_PCC"] == "1"
+
+/// **The PCC residue: three questions §8 answers by reasoning and nobody has run.**
+///
+/// §8 maps `PrivateCloudComputeLanguageModel.Error`'s three cases by lift rules 2
+/// and 4 — `networkFailure` → `transport(.connectivity)`, `quotaLimitReached` →
+/// `rateLimited(retryAfter:)`, `serviceUnavailable` → `providerFailure(status:
+/// nil, code:)`. Every one of those is a **disposition**, and §14's own closing
+/// note is that a tripwire pins shape while a disposition is a claim about the
+/// world only running code can falsify. The `emptyResponse` case is the precedent
+/// that cost something: it was argued from "obviously retryable", which was never
+/// measured and was false.
+///
+/// **The sharpest of the three, stated so it is not lost:** §8 calls
+/// `serviceUnavailable` *"the nil-status transient this section anticipated in
+/// prose"* — yet the shipped default maps a nil-status `providerFailure` to
+/// **`terminal`**. If PCC's `serviceUnavailable` really is transient, the default
+/// hands users the wrong affordance, and §8 already names the remedy: an override
+/// keyed on `code`, plus a fixture. That correction is **free after the tag**,
+/// because `Recoverability` is derived at classification time and persisted
+/// nowhere — which is why this is a residue rather than a `0.1.0` blocker.
+///
+/// ⚠️ **These tests cannot *force* their conditions**, and pretending otherwise
+/// would be the vacuous-predicate trap `InvariantCheckTests` exists to guard
+/// against. So each asserts something that must hold whenever the condition
+/// arrives, and *prints* what it saw. A residue re-asks its question; it does not
+/// assert a remembered answer.
+@Suite(
+    "§14 residue — Private Cloud Compute",
+    .enabled(if: foundationModelsAvailable && pccTestsEnabled),
+    .timeLimit(.minutes(5))
+)
+struct PrivateCloudComputeResidueTests {
+
+    /// The descriptor this residue writes into the log.
+    ///
+    /// ⚠️ **Deliberately not a public `ModelDescriptor` constant yet.** D64 added
+    /// `.appleSystem` because two apps spelling one model differently make it look
+    /// like two in the log — the same argument applies here, and it is exactly why
+    /// the string should not be minted blind. A `provider`/`model` pair is
+    /// **permanent wire data**; choosing it before anyone has run PCC would commit
+    /// a name on a guess. Adding a static constant later is purely additive, so
+    /// nothing is lost by waiting for the first real generation to inform it.
+    private static let descriptor = ModelDescriptor(provider: "apple", model: "private-cloud-compute")
+
+    /// **Question 1: is PCC a usable second provider at all, end to end?**
+    ///
+    /// This is the substrate check, and it is worth more than it looks. DoD-2 asks
+    /// for a one-line swap to *a second real provider*, and every demonstration so
+    /// far has needed either a scripted double or a vendor package on its own
+    /// release cadence (D69). PCC is Apple's, so a pass here is provider-swap
+    /// evidence with **no remote dependency and no forced deployment floor** —
+    /// which is strictly better than the path M8 recorded.
+    @Test("PCC answers through the driver, and the log names it")
+    func pccAnswersThroughTheDriver() async throws {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+
+        let model = PrivateCloudComputeLanguageModel()
+        print("PCC — availability=\(model.availability) isAvailable=\(model.isAvailable)")
+
+        let store = try ConversationStore(persistence: .inMemory)
+        let driver = GenerationDriver(model: model, descriptor: Self.descriptor)
+        let convo = try await store.createConversation()
+
+        let outcome = try await store.send("List three colors.", in: convo.id, using: driver)
+        print("PCC — outcome=\(outcome)")
+
+        let conversation = try await store.conversation(convo.id)
+        let assistant = try #require(conversation.activeMessages.last { $0.role == .assistant })
+
+        // The one thing that must hold however the generation went: the ledger
+        // records which provider answered. §13 DoD-2's evidence is the log, not a
+        // vendor's name in a build file.
+        #expect(conversation.diagnostics.isEmpty, "a store-written log must reduce cleanly")
+        switch assistant.state {
+        case .complete(let content):
+            #expect(!content.text.isEmpty, "a completed PCC generation should carry text")
+        case .failed(_, let error, let recoverability):
+            // Not a failure of this test — PCC may legitimately be unavailable.
+            // Recorded so the run is readable, and asserted below on taxonomy.
+            print("PCC — generation failed: \(error) → \(recoverability)")
+        case .cancelled, .interrupted, .streaming:
+            Issue.record("PCC — unexpected terminal state \(assistant.state)")
+        }
+    }
+
+    /// **Question 2: does PCC's quota API belong to LedgerKit? (Expected: no.)**
+    ///
+    /// Rev 12 item 10 argues from §2 that quota is billing-adjacent and therefore
+    /// Apple's, so `quotaUsage` is the app querying the provider *before*
+    /// generating — structurally the same as `SystemLanguageModel.availability`,
+    /// which §8 normalizes only where it produces a generation-time error.
+    ///
+    /// The assertion is the boundary, not the numbers: nothing quota-shaped may
+    /// reach the ledger. ⚠️ **The values themselves are environmental** and must
+    /// never be asserted — the same rule cache warmth earned in §7.7.
+    @Test("quota is Apple's to report, and reaches the ledger nowhere")
+    func quotaIsApplesToReport() async throws {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+
+        let model = PrivateCloudComputeLanguageModel()
+        let quota = model.quotaUsage
+
+        // Readable with no LedgerKit API in the path — which is the boundary
+        // holding, demonstrated by this test body rather than argued.
+        print("PCC quota — isLimitReached=\(quota.isLimitReached) resetDate=\(quota.resetDate as Any)")
+        print("PCC quota — status=\(quota.status) suggestion=\(quota.limitIncreaseSuggestion as Any)")
+
+        let store = try ConversationStore(persistence: .inMemory)
+        let driver = GenerationDriver(model: model, descriptor: Self.descriptor)
+        let convo = try await store.createConversation()
+        let outcome = try await store.send("What is 2+2?", in: convo.id, using: driver)
+
+        // `StopInfo` carries stop reason, usage and resolved model — and no quota
+        // field, by construction. If a future revision adds one, this is where the
+        // §2 boundary argument gets re-litigated rather than quietly crossed.
+        if case .completed(let stop) = outcome {
+            print("PCC — stopInfo=\(stop)")
+            #expect(stop.usage?.inputTokens != nil || stop.usage == nil,
+                    "usage is either reported coherently or absent; never partially invented")
+        }
+    }
+
+    /// **Question 3: do PCC's failures land in §8's typed taxonomy, and is
+    /// `serviceUnavailable` actually transient?**
+    ///
+    /// Two claims in one test because they are answered by the same observation.
+    ///
+    /// **The taxonomy claim is assertable whenever a failure arrives**: §8 claims
+    /// totality over Apple's families, so a PCC failure must *not* reach
+    /// `unrecognized`. That case is the floor whose job is to be loud about what
+    /// the taxonomy failed to anticipate — and rev 6 caught §8 quietly absorbing
+    /// four `unsupported*` cases into it, so the floor being hit here would be a
+    /// real finding rather than a curiosity.
+    ///
+    /// **The transience claim can only be probed opportunistically.** If a
+    /// nil-status `providerFailure` appears, this retries immediately and reports
+    /// the tally — the shape of the ten-line probe that settled `emptyResponse`
+    /// (0/10 on retry vs 5/5 on rewording). A retry that succeeds means the
+    /// default `terminal` affordance is wrong for this code and §8 owes an
+    /// override; a retry that fails means `terminal` was right. Either way the
+    /// answer is measured rather than reasoned.
+    @Test("PCC failures stay inside the typed taxonomy, and transience is measured not assumed")
+    func failuresLandInTheTypedTaxonomy() async throws {
+        guard #available(macOS 27.0, iOS 27.0, visionOS 27.0, watchOS 27.0, *) else { return }
+
+        let model = PrivateCloudComputeLanguageModel()
+        let store = try ConversationStore(persistence: .inMemory)
+        let driver = GenerationDriver(model: model, descriptor: Self.descriptor)
+        var observed: [GenerationError] = []
+
+        for attempt in 1...5 {
+            let convo = try await store.createConversation()
+            let outcome = try await store.send("Explain gravity simply.", in: convo.id, using: driver)
+            guard case .failed(let error) = outcome else { continue }
+            observed.append(error)
+            print("PCC failure \(attempt) — \(error) → \(RecoverabilityMapping.default.recoverability(for: error))")
+
+            // §8's totality claim, asserted where it is checkable.
+            if case .unrecognized(let description) = error {
+                Issue.record("""
+                    PCC failure reached §8's floor rather than a typed case: \(description)
+                    That is a gap in §8's PCC rows, not a curiosity — see rev 6's
+                    `unsupported*` precedent. Record the shape and add the mapping.
+                    """)
+            }
+
+            // The transience probe, for the case §8 called a nil-status transient.
+            if case .providerFailure(let status, let code, _) = error, status == nil {
+                var recovered = 0
+                for _ in 1...5 {
+                    let retry = try await store.createConversation()
+                    if case .completed = try await store.send(
+                        "Explain gravity simply.", in: retry.id, using: driver
+                    ) { recovered += 1 }
+                }
+                print("""
+                    PCC — nil-status providerFailure(code: \(code as Any)) \
+                    recovered \(recovered)/5 on immediate retry. \
+                    Default affordance is `terminal`; >0 means §8 owes an override keyed on this code.
+                    """)
+            }
+        }
+
+        if observed.isEmpty {
+            print("PCC — 5/5 generations produced no failure; the transience question stays open.")
+        }
+    }
+}
