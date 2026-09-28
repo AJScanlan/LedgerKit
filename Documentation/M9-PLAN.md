@@ -1073,6 +1073,13 @@ non-empty.
 
 ## 6. Rev 12 inventory (seeded from the audit; draft at Phase 4, not from memory)
 
+> **☑ DRAFTED 2026-09-28 → [`REV12-DRAFT.md`](./REV12-DRAFT.md).** All twelve items
+> written out with current text, proposed text and rationale, one sign-off box each —
+> the rev 7 pattern. **Nothing has touched `SPEC.md`.** The inventory below stays as the
+> index; the draft is where the wording is argued. ⚠️ **Delete the draft at
+> ratification** — a draft left beside a ratified spec is a second source of truth.
+> **Nothing in rev 12 touches the wire**, which is the first thing a reader asks.
+
 1. **§9** — retire "migrations and value observation, the latter of which the M7
    projection wants" (F12). Paraphrase, do not quote: GRDB for migrations and the
    single-writer transaction model; observation examined and declined at M7 (ADR-003).
