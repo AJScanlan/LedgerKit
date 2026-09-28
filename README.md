@@ -258,6 +258,17 @@ The descriptor is durable wire data: two apps spelling the same model differentl
 would make one model look like two in the log, which is why
 `ModelDescriptor.appleSystem` is a shared constant rather than a string you retype.
 
+**What is claimed here, precisely.** The swap is one line, and the log records which
+provider answered. What is *not* claimed is that any given vendor's package stays
+buildable across SDK releases — that is the vendor's release cadence, not this
+library's. Concretely, as of Xcode 27.0: Apple's Private Cloud Compute provider needs
+an entitlement, and no tagged release of `ClaudeForFoundationModels` builds against
+the 27 SDK. The demo's Claude wiring therefore lives on the unmerged branch
+`m8-dod2-claude` rather than on `main`, because pinning `main` to a provider that
+does not currently build would be a worse promise than not making one. The recorded
+demonstration and the log line are the evidence; the vendor's name in a build file
+is not.
+
 ---
 
 ## Testing with Understudy

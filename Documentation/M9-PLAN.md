@@ -327,6 +327,29 @@ a "yes" recorded now could be stale by the tag. Also: adding the dependency is a
 decision (§12 cut line 4's standing rule that a remote dependency is not something this
 milestone takes in passing).
 
+### ☑ D69 RESOLVED 2026-09-28 — **the branch stays unmerged**
+
+Owner reports that **no tagged release of `ClaudeForFoundationModels` builds against the
+Xcode 27.0 GA SDK.** That is the second half of the condition failing, so D69 takes the
+branch it was drafted to take: `m8-dod2-claude` is **not merged**, and the README cites
+the clip and names the branch.
+
+**This costs DoD-2 nothing, and the reason is worth stating because it looks like it
+should.** SPEC §13 DoD-2 was already satisfied at M8 — demonstrated across *three*
+providers with the log recording which answered — and **rev 11 anticipated this exact
+situation in the line itself**: what is claimed is the one-line swap, not that any
+vendor's package stays buildable across SDK rings, and it names Anthropic's release
+cadence as the reason. A spec sentence written a milestone early turned out to describe
+the present. Nothing to amend.
+
+**One gap this surfaced, and it was in the fresh README.** The provider-swap section
+showed an `anthropic` example without saying it will not build on 27.0 today — a reader
+would have tried it. Fixed: the section now states precisely what is claimed (the swap,
+and the log as evidence) and what is not (vendor buildability), and names both live
+exceptions — PCC's entitlement and the untagged-for-27 Claude package — plus the branch.
+Recorded because the omission was the *honest* kind: everything written was true, and a
+reader would still have been misled by what was missing.
+
 ### D70 — The app target moves to 27; the OS-availability gate goes
 
 `Projection`'s deployment target is 26.5/26.4 on `main` while `ProjectionApp` refuses
@@ -851,7 +874,9 @@ the kind this plan is usually careful about. Candidates measured, none deleted: 
 
 ### Phase 3 — README (DoD-4) and, if the budget allows, DocC
 
-**Status:** ◐ **README drafted and signed off 2026-09-20**; GIFs and DocC outstanding.
+**Status:** ☑ **DONE — signed off 2026-09-28.** README and both DocC catalogs landed.
+**The two GIF slots are the owner's**, handled outside this plan; the `TODO(gif)`
+markers in the README name the assets and stay until then.
 
 **Goal:** the document a stranger reads first, written against the shipped layout.
 
@@ -905,8 +930,9 @@ the kind this plan is usually careful about. Candidates measured, none deleted: 
     **structurally opposed**, with message-level redaction out of scope until v0.2's
     crypto-shredding-vs-log-rewrite decision. The corrected passage is a stronger trust
     signal than the false one would have been.
-- [ ] **GIFs.** Two `TODO(gif)` slots remain (`dod1.gif`, `dod2.gif`); both assets exist
-      in `Documentation/assets/`. Deferred deliberately at drafting time.
+- [~] **GIFs — owner's, by agreement (2026-09-28).** Two `TODO(gif)` slots remain
+      (`dod1.gif`, `dod2.gif`) against assets that already exist in
+      `Documentation/assets/`. Not a Phase 3 blocker and not tracked further here.
 - [ ] Open questions left with the owner at sign-off: whether **Versioning** (long for a
       README) moves to a `VERSIONING.md` with a three-line summary; whether **Status**
       should carry the test count and the M0–M8 record as a credibility signal (left out
@@ -1085,7 +1111,35 @@ non-empty.
    by documentation (D65).
 9. **§10.1** — `Understudy` is a product of the same package (D61); the "separate
    product" sentence stays true, the "separate package" reading does not.
-10. **Anything Phases 1–3 surface** — logged here as discovered.
+10. **§8 provenance — `PrivateCloudComputeLanguageModel.quotaUsage` is unaccounted for.**
+    Found 2026-09-28 while pricing the PCC work, by reading the GA interface. PCC exposes
+    a *pre-generation* quota API — `quotaUsage: QuotaUsage { status, limitIncreaseSuggestion,
+    resetDate }`, `isLimitReached`, `Status.belowLimit(BelowLimit).isApproachingLimit` —
+    and **§8 mentions none of it**. ⚠️ **The fix is a provenance note, not a new case**,
+    and getting that right matters because it is the difference between a sentence and a
+    breaking change:
+    - Quota is *billing-adjacent*, and §2 puts "auth/billing for server models" in
+      **Apple's** column. `quotaUsage` is the app querying the provider before
+      generating — structurally the same as `SystemLanguageModel.availability`, which
+      §8 normalizes only where it produces a generation-time error.
+    - So LedgerKit's obligation is discharged by the existing row:
+      `Error.quotaLimitReached` → `rateLimited(retryAfter: resetDate)`. A quota ceiling
+      an app must *wait out* is a retry-after, and it already has one.
+    - ⚠️ **`RequiredAction` does not need a fifth case, and that is load-bearing now.**
+      A `.requestQuotaIncrease` affordance was the obvious reading of
+      `limitIncreaseSuggestion`, and it would be a **breaking change to the promise the
+      README makes**, which lists `RequiredAction` among the enums a consumer may switch
+      exhaustively. It is not needed: quota-reached is `retryable`, not
+      `recoverableUpstream`, and surfacing a limit-increase prompt is the app reading
+      Apple's API directly — the boundary working, not a gap in it.
+    - This is the same shape rev 9 fixed for `modelUnavailable`'s provenance: a reader
+      auditing §8's totality against the error enums alone finds a surface unaccounted
+      for and concludes the section is sloppy. One sentence closes it.
+11. **§14 gains a PCC residue** (proposed — see the PCC note below; needs sign-off,
+    since it edits the spec). §14 is currently *empty*, which is the state the mechanism
+    earns rather than a permanent one.
+12. **Anything Phases 1–3 surface** — logged here as discovered. Phase 3 surfaced the
+    README's provider-swap omission (see D69's resolution) and item 10 above.
 
 **Considered and not amended (record so the next audit does not re-derive):** D60/§7.4
 (already an owned limit — D68); `activeMessages` (a convenience, not a contract — D64.3);
