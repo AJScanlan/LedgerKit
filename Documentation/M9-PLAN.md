@@ -1089,8 +1089,22 @@ coverage.
 - [x] **DoD-3 re-confirmation at the candidate:** full suite both substrates (**470 green**
       = 447 + 23, on the macOS 27 GA host *and* the iOS 27 GA simulator), device tier
       (skips 9 → 6), deep tier; `grep 'GenerationDriver(' Projection/` → **1**.
-- [x] Commit; **tag `0.1.0`** (annotated); push tag; D61 consumability proof repeated with
-      `.package(url:from: "0.1.0")` from outside the repo.
+- [x] Commit; **tag `0.1.0`** (annotated, on `main` after a clean fast-forward of M9);
+      pushed; D61 consumability proof repeated with `.package(url:from: "0.1.0")` from
+      outside the repo — **green, and it ran rather than merely building.** SPM resolved
+      `version: "0.1.0"` at `603f582`; both products linked; a `@Generable` struct compiled
+      in a file importing LedgerKit, Understudy *and* FoundationModels, with Apple's
+      `GenerationID` and our `GenerationAttemptID` named side by side — **which is D62's
+      entire reason, re-proved against the published artifact rather than a path
+      dependency**; `ModelDescriptor.appleSystem`'s values asserted by `precondition`.
+      ⚠️ **And F11 is verified, not argued:** the resolved checkout contains all 22
+      `frozen/0.1.0/` files. Under the README's old detach-then-copy order that directory
+      would have been **empty** at the tag, because the freeze commit would have landed
+      after it — a forward-compatibility net no consumer ever receives.
+      *(One wrinkle worth recording for the next proof: a throwaway consumer needs
+      `swift-tools-version: 6.3` to say `.macOS(.v26)`, and `IDGenerator` has no default
+      init — it is `IDGenerator.live()`. Both were the test package's bugs, not the
+      library's, which is the outcome a consumer proof wants.)*
 - [x] **Alignment:** ROADMAP M9 struck through against exit criteria — **header line
       checked explicitly**, and the target line now records the tag rather than forecasting
       it; DoD table rows 3–5 ticked with dates; CLAUDE.md status rewrite; M9-PLAN status →
