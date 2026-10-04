@@ -131,19 +131,37 @@ compiler error forces someone to confront when the inventory grows.
 3. Commit both files. Review the `.txt` as carefully as the code — it is the
    assertion.
 
-## Freezing a release (M9)
+## Freezing a release
 
 At each tagged release, `dev/` is copied into `frozen/<version>/` and never
-touched again:
+touched again. **Freeze on the release candidate, then tag that commit** — in
+that order:
 
 ```bash
-git switch --detach v0.1.0
-LEDGERKIT_RECORD=1 swift test   # confirm dev/ is clean at the tag
+LEDGERKIT_RECORD=1 swift test   # 1. re-record, then confirm dev/ is clean
+git status --short Tests/LedgerKitTests/Corpus/   # must print nothing
 cp -R Tests/LedgerKitTests/Corpus/dev Tests/LedgerKitTests/Corpus/frozen/0.1.0
+swift test --filter CorpusFileTests   # 2. the frozen sweeps must now see rows
+git commit …                          # 3. commit the freeze
+git tag -a 0.1.0 …                    # 4. then tag it
 ```
 
-Then commit on the next development branch. From that moment the rule is
-absolute: **a change under `frozen/` is a regression, not a fixture that needs
+⚠️ **The order is the whole point, and this file had it wrong (M9 F11).** It used
+to say `git switch --detach v0.1.0` *then* copy — which freezes the corpus into a
+commit that comes **after** the tag, so a consumer resolving the tag gets an empty
+`frozen/`. The corpus must be in the commit the tag names. (The tag is spelled
+`0.1.0`, with no `v`, matching `M1`…`M8` and the ROADMAP; this file said `v0.1.0`.)
+
+⚠️ **Step 2 is not ceremony.** Every sweep asks `names(in:)` for the `.json` files
+*directly inside* a directory, and the freeze puts them one level deeper. Copying
+the fixtures without teaching the sweeps where to look gives a fully green run
+over a frozen corpus nothing reads — observed, not imagined, which is why
+`CorpusFiles.frozenReleases` enumerates the release directories and
+`frozenCorpusIsPopulated` asserts the corpus is non-empty and paired. A new
+release directory is picked up by `CorpusFiles.allDirectories`, so it inherits
+every schema-level property without editing a test.
+
+From that moment the rule is absolute: **a change under `frozen/` is a regression, not a fixture that needs
 updating.** If a future decoder genuinely cannot read a frozen log, the answer
 is an upcaster (ADR-001's named evolution idiom) — a decode-time old-shape →
 current-shape transform, so the reducer stays single-shape and the frozen bytes

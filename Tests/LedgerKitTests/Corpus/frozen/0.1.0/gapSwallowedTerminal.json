@@ -1,0 +1,74 @@
+{
+  "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+  "rows" : [
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000101",
+        "payload" : {
+          "kind" : "conversationCreated",
+          "title" : "Origami"
+        },
+        "timestamp" : "2026-07-25T11:30:01.000Z"
+      },
+      "sequence" : 1
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000102",
+        "payload" : {
+          "content" : "q",
+          "kind" : "userMessageAppended",
+          "messageID" : "01980E5A-0000-7000-8000-000000000010"
+        },
+        "timestamp" : "2026-07-25T11:30:02.000Z"
+      },
+      "sequence" : 2
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000103",
+        "payload" : {
+          "generationID" : "01980E5A-0000-7000-8000-000000000030",
+          "kind" : "generationStarted",
+          "messageID" : "01980E5A-0000-7000-8000-000000000020",
+          "model" : {
+            "model" : "on-device",
+            "provider" : "apple",
+            "version" : "27.0"
+          },
+          "parent" : "01980E5A-0000-7000-8000-000000000010"
+        },
+        "timestamp" : "2026-07-25T11:30:03.000Z"
+      },
+      "sequence" : 3
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000104",
+        "payload" : {
+          "generationID" : "01980E5A-0000-7000-8000-000000000030",
+          "kind" : "deltaAppended",
+          "text" : "half an answer"
+        },
+        "timestamp" : "2026-07-25T11:30:04.000Z"
+      },
+      "sequence" : 4
+    },
+    {
+      "event" : {
+        "conversationID" : "01980E5A-0000-7000-8000-000000000001",
+        "id" : "01980E5A-0000-7000-8000-000000000105",
+        "payload" : {
+          "kind" : "titleChanged",
+          "title" : "after the hole"
+        },
+        "timestamp" : "2026-07-25T11:30:06.000Z"
+      },
+      "sequence" : 6
+    }
+  ]
+}

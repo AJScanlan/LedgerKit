@@ -8,7 +8,10 @@ import Testing
 //            reducer changed, which is sometimes correct — review, then re-record.
 //   wire/    hand-authored bytes this version cannot write (future payload kinds,
 //            degraded outcomes). Never regenerated; only their dumps are.
-//   frozen/  empty until 0.1.0, and a diff is *always* a failure afterwards.
+//   frozen/  one subdirectory per released version (`frozen/0.1.0/` since M9
+//            Phase 4). A diff under here is *always* a failure. Note the extra
+//            level: sweeps iterate `CorpusFiles.allDirectories`, never the bare
+//            `frozen` constant, which would find nothing and pass.
 //
 // Regenerate with:  LEDGERKIT_RECORD=1 swift test
 
@@ -117,17 +120,63 @@ struct CorpusFileTests {
 
     @Test("frozen fixtures still decode and still reduce to what they recorded")
     func frozenFixturesAreIntact() throws {
-        // Empty until `0.1.0` is tagged; the M9 procedure is in Corpus/README.md.
         // Deliberately *not* gated on record mode: nothing may ever rewrite a
         // frozen expectation, so there is no branch here that could.
-        for name in CorpusFiles.names(in: CorpusFiles.frozen) {
-            let document = try JSONDecoder().decode(
-                CorpusDocument.self,
-                from: CorpusFiles.read(CorpusFiles.logFile(CorpusFiles.frozen, name))
-            )
-            let state = fold(document.loadedEvents(), for: document.conversationID)
-            let expected = try String(decoding: CorpusFiles.read(CorpusFiles.dumpFile(CorpusFiles.frozen, name)), as: UTF8.self)
-            #expect(StateDump.render(state) == expected, "FROZEN fixture \(name) changed meaning")
+        for release in CorpusFiles.frozenReleases {
+            for name in CorpusFiles.names(in: release) {
+                let document = try JSONDecoder().decode(
+                    CorpusDocument.self,
+                    from: CorpusFiles.read(CorpusFiles.logFile(release, name))
+                )
+                let state = fold(document.loadedEvents(), for: document.conversationID)
+                let expected = try String(decoding: CorpusFiles.read(CorpusFiles.dumpFile(release, name)), as: UTF8.self)
+                #expect(
+                    StateDump.render(state) == expected,
+                    "FROZEN fixture \(release)/\(name) changed meaning"
+                )
+            }
+        }
+    }
+
+    /// The freeze cannot be silently lost (M9 Phase 4, D67).
+    ///
+    /// ⚠️ **Every other frozen check passes vacuously on an empty corpus**, and
+    /// that is not a hypothetical: the sweeps iterate a directory and ask for the
+    /// `.json` files directly inside it, while the freeze puts them one level
+    /// deeper in `frozen/<version>/`. Before this test existed, copying the
+    /// corpus into place and *not* teaching the sweeps where to look produced a
+    /// fully green run over a frozen corpus nothing read. So this asserts the
+    /// population itself, in three parts a vacuous pass would fail: at least one
+    /// release directory, at least one fixture in each, and a `.txt` beside every
+    /// `.json` — because a log with no recorded state is a fixture that asserts
+    /// nothing.
+    ///
+    /// It is deliberately *not* pinned to `0.1.0` by name or to a fixture count:
+    /// the contract is that the corpus is populated and paired, and pinning the
+    /// release would make the next freeze edit this test instead of inheriting it.
+    @Test("the frozen corpus is populated, and every log has its recorded state")
+    func frozenCorpusIsPopulated() throws {
+        let releases = CorpusFiles.frozenReleases
+        #expect(
+            !releases.isEmpty,
+            """
+            No frozen release directories found under Corpus/frozen/. Either the \
+            0.1.0 freeze has been lost, or fixtures were copied somewhere the \
+            sweeps do not read. See Corpus/README.md.
+            """
+        )
+
+        for release in releases {
+            let names = CorpusFiles.names(in: release)
+            #expect(!names.isEmpty, "frozen release \(release) contains no fixtures")
+            for name in names {
+                #expect(
+                    throws: Never.self,
+                    "frozen fixture \(release)/\(name) has no recorded state beside it"
+                ) {
+                    try CorpusFiles.read(CorpusFiles.dumpFile(release, name))
+                }
+            }
         }
     }
 
@@ -139,7 +188,7 @@ struct CorpusFileTests {
         // whose files are deliberately shapes this encoder would not write.
         // Value-identity must hold everywhere — an asymmetric codec would lose
         // data on the first re-save.
-        for directory in [CorpusFiles.dev, CorpusFiles.wire, CorpusFiles.frozen] {
+        for directory in CorpusFiles.allDirectories {
             for name in CorpusFiles.names(in: directory) {
                 let document = try JSONDecoder().decode(
                     CorpusDocument.self,
@@ -161,7 +210,7 @@ struct CorpusFileTests {
         // identities depending on whether it has been to disk, which is exactly
         // the bug class P1 and P3 exist to catch. The corpus holds the line now
         // so the store inherits a fixture that already fails if it slips.
-        for directory in [CorpusFiles.dev, CorpusFiles.wire, CorpusFiles.frozen] {
+        for directory in CorpusFiles.allDirectories {
             for name in CorpusFiles.names(in: directory) {
                 let document = try JSONDecoder().decode(
                     CorpusDocument.self,
@@ -191,7 +240,7 @@ struct CorpusFileTests {
         var sawUnidentified = 0
         var sawIdentified = 0
 
-        for directory in [CorpusFiles.dev, CorpusFiles.wire, CorpusFiles.frozen] {
+        for directory in CorpusFiles.allDirectories {
             for name in CorpusFiles.names(in: directory) {
                 let document = try JSONDecoder().decode(
                     CorpusDocument.self,
@@ -307,7 +356,7 @@ struct CorpusFileTests {
         let registry = try TagRegistry.load().registeredTags("payload")
 
         var covered: Set<String> = []
-        for directory in [CorpusFiles.dev, CorpusFiles.wire, CorpusFiles.frozen] {
+        for directory in CorpusFiles.allDirectories {
             for name in CorpusFiles.names(in: directory) {
                 let json = try JSONSerialization.jsonObject(
                     with: CorpusFiles.read(CorpusFiles.logFile(directory, name))

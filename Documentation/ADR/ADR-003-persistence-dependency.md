@@ -166,10 +166,25 @@ first; and the robust answer is protection on the containing *directory*, which 
 the app because the app chose the directory. This is a floor, not a guarantee — §9's
 guidance that sensitive domains layer their own encryption stands.
 
-**Deferred to M9's hardening pass, deliberately and on the record** (rolled forward at M6
-Phase 0; the note previously said "revisit at M5"). M5 came and went: `ConversationStore`
-now owns database creation end to end and nothing about that changed the two gaps, because
-both are properties of *where the app put the file* rather than of who opens it. Neither is
-a correctness issue, and the honest fix — directory-level protection, or an explicit
-`PersistenceConfiguration` knob for it — is a public-API decision that belongs with the
-other 0.1.0 packaging choices rather than mid-milestone.
+**Closed at M9 Phase 4, by documentation rather than by a knob (D65).** *(This paragraph
+read "Deferred to M9's hardening pass" from M6 Phase 0 until the tag, having previously
+said "revisit at M5".)* The deferral was correct and the deferred question answered itself
+in the asking: both gaps are properties of **where the app put the file**, not of who
+opens it — which is why M5 came and went without moving them, even though
+`ConversationStore` took over database creation end to end in that milestone.
+
+So the two gaps are **owned, not closed**, and the decision is to say so rather than to
+grow API. A `PersistenceConfiguration` option for directory-level protection would be
+permanent public surface bought for a floor the app sets in one line, on a directory it
+chose and LedgerKit never sees. ⚠️ **Writing it down was not cosmetic.** §9's privacy
+bullet read as advice *to the app* when half of it is a thing the library does, and
+drafting the README's privacy section on that reading produced a paragraph claiming
+LedgerKit sets no protection class at all — which is false
+(`Store/SQLitePersistenceStore.swift`, `protectFiles(at:)`). The amendment is §9's
+pointer (SPEC rev 12, item 8) plus the README sentence; this paragraph stays as the
+reasoning behind both.
+
+**What would reopen it:** an app that needs a protection class *stronger* than the floor
+on the database itself (`.complete`, which denies access while the device is locked and
+would break a background generation). That is a knob with a real argument behind it, and
+it is additive — which is the other reason not to guess at it now.

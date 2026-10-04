@@ -1,0 +1,10 @@
+conversation 01980E5A-0000-7000-8000-000000000001
+genesis no
+title —
+instructions —
+path —
+
+messages
+
+diagnostics
+  none

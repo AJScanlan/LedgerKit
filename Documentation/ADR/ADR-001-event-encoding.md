@@ -1,9 +1,13 @@
 # ADR-001 — Tagged-JSON event encoding & the discriminator registry
 
-**Status:** Draft · opened 2026-07-18 at M1 · updated 2026-07-19 (M1 wire types landed) ·
-**D-1/D-2 closed at M4 Phase 1, D-3 closed at M4 Phase 4** (no open questions remain) ·
-**R-5's scope corrected 2026-08-01 at M6 Phase 3.5** (durations are governed too — see R-5) ·
-ratifies at M9
+**Status:** **Accepted** · opened 2026-07-18 at M1 · updated 2026-07-19 (M1 wire types
+landed) · **D-1/D-2 closed at M4 Phase 1, D-3 closed at M4 Phase 4** · **R-5's scope
+corrected 2026-08-01 at M6 Phase 3.5** (durations are governed too — see R-5) ·
+**ratified 2026-10-04 at M9 Phase 4**, with R-3's inventory re-read against
+`Registry/tags.json` one last time: all seven levels and the single reserved entry agree,
+34 tags, no drift. Reversal now needs a superseding ADR — which is the point, because
+what this document governs is the one surface in the project that cannot be revised:
+a log already written.
 **Spec:** §6.1 (envelope/payload, tolerant terminals, gaps), §6.6 (quarantine table), §9
 (persistence & versioning), §10 (test corpus), §13 DoD-5
 **Code:** `Core/LedgerEvent.swift`, `Core/Outcome.swift`, `Core/GenerationError.swift`,
@@ -247,7 +251,12 @@ Related: the sentinel strings involved (`"undecodable outcome: "` for an unreada
 matching on them outside log triage is unsupported, and they may change wording without
 notice. Declared here so Hyrum's Law doesn't ossify them by usage.
 
-## Open — to decide before M9
+## Closed — the three decisions this ADR owed M9
+
+**All three closed at M4, one milestone and a half before the deadline they were given**,
+which is why ratification at M9 was a re-read rather than a decision. Kept in full: each
+one names the failure it prevents, and a closed decision whose reasoning is deleted is
+indistinguishable at the next audit from one nobody made.
 
 *(Renumbered from the draft's OQ-1…5 to avoid colliding with the spec's beta-tracking
 OQ1–9, §14.)*

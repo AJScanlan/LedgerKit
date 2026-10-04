@@ -153,9 +153,47 @@ enum CorpusFiles {
     /// write something else.
     static let wire = "wire"
 
-    /// Empty until `0.1.0`. Once populated, a diff under here is *always* a
-    /// failure — that is the entire contract (SPEC §10.2, ADR-001).
+    /// The parent of the per-release directories. Fixtures never live here
+    /// directly — they live in `frozen/<version>/`, which is why sweeps iterate
+    /// ``frozenReleases`` rather than this constant.
     static let frozen = "frozen"
+
+    /// Every populated frozen release, as corpus-relative directory paths
+    /// (`frozen/0.1.0`, and one more at every future tag), sorted.
+    ///
+    /// ⚠️ **This exists because the obvious spelling silently verified nothing.**
+    /// Every corpus sweep iterates directory names and asks ``names(in:)`` for
+    /// the `.json` files *directly inside* one. The freeze copies `dev/` into
+    /// `frozen/<version>/`, one level deeper — so a sweep over the bare `frozen`
+    /// constant finds zero fixtures and passes, with the whole frozen corpus on
+    /// disk and nothing reading it. `names(in:)` returning `[]` on failure is
+    /// right for an unpopulated directory and indistinguishable from a
+    /// mislocated one, which is the trap. `frozenCorpusIsPopulated` is the
+    /// tripwire; this is the enumeration it guards.
+    static var frozenReleases: [String] {
+        guard let root = bundled?.appendingPathComponent(frozen),
+              let entries = try? FileManager.default.contentsOfDirectory(atPath: root.path)
+        else { return [] }
+
+        return entries
+            .filter { entry in
+                var isDirectory: ObjCBool = false
+                let path = root.appendingPathComponent(entry).path
+                guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                else { return false }
+                return isDirectory.boolValue
+            }
+            .map { "\(frozen)/\($0)" }
+            .sorted()
+    }
+
+    /// Every directory a schema-level property must hold over: the regenerable
+    /// fixtures, the hand-authored ones, and every frozen release. Sweeps take
+    /// this rather than a literal list, so a future release's directory is
+    /// covered by existing tests the moment it lands.
+    static var allDirectories: [String] {
+        [dev, wire] + frozenReleases
+    }
 
     /// Set `LEDGERKIT_RECORD=1` to rewrite `dev/` (and the dumps beside `wire/`)
     /// instead of comparing against them.
