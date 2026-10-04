@@ -1,7 +1,7 @@
 # LedgerKit v0.1 — Build Roadmap
 
-**Companion to:** [SPEC.md](./SPEC.md) — **rev 11 ratified 2026-09-05** at the M8 boundary (Appendix I, five items in four batches; nothing touches the wire). Further amendments open **rev 12**, which ratifies at the M9 boundary. (Rev 10: M7 boundary, 2026-08-16; rev 9: M6 boundary, 2026-08-02; rev 8: M5 boundary, 2026-07-28; rev 7: M4 boundary, 2026-07-26; rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
-**Target:** tagged `0.1.0` against **the SDK current when the tag is cut** — restated on evidence at M9 (D67), replacing "before iOS 27 GA". "Before GA" was always a proxy for *usable on GA day*, and it is a bad one: a `0.1.0` whose own `sdkBuildIsPinned` names a superseded beta fails its own tripwire the week it ships. The estimate held — M0–M8 landed inside spec §12's **4–6 weeks part-time**, and the ⚠️ beta verifications did hold, three passes in a row.
+**Companion to:** [SPEC.md](./SPEC.md) — **rev 12, amendments landed 2026-10-04 at M9 Phase 4** (Appendix J, thirteen items in six batches; nothing touches the wire), **ratified at the `0.1.0` tag** per D67. (Rev 11: M8 boundary, 2026-09-05, Appendix I.) (Rev 10: M7 boundary, 2026-08-16; rev 9: M6 boundary, 2026-08-02; rev 8: M5 boundary, 2026-07-28; rev 7: M4 boundary, 2026-07-26; rev 6: M3 boundary, same day; rev 5: 2026-07-25, M2 boundary.)
+**Target:** ✅ **tagged `0.1.0` on 2026-10-04**, against **the SDK current when the tag was cut** (macOS 27.0 GA, SDK `26A425`) — restated on evidence at M9 (D67), replacing "before iOS 27 GA". "Before GA" was always a proxy for *usable on GA day*, and it is a bad one: a `0.1.0` whose own `sdkBuildIsPinned` names a superseded beta fails its own tripwire the week it ships. The estimate held — M0–M8 landed inside spec §12's **4–6 weeks part-time**, and the ⚠️ beta verifications did hold, three passes in a row.
 **Sequencing strategy:** *pure core first* — build and fully test everything platform-agnostic (§6) before touching the beta-coupled session seam (§7).
 
 > This document is the **build order**. The spec is the **contract**. Where they ever disagree, the spec wins and this file is stale — fix it.
@@ -267,7 +267,7 @@ The [Projection](../Projection) Xcode app (built from `LedgerKit.xcworkspace`, s
 **Beta risk:** medium — and it materialized. Phase 0 hit **Beta 5 breaking `Understudy`'s build and, silently, two metadata reads**; the host suite then SIGSEGV'd in dyld because the SDK was ahead of the OS. Both were the beta, not the repo, exactly as the phase was designed to prove — and the fix was an OS update, not a code change.
 **Deferred to M9, deliberately:** the DoD-2 wiring lives on branch `m8-dod2-claude`, not `main`. `ClaudeForFoundationModels` is still untagged, and pinning `main` to a vendor revision is what D58 rules out. Revisit when Anthropic tags a Beta 5-compatible release.
 
-### M9 — README, ADR-001, tag `0.1.0` ⏳ **IN PROGRESS**
+### ~~M9 — README, ADR-001, tag `0.1.0`~~ ✅ **DONE 2026-10-04**
 DoD-3/4/5. **Build order, decision log (D61–D72) and phase gates: [M9-PLAN.md](./M9-PLAN.md)** (drafted 2026-09-05 from the M8 boundary audit, findings F1–F42).
 
 > ⚠️ **This section was a four-bullet sketch until 2026-09-05 and understated the milestone badly** (audit F8). M9's real work is not the README. The audit found four things nobody had scheduled — the **packaging** question handed forward since M6, the **naming review**, a **derived-state mutability** hole, and a **stale formal model** — and any one of them is more consequential than the prose. Rewritten here from the plan.
@@ -275,13 +275,14 @@ DoD-3/4/5. **Build order, decision log (D61–D72) and phase gates: [M9-PLAN.md]
 **Five phases, and the README is the fourth of them.**
 
 - **Phase 0 — the toolchain.** ✅ **Done 2026-09-05.** Xcode 27 Beta 6 (`27A5252f`), macOS 27 SDK `26A5419a`, host `26A5425a`. **457 green** across host, device, deep and simulator tiers; the demo app builds; `ProjectionUITests` 6/6. Exactly one failure before the pin moved and it *was* the pin — **Apple's surface did not move at all**, so rev 12's beta-fallout item is empty. All four §14 residues re-confirmed (budget still 4096; 0 revisions in 248 snapshots).
-- **Phase 1 — hygiene.** ⏳ Document alignment (this section, M8-PLAN's drift, ENHANCEMENTS, CLAUDE.md, ADR-003's self-contradiction), the **Formal model re-transcribed** against `drive`'s post-M8 shape and re-calibrated, CI, git.
-- **Phase 2 — the breaking changes, while they are still free.** The root `Package.swift` (**D61** — there is no root manifest today, so `.package(url:)` resolves to *nothing*; this is a DoD-5 blocker, not a tidiness item); `GenerationID` → **`GenerationAttemptID`** (**D62** — Apple's `@Generable` macro emits the bare name and the collision lands inside an expansion the consumer never wrote; re-verified live on Beta 6); derived state made `private(set)` (**D63**); `MessageTree.versions(of:)` replacing `siblings(of:)` and `ModelDescriptor.appleSystem` (**D64**); LICENSE (**D66**, MIT); the app target to 27 (**D70**).
-- **Phase 3 — the README** (DoD-4), written against the shipped layout and shipped names, with every snippet lifted from something that compiles. DocC is a stretch and is the first thing cut.
-- **Phase 4 — rev 12, ADR-001 Accepted, the freeze, the tag.** ⚠️ **The freeze happens *before* the tag** (D67): the corpus README's procedure detaches at the tag and copies afterwards, which leaves `frozen/` empty at the tag a consumer actually gets. And the tag is cut against **the SDK current when Phase 4 opens**, not a calendar date — a `0.1.0` whose own `sdkBuildIsPinned` names a superseded beta fails its own tripwire the week it ships.
+- **Phase 1 — hygiene.** ✅ **Done 2026-09-05.** Document alignment (this section, M8-PLAN's drift, ENHANCEMENTS, CLAUDE.md, ADR-003's self-contradiction), the **Formal model re-transcribed** against `drive`'s post-M8 shape and re-calibrated, CI, git.
+- **Phase 2 — the breaking changes, while they are still free.** ✅ **Done 2026-09-06**, API diff signed off 2026-10-04. The root `Package.swift` (**D61** — there is no root manifest today, so `.package(url:)` resolves to *nothing*; this is a DoD-5 blocker, not a tidiness item); `GenerationID` → **`GenerationAttemptID`** (**D62** — Apple's `@Generable` macro emits the bare name and the collision lands inside an expansion the consumer never wrote; re-verified live on Beta 6); derived state made `private(set)` (**D63**); `MessageTree.versions(of:)` replacing `siblings(of:)` and `ModelDescriptor.appleSystem` (**D64**); LICENSE (**D66**, MIT); the app target to 27 (**D70**).
+- **Phase 3 — the README** (DoD-4). ✅ **Done 2026-09-28**, written against the shipped layout and shipped names, with every snippet lifted from something that compiles. **DocC was not cut** — both products got catalogs, and adding them surfaced four dangling symbol links that had sat in public doc comments for milestones, which nothing else in the repo would have caught.
+- **Phase 4 — rev 12, ADR-001 Accepted, the freeze, the tag.** ✅ **Done 2026-10-04.** The SDK had not moved since the Phase 0 re-run, so no fourth toolchain pass was needed — confirmed by `sdkBuildIsPinned` rather than by memory. Rev 12's thirteen items landed in six batches (Appendix J); ADR-001 is **Accepted** with R-3's inventory re-read against `tags.json` one last time; ADR-003's file-protection item closed by documentation (D65); `frozen/0.1.0` populated and asserted non-empty.
+  ⚠️ **The freeze happened *before* the tag** (D67) — the corpus README's procedure detached at the tag and copied afterwards, which leaves `frozen/` empty at the tag a consumer actually gets. **And the freeze needed a code change the procedure did not mention:** every corpus sweep reads the `.json` files *directly inside* a directory, while the freeze puts them one level deeper, so copying the fixtures and stopping there produced a green run over a frozen corpus nothing read. Verified, not reasoned — the frozen sweep passed on the empty corpus before the tripwire existed.
 
 **Satisfies:** DoD-3, DoD-4, DoD-5.
-**Exit:** all five DoD items checked; **a remote consumer can `.package(url:from: "0.1.0")` and get both products**; rev 12 ratified; ADR-001 **Accepted**; `Corpus/frozen/0.1.0` populated and asserted non-empty; `0.1.0` tagged.
+**Exit — all met 2026-10-04:** ✅ all five DoD items checked; ✅ **a remote consumer can `.package(url:from: "0.1.0")` and get both products**; ✅ rev 12 landed and ratified at the tag; ✅ ADR-001 **Accepted**; ✅ `Corpus/frozen/0.1.0` populated and asserted non-empty — and the assertion is the interesting half, because the obvious freeze passes vacuously; ✅ `0.1.0` tagged.
 **Beta risk:** low, and Phase 0 confirmed it — but not zero: an RC is likely inside M9's window, and D67 repeats Phase 0 if the SDK moves rather than tagging against a stale one.
 
 ---
@@ -348,9 +349,9 @@ Cut from the *top* first; never cross the "never cut" line.
 |-----|-----------|---|
 | 1 kill-mid-stream GIF, partial-as-branch | M8 | ✅ **2026-08-31** — `assets/dod1.gif` |
 | 2 one-line provider swap | M6, M8 | ✅ **2026-09-05** — `assets/dod2.gif`, three providers |
-| 3 crash-fuzz + chaos + hostile + P1–P3 green | M3, M4, M7, M9 | green; M9 re-confirms at the tag |
-| 4 README with "why not the transcript blob?" | M9 | ☐ |
-| 5 tagged `0.1.0`, ADR-001 committed | M9 | ☐ |
+| 3 crash-fuzz + chaos + hostile + P1–P3 green | M3, M4, M7, M9 | ✅ **2026-10-04** — re-confirmed at the candidate: 470 green on the macOS 27 GA host *and* the iOS 27 GA simulator, device and deep tiers green |
+| 4 README with "why not the transcript blob?" | M9 | ✅ **2026-09-28** — plus DocC catalogs for both products |
+| 5 tagged `0.1.0`, ADR-001 committed | M9 | ✅ **2026-10-04** — ADR-001 **Accepted**, registry enforced by `RegistryTests`, `frozen/0.1.0` populated and asserted non-empty |
 
 ---
 
@@ -360,7 +361,7 @@ Cut from the *top* first; never cross the "never cut" line.
 M0 → M1 → M2 ─┬─ M3 (interleaves with M2)
               └─ M4 → M5 → M6 → M7 → M8 → M9
                                             ▲    ▲
-                                            │    └── in progress (Phase 0 done 2026-09-05)
+                                            │    └── done 2026-10-04 — tagged `0.1.0`
                                             └── done 2026-09-05
 ```
 

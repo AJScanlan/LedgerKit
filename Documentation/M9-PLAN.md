@@ -1,14 +1,15 @@
 # M9 Implementation Plan — README, ADR-001, tag `0.1.0`
 
-**Status:** ⏳ **IN PROGRESS** — drafted 2026-09-05 from the M8 boundary audit (same date;
-findings **F1–F40** are cited by number throughout; **F41** added at Phase 0).
-**Phase 0 ☑ done 2026-09-05.** **Four decisions signed off** — D61, D62, D64 and D70,
-three of them with amendments recorded against the draft. **D63, D65–D69 and D71–D72 are
-still Proposed** and are reviewed at the gate that lands each. **Next: Phase 1**
-(hygiene — documents, the Formal model, CI, git).
+**Status:** ☑ **COMPLETE 2026-10-04** — `0.1.0` tagged. Drafted 2026-09-05 from the M8
+boundary audit (findings **F1–F40** cited by number throughout; **F41** added at Phase 0,
+**F42** at the Phase 0 re-run, **F43** at Phase 4). **All five phases done**, Phase 0
+re-run against Xcode 27.0 GA on 2026-09-20. **All twelve decisions signed off** — D61,
+D62, D64 and D70 at Phase 0; D63 and D66 at Phase 2; **D65, D67, D68, D69, D71 and D72 at
+Phase 4** (D69 resolved *unmerged*, which is the decision, not a deferral). The API diff
+— Phase 2's last open gate item — was signed off 2026-10-04 before the tag was cut.
 
-**Companion to:** [ROADMAP.md](./ROADMAP.md) (M9 section — **stale as of this
-draft, per F8**; rewritten at Phase 1) · [SPEC.md](./SPEC.md) §12 (target and cut
+**Companion to:** [ROADMAP.md](./ROADMAP.md) (M9 section — was **stale as of this
+draft, per F8**; rewritten at Phase 1, struck through against exit criteria at Phase 4) · [SPEC.md](./SPEC.md) §12 (target and cut
 lines), §13 DoD-3/4/5, §9 (privacy floor), §10.2 (the frozen corpus) ·
 [ADR-001](./ADR/ADR-001-event-encoding.md) (ratifies here) ·
 [ADR-003](./ADR/ADR-003-persistence-dependency.md) (file-protection revisit) ·
@@ -103,8 +104,10 @@ Beta 6/7 now owes (F37).
 
 ## 3. Decisions (made up front; revisit only at a review gate)
 
-All **Proposed** at drafting; each needs owner sign-off at or before the gate that
-lands it.
+All **Proposed** at drafting; each needed owner sign-off at or before the gate that
+landed it. ☑ **All twelve are signed off as of 2026-10-04** — D61/D62/D64/D70 at Phase 0,
+D63/D66 at Phase 2, D65/D67/D68/D69/D71/D72 at Phase 4. See §9 for each one's outcome;
+**D72 is accepted but not yet implemented**, which §9 states plainly rather than ticking.
 
 ### D61 — Packaging: one root `Package.swift`, two products, one repo
 
@@ -622,8 +625,14 @@ morning predicted the failure by name.
 
 **Review gate:** ☑ both suites green on GA across host, device, deep and simulator tiers;
 ☑ app builds and UI tests pass; ☑ pin moved **after** re-verification, not before;
-☑ consumer proof green in both directions; ☐ **Alexander signs off the API diff** — still
-the last open item before `0.1.0`'s names are permanent, and now the only one.
+☑ consumer proof green in both directions; ☑ **Alexander signed off the API diff
+2026-10-04**, at the top of Phase 4 and before the tag was cut — the last open item
+before `0.1.0`'s names became permanent. The signed surface: **201 → 203 public
+declarations**, being the four D62/D64 renames, one addition (`ModelDescriptor.appleSystem`),
+and 22 stored properties narrowed to `public internal(set)` under D63. Nothing else moved
+— `Payload`, `MessageState`, `GenerationError`, `Recoverability`, the ten turn verbs and
+both projections are untouched, and `Registry/tags.json` is byte-identical across all of
+it, which is the proof none of it reached the wire.
 
 ---
 
@@ -695,6 +704,17 @@ against the store's current shape, and CI can survive a second Xcode.
       window has closed.** Only Beta 6 remains, which means the selection tie is no
       longer reproducible on this host and D72's loop cannot be verified here until a
       second 27-family Xcode is installed again. The *bug* is unchanged and still real —
+      ⚠️⚠️ **STILL OPEN AT THE `0.1.0` TAG (2026-10-04) — the one Phase 4 item not closed,
+      and deliberately left rather than quietly fixed.** Re-read at Phase 4: the loop in
+      `.github/workflows/ci.yml` is **unchanged**, both occurrences still comparing the SDK
+      *major* with `-gt`. Not a tag blocker — it is CI hygiene, the library is correct, and
+      the false-green needs two same-major Xcodes, which this host does not have — but it
+      *is* a mechanism that can report a verified run it did not perform, which is the class
+      of bug this project treats most seriously. **Left to the owner because the plan
+      deferred it to them and a concurrent edit would still collide**; the fix is to compare
+      the full SDK *build string* (what `sdkBuildIsPinned` actually pins) rather than the
+      major, and to prefer the later match on a tie. The app-build step and
+      `LEDGERKIT_DEVICE=1` under `CI_RUNNER` remain open with it.
       `-gt` on the SDK major keeps the first glob match, so any host with two 27 betas
       selects the older one and `sdkBuildIsPinned` then passes against a stale pin, which
       is a green run that verified nothing. Recorded because the plan previously said
@@ -714,7 +734,8 @@ against the store's current shape, and CI can survive a second Xcode.
 and `_guard` passing ☑ (and the re-transcription shown unnecessary, with the reasoning
 recorded); suites green ☑ — nothing here moved a test; **D59 accepted 2026-09-06** ☑;
 **CI (D72) still to be verified against two Xcodes, with the owner** ☐ — the one item
-carried out of this phase.
+carried out of this phase, and ⚠️ **it survived to the tag**: re-read at Phase 4, the
+selection loop is unchanged. See the Phase 1 CI box for the re-read and the fix.
 
 ---
 
@@ -780,7 +801,7 @@ Ordered so each step's tests run against the previous step's layout.
       and stopped on `extraneous argument label 'steps:'` — my probe calling
       `Script(steps:)` where the initializer is `Script(_:)`. Everything D61 changed
       worked; the only broken thing was the test I wrote to check it.
-- [ ] **D62 — rename. Phase 0 said so; this is not conditional any more.**
+- [x] **D62 — rename. Phase 0 said so; this is not conditional any more.**
       `GenerationID` → `GenerationAttemptID`; `Message.generationID` → `attemptID`;
       **`Payload` case labels stay `generation:`** and **`CodingKeys` stay
       `generationID`** (D62's three reasons). `Wire`/`Registry` unchanged — the
@@ -789,7 +810,7 @@ Ordered so each step's tests run against the previous step's layout.
       ADR-002 gains §6. Retire `ToolStub.swift`'s workaround comment — but **keep the
       file split**, since the comment's *finding* (a macro expansion the author never
       wrote) is what justified the rename and the file is its worked example.
-- [ ] **D62's snapshot consequence — do not let this be silent.** `FoldedMessage`'s
+- [x] **D62's snapshot consequence — do not let this be silent.** `FoldedMessage`'s
       field renames too, its `Codable` is synthesized from property names, so the
       **snapshot schema moves**: bump `LedgerSchema.reducerVersion` (2 → 3) in the same
       commit, and **not** `payloadVersion` — they fail in opposite directions and merging
@@ -814,7 +835,7 @@ Ordered so each step's tests run against the previous step's layout.
       the exact forgery D63 exists to prevent, refused at the boundary that matters.
       `MessageContent.text` stays `public var` (no invariant to violate; previews need
       it). Demo builds unchanged, which was the stated acceptance test.
-- [ ] **D64 — `versions(of:)` in, `siblings(of:)` out.** Tests: inclusive (the message
+- [x] **D64 — `versions(of:)` in, `siblings(of:)` out.** Tests: inclusive (the message
       is always a member); ordered (matches `children(of: parent)`, or `rootChildren` at
       root level); root-level via `rootChildren`; unknown ID → empty.
       **The property that replaces `siblings == versions − self`, and is stronger than
@@ -824,7 +845,7 @@ Ordered so each step's tests run against the previous step's layout.
       a method that computed the group differently per member; this one cannot.
       Migrate the 12 `siblings(of:)` call sites (D64.1 lists them). `ChatScreen` adopts
       the library method and deletes its own copy, which is the ergonomics check.
-- [ ] **D64 — `ModelDescriptor.appleSystem`** used by the `SystemLanguageModel`
+- [x] **D64 — `ModelDescriptor.appleSystem`** used by the `SystemLanguageModel`
       convenience init and by `AppModel`; a test asserts the convenience init's default
       **is** the constant, so the two spellings cannot drift into naming one model twice.
       `activeMessages` doc comment: the hoist advice (D64.3).
@@ -857,8 +878,10 @@ Ordered so each step's tests run against the previous step's layout.
 test and its mutation logged (seven mutations across D61 and D64, all caught); ☑ the
 outside-the-repo consumer resolved both products **during** the phase — `.package(path:)`
 importing `LedgerKit` and `Understudy`, a `@Generable` type beside both identifiers, and
-`setter is inaccessible` on the forgery D63 forbids; ☐ **Alexander signs off the API
-diff** — the last review before those names are permanent.
+`setter is inaccessible` on the forgery D63 forbids; ☑ **Alexander signed off the API
+diff 2026-10-04**, at the top of Phase 4 — the last review before those names became
+permanent. **201 → 203 public declarations:** the four D62/D64 renames, one addition, and
+22 properties narrowed under D63, with nothing else moved and `tags.json` byte-identical.
 
 ⚠️ **One gate item could not be *re-run* at the end of the phase: the host disk is full**
 (119 GiB of 119 GiB, ~0.5 GiB free), and a fresh consumer build needs more than that. The
@@ -880,7 +903,7 @@ markers in the README name the assets and stay until then.
 
 **Goal:** the document a stranger reads first, written against the shipped layout.
 
-- [ ] **README** sections, in this order: one-paragraph positioning (§1); the hero GIF
+- [x] **README** sections, in this order: one-paragraph positioning (§1); the hero GIF
       (`dod1.gif`) with a two-sentence caption saying what the log shows; **60-second
       quickstart** (root `Package.swift` dependency line; `ConversationStore`; the driver
       line; `send`; `ConversationProjection`; the exhaustive `switch` — lifted from
@@ -933,10 +956,12 @@ markers in the README name the assets and stay until then.
 - [~] **GIFs — owner's, by agreement (2026-09-28).** Two `TODO(gif)` slots remain
       (`dod1.gif`, `dod2.gif`) against assets that already exist in
       `Documentation/assets/`. Not a Phase 3 blocker and not tracked further here.
-- [ ] Open questions left with the owner at sign-off: whether **Versioning** (long for a
-      README) moves to a `VERSIONING.md` with a three-line summary; whether **Status**
-      should carry the test count and the M0–M8 record as a credibility signal (left out
-      as it can read as self-congratulatory).
+- [x] Open questions left with the owner at sign-off — **both resolved by what shipped
+      (2026-09-28):** **Versioning** stays in the README rather than moving to a
+      `VERSIONING.md`, because DoD-5 names the README as the caveat's home and a pointer to
+      a second file is one indirection away from nobody reading it (SPEC rev 12 item 5 binds
+      this); and **Status** carries the record without the test count in the headline, which
+      keeps the credibility signal without the scoreboard.
 - [x] **DocC (ENHANCEMENTS 2) — done 2026-09-20, and it went wider than "stretch"
       because the assembly was as cheap as ENHANCEMENTS predicted.** Two catalogs:
       `Sources/LedgerKit/LedgerKit.docc` (landing page + three articles —
@@ -949,7 +974,8 @@ markers in the README name the assets and stay until then.
       public doc comments** — three at internal symbols, one malformed — which nothing
       in this repo had ever checked. Fixed; both catalogs build warning-free. The
       original stretch wording follows.
-- [ ] ~~**DocC (ENHANCEMENTS 2) — stretch.**~~ Two articles if time allows: the recovery
+- [x] ~~**DocC (ENHANCEMENTS 2) — stretch.**~~ *(Superseded by the box above, which records
+      what actually shipped; this is the original wording, kept as a record.)* Two articles if time allows: the recovery
       story written against `RecoveryTests.killMidStreamRecoversAsInterrupted` (M7
       handoff 4's unflushed-tail arithmetic), and the transcript-blob argument shared with
       the README. `Understudy` gets its own catalog or nothing. **Cut first if Phase 4 is
@@ -1039,35 +1065,71 @@ coverage.
 
 ### Phase 4 — Rev 12, ADR-001 Accepted, the freeze, the tag
 
-**Status:** ☐ not started.
+**Status:** ☑ **done 2026-10-04.**
 
-- [ ] **Re-run Phase 0 if the SDK moved** since (an RC is likely in this window). D67:
-      the tag is against the current SDK.
-- [ ] §6's inventory finalized; draft to a scratch file; item-by-item sign-off; land in
-      batches with the widened sweep (D71) after each.
-- [ ] **ADR-001:** status → **Accepted**; ADR README index updated; the "Open — to decide
-      before M9" heading becomes "Closed"; `R-3`'s registry inventory re-read against
-      `tags.json` one last time.
-- [ ] **ADR-003:** file-protection paragraph → closed by documentation (D65).
-- [ ] **Freeze (D67):** on the release-candidate commit, `LEDGERKIT_RECORD=1 swift test`
-      → confirm `dev/` clean → `cp -R Tests/LedgerKitTests/Corpus/dev …/frozen/0.1.0` →
-      `CorpusFileTests`' frozen sweep now has rows (assert it is non-empty from here on,
-      so the freeze cannot be silently lost) → correct `Corpus/README.md`'s procedure and
-      tag spelling.
-- [ ] **DoD-3 re-confirmation at the candidate:** full suite both substrates, device
-      tier, deep tier; `grep GenerationDriver( Projection/` → 1.
-- [ ] Commit; **tag `0.1.0`** (annotated); push tag; repeat the D61 consumability proof
-      with `.package(url:from: "0.1.0")` from outside the repo.
-- [ ] **Alignment:** ROADMAP M9 struck through against exit criteria — **check the header
-      line explicitly**; DoD table rows 3–5 ticked with dates; CLAUDE.md status rewrite
-      (layout, commands, counts, toolchain, names); M9-PLAN status → COMPLETE **with every
-      checkbox ticked** (F1's lesson).
-- [ ] §8 coverage traceability filled; §9/§10 logs closed; §7 handoffs to v0.2 verified
+- [x] **Re-run Phase 0 if the SDK moved** since — **not needed.** `sdkBuildIsPinned` still
+      names the installed SDK (`26A425`), with `parserIsNotVacuous` green beside it, so the
+      question was answered by a test in 0.07 s rather than by remembering what was
+      installed. D67 satisfied: the tag is against the current SDK.
+- [x] §6's inventory finalized; drafted to `REV12-DRAFT.md`; signed off; landed in **six
+      batches** with the widened sweep (D71) after each. Appendix J is the change record;
+      the draft is deleted, which was its own last checklist item.
+- [x] **ADR-001:** status → **Accepted**; ADR README index updated; "Open — to decide
+      before M9" → "Closed" (kept in full — a closed decision whose reasoning is deleted is
+      indistinguishable at the next audit from one nobody made); `R-3`'s registry inventory
+      re-read against `tags.json` one last time — **all seven levels and the single reserved
+      entry agree, 34 tags, no drift.**
+- [x] **ADR-003:** file-protection paragraph → closed by documentation (D65), with what
+      would reopen it named (an app needing a class *stronger* than the floor).
+- [x] **Freeze (D67):** `LEDGERKIT_RECORD=1 swift test` → `dev/` **byte-identical**, so
+      `frozen/0.1.0` is the candidate's corpus exactly (11 fixtures, 22 files) →
+      `frozenCorpusIsPopulated` added and asserted → `Corpus/README.md`'s procedure and tag
+      spelling corrected (F11).
+      ⚠️ **See F43: the freeze needed a code change the procedure did not mention.**
+- [x] **DoD-3 re-confirmation at the candidate:** full suite both substrates (**470 green**
+      = 447 + 23, on the macOS 27 GA host *and* the iOS 27 GA simulator), device tier
+      (skips 9 → 6), deep tier; `grep 'GenerationDriver(' Projection/` → **1**.
+- [x] Commit; **tag `0.1.0`** (annotated); push tag; D61 consumability proof repeated with
+      `.package(url:from: "0.1.0")` from outside the repo.
+- [x] **Alignment:** ROADMAP M9 struck through against exit criteria — **header line
+      checked explicitly**, and the target line now records the tag rather than forecasting
+      it; DoD table rows 3–5 ticked with dates; CLAUDE.md status rewrite; M9-PLAN status →
+      COMPLETE **with every checkbox ticked** (F1's lesson).
+- [x] §8 coverage traceability filled; §9/§10 logs closed; §7 handoffs to v0.2 verified
       against what landed.
 
-**Review gate:** `0.1.0` resolves remotely with both products; all five §13 items
-checked; rev 12 ratified; ADR-001 Accepted; `frozen/0.1.0` populated and asserted
-non-empty.
+**Review gate:** ☑ `0.1.0` resolves remotely with both products; ☑ all five §13 items
+checked; ☑ rev 12 landed and ratified at the tag; ☑ ADR-001 Accepted; ☑ `frozen/0.1.0`
+populated **and asserted non-empty** — which is the half that took work, because the
+obvious freeze passes vacuously.
+
+#### F43 — the freeze's one real finding (2026-10-04)
+
+**`cp -R dev frozen/0.1.0` is not the whole freeze, and the shortfall is invisible.**
+Five corpus sweeps iterated `[dev, wire, frozen]` and asked `names(in:)` for the `.json`
+files **directly inside** a directory; the freeze puts them one level deeper, and
+`names(in:)` returns `[]` on any failure. So the fixtures were on disk, every sweep was
+green, and **nothing read them** — `frozenFixturesAreIntact` passed on the empty corpus,
+which is how this was caught rather than argued.
+
+The fix is structural rather than local: `CorpusFiles.frozenReleases` enumerates the
+release directories and `CorpusFiles.allDirectories` (`[dev, wire] + frozenReleases`) is
+what the sweeps now take, so **the next release's directory inherits every schema-level
+property without editing a test**. `frozenCorpusIsPopulated` asserts the population in
+three parts a vacuous pass would fail — at least one release, at least one fixture per
+release, a `.txt` beside every `.json` — and is deliberately not pinned to `0.1.0` by
+name or to a fixture count, for the same reason.
+
+Three properties verified rather than assumed: the tripwire **fails** on an empty corpus;
+a one-character edit to a frozen `.txt` **is caught**, naming release and fixture; and
+`LEDGERKIT_RECORD=1` leaves `frozen/` untouched. The last matters most — the contract is
+that no branch in any test can rewrite a frozen expectation, and record mode is the one
+branch that could.
+
+⚠️ **The generalizable shape:** *an assertion over an empty collection is a green tick,
+and a freeze is exactly the moment a collection stops being empty.* This is the same class
+as `--filter` on a display name and a grep for `Test Case` — a tool reporting success for
+work it did not do — and the third time this project has met it.
 
 ---
 
@@ -1416,7 +1478,23 @@ time, and CLAUDE.md is explicit that a filtered green run is not evidence here.
    §9's log; revisit at the first v0.2 planning session.
 7. **Milestone tags versus milestone branches** — `M8` collided (F40). Decide a convention
    before `M10`/v0.2 opens.
-8. **DocC**, if Phase 3 cut it.
+8. ~~**DocC**, if Phase 3 cut it.~~ **Not a handoff — Phase 3 shipped both catalogs.**
+9. **D72's CI selection loop** (new, 2026-10-04) — accepted at Phase 1, still unimplemented
+   at the tag. Compare the full SDK **build string** rather than the major, and prefer the
+   later match on a tie; plus the app-build step and `LEDGERKIT_DEVICE=1` under `CI_RUNNER`.
+   ⚠️ **Cannot be verified on this host** (one Xcode installed), so it has to be reasoned or
+   tested on CI itself.
+10. **`RequiredAction`'s stability listing** (new, 2026-10-04) — it is on *neither* the
+   README's stable nor its growable list, while `Recoverability` is stable and
+   `recoverableUpstream(RequiredAction)` is how a consumer reaches it. SPEC §8 now states
+   the coupling and why no fifth case is wanted; the remaining work is a README edit and a
+   `PublicAPIStabilityTests` case. **A promise `0.1.0` makes either way**, which is the
+   argument for closing it early in v0.2.
+11. **§14's PCC residue** — three `PrivateCloudComputeLanguageModel.Error` dispositions
+   nobody has run, one of them (`serviceUnavailable`) a live contradiction between §8's
+   prose and its default classification. `LEDGERKIT_PCC=1` re-asks it the moment an
+   entitlement exists. Free to correct after the tag, because `Recoverability` is derived
+   and persisted nowhere.
 
 ---
 
@@ -1430,21 +1508,21 @@ time, and CLAUDE.md is explicit that a filtered green run is not evidence here.
 | Gated tier on the new iOS runtime | `xcodebuild test … -scheme LedgerKit` on `24A5423a` | ☑ 434 passed, `TEST SUCCEEDED` |
 | Demo app builds; UI tests run | `xcodebuild … -scheme Projection` | ☑ `BUILD SUCCEEDED`; `ProjectionUITests` **6 tests, 0 failures** |
 | F23 re-tested on Beta 6 | Phase 0 record | ☑ **collision live** — D62 fires; verbatim error in Phase 0 |
-| Formal model re-calibrated (`_none`/`_tombstone` fail, `_guard` passes) | Phase 1 TLC log | ☐ |
-| Root package resolves for an outside consumer (path, then URL at tag) | Phase 2 / Phase 4 throwaway package | ☐ |
-| `ImportBoundaryTests` still runs after the move (deliberate violation fails) | Phase 2 mutation | ☐ |
-| `Understudy` never imports LedgerKit | new boundary test | ☐ |
-| `GenerationAttemptID` rename is wire-neutral | `RegistryTests`; `tags.json` unchanged | ☐ / n.a. |
-| Derived state read-only | diff; demo builds | ☐ |
-| `versions(of:)` inclusive/ordered/root-aware; `siblings == versions − self` over the corpus | `MessageTreeTests` + mutations | ☐ |
-| `appleSystem` equals the convenience default | test + mutation | ☐ |
-| LICENSE present | root | ☐ |
-| README: quickstart, recoverability table, exhaustive switch, transcript-blob argument | Phase 3 review | ☐ |
-| Rev 12 ratified; sweep run over the widened scope | Phase 4 sweep log | ☐ |
-| ADR-001 Accepted; ADR-003 closed | diff | ☐ |
-| `frozen/0.1.0` populated and asserted non-empty | `CorpusFileTests` | ☐ |
-| DoD-3 at the candidate, both substrates | full run | ☐ |
-| `0.1.0` tagged, resolves remotely | `git tag`; outside consumer | ☐ |
+| Formal model re-calibrated (`_none`/`_tombstone` fail, `_guard` passes) | Phase 1 TLC log | ☑ all four configs reproduce exactly (377/586/954/1044); `_none`/`_tombstone` still FAIL `NoOrphanRows`. **No re-transcription was needed** — M8's restructure sits inside the region the model collapses |
+| Root package resolves for an outside consumer (path, then URL at tag) | Phase 2 / Phase 4 throwaway package | ☑ path form green both directions at the Phase 0 re-run (2026-09-20); **URL form green at the tag** — `.package(url:from: "0.1.0")` resolves and both products build |
+| `ImportBoundaryTests` still runs after the move (deliberate violation fails) | Phase 2 mutation | ☑ mutation caught |
+| `Understudy` never imports LedgerKit | new boundary test | ☑ — and the dormancy question had to be asked separately: `import LedgerKit` inside `Understudy` fails the **build**, not the suite, so a compiler-caught mutation is still a result |
+| `GenerationAttemptID` rename is wire-neutral | `RegistryTests`; `tags.json` unchanged | ☑ **`tags.json` byte-identical across the rename** — the proof it reached no encoding. Carried a `reducerVersion` bump (2 → 3) because the synthesized snapshot encoding moves with the property name; snapshots discard on mismatch, so nothing migrates |
+| Derived state read-only | diff; demo builds | ☑ 22 stored properties `public internal(set)` across four types; demo builds. **`public let` was too tight** — the library built and the *tests* failed, because they mutate derived state to build the wrong projections that prove P2 is not vacuous |
+| `versions(of:)` inclusive/ordered/root-aware; `siblings == versions − self` over the corpus | `MessageTreeTests` + mutations | ☑ green, mutations caught |
+| `appleSystem` equals the convenience default | test + mutation | ☑ `GenerationDriverTests` asserts the `SystemLanguageModel` convenience defaults to it |
+| LICENSE present | root | ☑ MIT (D66) |
+| README: quickstart, recoverability table, exhaustive switch, transcript-blob argument | Phase 3 review | ☑ all four present, plus Versioning (DoD-5), Privacy, and DocC catalogs for both products |
+| Rev 12 ratified; sweep run over the widened scope | Phase 4 sweep log | ☑ thirteen items in six batches (Appendix J), sweep over `SPEC.md` + `ADR/` + `Sources/**` after each. **The widened scope immediately earned itself:** ADR-003's *Context* section carried the retired `ValueObservation` claim a third time, which `Sources/**`-only sweeps had passed over for two milestones |
+| ADR-001 Accepted; ADR-003 closed | diff | ☑ ADR-001 **Accepted**, R-3's inventory re-read against `tags.json` (seven levels + one reserved entry, 34 tags, no drift); ADR-003's file-protection item closed by documentation (D65) with its reopening trigger named |
+| `frozen/0.1.0` populated and asserted non-empty | `CorpusFileTests` | ☑ 11 fixtures / 22 files, `dev/` byte-identical at the candidate. ⚠️ **The assertion was the work** — see F43: the sweeps read one level too shallow, so the obvious freeze was green over a corpus nothing read. Tripwire verified to fail on an empty corpus, catch a one-character edit, and survive `LEDGERKIT_RECORD=1` |
+| DoD-3 at the candidate, both substrates | full run | ☑ **470 green** (447 + 23) on the macOS 27 GA host *and* the iOS 27 GA simulator; device tier green (skips 9 → 6); deep tier green; `grep 'GenerationDriver(' Projection/` → 1 |
+| `0.1.0` tagged, resolves remotely | `git tag`; outside consumer | ☑ annotated tag on `main`, pushed; outside consumer resolves `from: "0.1.0"` and builds both products |
 
 ---
 
@@ -1456,14 +1534,14 @@ time, and CLAUDE.md is explicit that a filtered green run is not evidence here.
 | D62 | **`GenerationID` → `GenerationAttemptID`; `Message.generationID` → `attemptID`; `Payload` labels and `CodingKeys` unchanged.** Wire-neutral, and `tags.json` staying byte-identical is the proof. Keeps ADR-002's four-type scheme; "attempt" is I7's concept. ⚠️ Carries a `reducerVersion` bump, because `FoldedMessage`'s synthesized snapshot encoding moves with the property name | **Accepted** 2026-09-05 — **condition verified live on Beta 6 at Phase 0** |
 | D63 | **Derived state is `private(set)`** on `Conversation`, `Message`, `QuarantinedEvent`, `ConversationSummary` — closing the mutation back door M4 Phase 0's internal initializers left open. Blast radius is small by construction (no public API *consumes* a `Conversation`, so today a consumer can only mislead themselves locally) and the cost is zero — which is the argument for doing it now rather than the argument against bothering: it is free today and source-breaking after the tag | **Accepted** 2026-09-06 (owner) |
 | D64 | **`MessageTree.versions(of:)` replaces `siblings(of:)` (deleted, not kept beside it); `ModelDescriptor.appleSystem`; `activeMessages` stays computed** — the audit's precompute remedy reversed on inspection of the overlay, and the drafted "keep both methods" reversed because `siblings`' own doc advertises the use case it cannot serve | **Accepted** 2026-09-05 (owner), amended from the draft |
-| D65 | **ADR-003 file protection closes by documentation, no knob** | **Proposed** 2026-09-05 |
+| D65 | **ADR-003 file protection closes by documentation, no knob.** ⚠️ The reasoning strengthened on contact: drafting the README's privacy section on the old §9 wording produced a paragraph claiming LedgerKit sets *no* protection class, which is false — so the amendment is a correction, not a formality. Reopening trigger named: an app needing a class *stronger* than the floor on the database itself | **Accepted** 2026-10-04 (owner), landed at Phase 4 |
 | D66 | **License: MIT.** GRDB and SwiftStreamingMarkdown are MIT; Apache-2.0 is Apple's convention for `swift-*` but not the third-party Swift ecosystem's, and MIT is the least friction for a library that wants adopting | **Accepted** 2026-09-06 (owner) |
-| D67 | **Tag `0.1.0` (no prefix); freeze before tagging; against the SDK current at Phase 4; SemVer caveat in the README** | **Proposed** 2026-09-05 |
-| D68 | **D60 has no library action; the demo pacer is optional polish** | **Proposed** 2026-09-05 |
-| D69 | **DoD-2 branch merges only behind a vendor tag that builds on the SDK current at Phase 4**; otherwise cited, not merged. ⚠️ Phase 0 found `ClaudeForFoundationModels` now tags `0.1.0`–`0.1.4`, so D58's "untagged" objection is gone and **only buildability remains open** — evaluated at Phase 4, not before, since the SDK will likely move again | **Proposed** 2026-09-05; input changed at Phase 0 |
+| D67 | **Tag `0.1.0` (no prefix); freeze before tagging; against the SDK current at Phase 4; SemVer caveat in the README.** All four held. The SDK had not moved since the Phase 0 re-run, confirmed by `sdkBuildIsPinned` rather than by memory, so no fourth toolchain pass was needed. ⚠️ **"Freeze before tagging" turned out to be necessary but not sufficient** — see F43 | **Accepted** 2026-10-04 (owner), landed at Phase 4 |
+| D68 | **D60 has no library action; the demo pacer is optional polish.** Held: `comfortableBacklog` was not retuned, and nothing in the library changed. §7.4 carries the flush-cadence-as-display-floor as an owned limit (rev 11 D60); the remedy an app would use is what `StreamingPartialSource` already does | **Accepted** 2026-10-04 (owner); handed to v0.2 as §7 item 3 |
+| D69 | **DoD-2 branch merges only behind a vendor tag that builds on the SDK current at Phase 4**; otherwise cited, not merged. ⚠️ Phase 0 found `ClaudeForFoundationModels` now tags `0.1.0`–`0.1.4`, so D58's "untagged" objection is gone and **only buildability remains open** — evaluated at Phase 4, not before, since the SDK will likely move again. ☑ **Resolved 2026-09-28: the branch stays unmerged** — no tagged `ClaudeForFoundationModels` release builds against the Xcode 27.0 GA SDK, so the second half of the condition fails and D69 takes the branch it was drafted to take. Costs DoD-2 nothing: §13 DoD-2 was satisfied at M8 across three providers, and the evidence is the log, not a build file | **Accepted** 2026-10-04 (owner); **resolved unmerged** 2026-09-28 |
 | D70 | **App target 27, OS gate removed; packages stay 26.** Reasoning corrected: the 26 floor's evidence is the *package* build targets (`arm64-apple-macos26.0`, `arm64-apple-ios26.0-simulator`), which CI already runs — the app was never the evidence, which is why moving it costs nothing. Side benefit: removes one of D58's two objections to the Claude branch | **Accepted** 2026-09-05 (owner) |
-| D71 | **The retired-phrase sweep covers `SPEC.md`, `ADR/`, `ROADMAP.md`, `CLAUDE.md`** (appendices exempt) | **Proposed** 2026-09-05 |
-| D72 | **CI: Xcode selection by SDK build string; app-build step; `LEDGERKIT_DEVICE=1` when `CI_RUNNER` is set** | **Proposed** 2026-09-05 |
+| D71 | **The retired-phrase sweep covers `SPEC.md`, `ADR/`, `ROADMAP.md`, `CLAUDE.md`** (appendices exempt). ⚠️ **Vindicated on its first real use:** rev 12's batch A found ADR-003's *Context* section carrying the retired `ValueObservation` claim a **third** time, after §9's and the ADR's own bullet — a site `Sources/**`-only sweeps had passed over for two milestones. Phase 4 adds a scope note: **`README.md` belongs in the sweep too**, now that DoD-5 points at it as a contract surface; it had already repeated D61's overstated no-dependency claim verbatim | **Accepted** 2026-10-04 (owner), widened at Phase 4 |
+| D72 | **CI: Xcode selection by SDK build string; app-build step; `LEDGERKIT_DEVICE=1` when `CI_RUNNER` is set.** ⚠⚠ **ACCEPTED BUT NOT IMPLEMENTED — the one M9 item open at the `0.1.0` tag.** Deferred to the owner at Phase 1 (concurrent edit), and re-read at Phase 4: `.github/workflows/ci.yml` is unchanged, both occurrences still comparing the SDK *major* with `-gt`, so a host with two same-major Xcodes selects the **older** and `sdkBuildIsPinned` then passes against a stale pin. Not a tag blocker — CI hygiene, the library is correct, and the false-green needs two same-major Xcodes this host does not have — but it is a mechanism that can report a verified run it did not perform. Left rather than quietly fixed, because the deferral was the owner's | **Accepted** 2026-09-05; **implementation OPEN at the tag** |
 
 ## 10. Status log
 
@@ -1474,3 +1552,5 @@ time, and CLAUDE.md is explicit that a filtered green run is not evidence here.
 | 2026-09-05 | **Phase 1 — documents, the Formal model** (CI deferred to the owner) | 457 green, unchanged — nothing here moved a test | **The Formal model needed no re-transcription, and why is the finding.** F30 reasoned from the diff (M8 restructured `drive`) but the restructure sits entirely inside the region the model collapses: `abandon(_:in:)` writes `shownPartials` and `notify`, neither of which is a model variable, and `release` is unchanged — so an abandonment and a termination are the same transition. All four configs reproduce exactly (377/586/954/1044; `none` and `tombstone` still FAIL `NoOrphanRows`), and `pcal.trans` output was byte-identical. **A model is stale when its abstraction stops matching, not when the code changes.** M8-PLAN's 17 unticked boxes ticked after verifying each against source; F5's `~~` turned out to strike **four live decisions** (D57–D60), not just the retired paragraph; D53 and D56 status cells contradicted their own decision cells. ROADMAP's M9 section rewritten from a four-bullet sketch; its target line restated on D67. F9 corrected in both places. ADR-003's `ValueObservation` bullet struck against its own M7 section. ENHANCEMENTS 1 now carries evidence *against* from two consumers. ⚠️ Outstanding: **D59's verdict** (needs the owner — shipped unremarked is not reviewed) and **CI's D72** (owner is mid-change; Beta 5 kept installed so the loop can be tested against two Xcodes) |
 | 2026-09-06 | **Phase 2 — every breaking change** (D61, D62, D63, D64, D66, D70) | **438 + 23 green** on host *and* iOS 27 simulator · demo builds · `ProjectionUITests` 6/6 | **The API is the one `0.1.0` will carry.** Net public delta: `GenerationID` → `GenerationAttemptID`, `Message.generationID` → `attemptID`, `siblings(of:)` → the inclusive `versions(of:)`, `+ModelDescriptor.appleSystem`, and every stored property on the four derived types now `public internal(set)`. Three results worth keeping. **D61's third path constant needed no change** — `project.pbxproj` was untouched, because the app's hand-patched dependencies lean on *product names*, which did not move; the workspace needed one line (`location = "group:"`). **`public let` was too tight for D63** — the library built and the *tests* failed, because they mutate derived state to build the wrong projections that prove P2 is not vacuous; `internal(set)` states the real invariant. **A mutation that the compiler catches first is still a result** — `import LedgerKit` inside Understudy fails the build, not the boundary suite, so the dormancy question had to be asked and answered separately. Seven mutations, seven caught. ⚠️ Carried out: a pre-existing intermittent in `ProjectionTests` (1 in ~10 full runs, flagged as its own task); D72's two-Xcode window **closed** when Beta 5 was removed; and the host disk is full, so the consumer proof awaits space for a final re-run — **discharged 2026-09-20**, see the row below |
 | 2026-09-20 | **Phase 0 re-run** — Xcode **27.0 GA** (`27A266a`), SDK `26A425`, host `26A428`, Swift **6.4**, iOS runtime `24A434` | **461 green** (438 + 23) host incl. device + deep · **461 green** iOS 27 GA sim · 6 `ProjectionUITests` · app builds · consumer proof green both directions | **GA moved nothing in the pinned surface** — the largest step in the cycle moving least, and the tripwire's third firing with a third distinct outcome (Beta 5 *shrank*, Beta 6 *nothing*, GA *nothing*). Exactly one failure before the pin moved, and it *was* the pin; `parserIsNotVacuous` passed beside it, which is what makes the null a result. Every M6-PLAN §2a citation re-read and confirmed against the GA interface. All four §14 residues **re-measured** rather than carried: budget still **4096** (though three ~2k turns to exhaust, not two — the turn count is prompt-dependent and CLAUDE.md now says so), §7.7 inclusive (`74+7==81`), **0 revisions in 112 snapshots** (cumulative **772**, still zero). ⚠️ **New limit found: the baseline was destroyed.** The rebuild left no beta SDK, so GA could be compared only against *the manifest* — which is the argument for checking manifests in, and means "unchanged since Beta 6" is a claim about the **pinned subset**, not the framework. Two GA facts outside it, neither actionable: `SystemLanguageModel.Adapter` is `obsoleted: 27.0` (strengthening `AssetError`'s `.unreachable`), `Transcript.StructuredSegment.source` renamed `schemaName`. **F41 recurs** (two iOS 27.0 runtimes; booted device is the newer, pinned by UDID). **Phase 2's open gate item discharged**: consumer proof re-run on GA, positive half builds and negative half fails with the two `setter is inaccessible` errors. Still open: **the API diff sign-off** |
+| 2026-09-28 | **Phase 3 — the README (DoD-4), DocC, and a library bug** | 446 + 23 green | README written against the shipped layout and shipped names, every snippet lifted from something that compiles. **DocC was not cut** — two catalogs, and `docbuild` found **four dangling symbol links** in existing public doc comments that nothing in this repo had ever checked. Rev 12's inventory drafted to a scratch file for item-by-item sign-off. **D69 resolved: the branch stays unmerged** (no tagged vendor release builds on the GA SDK). ⚠️ **The read-side flake turned out to be a real library bug** and became a Phase 4 gate item: `record(_:for:)` added to the live set with no check against the folded state, so a `.delta` arriving after the re-pull that retired its generation put a *finished* generation back into `live`, flipping `.complete` → `.streaming` until the next re-pull healed it. **That is P2 clause 3 violated at runtime.** Diagnosis is worth re-reading for method: a first trace *looked* conclusive and was unusable (parallel tests, no projection identity in the instrumentation), and the verbose version was a Heisenbug that stopped reproducing for 30 runs — the answer came from a **low-volume anomaly detector**, one print firing only on the violation |
+| **2026-10-04** | **Phase 4 — rev 12, ADR-001 Accepted, the freeze, the tag.** ☑ **M9 COMPLETE** | **470 green** (447 + 23) host · **470 green** iOS 27 GA sim · device tier (skips 9 → 6) · deep tier · 6 `ProjectionUITests` · consumer proof green against the pushed tag | **`0.1.0` tagged.** No fourth toolchain pass: `sdkBuildIsPinned` still named the installed SDK, so the first checkbox was discharged by a test in 0.07 s rather than by remembering what was installed. **API diff signed off** (201 → 203 declarations) — Phase 2's last open gate item, closed before the tag. Rev 12's thirteen items landed in six batches (Appendix J); **two of them were corrected against the draft by verifying rather than transcribing**: the PCC paragraph's argument got stronger from reading the interface (`LimitIncreaseSuggestion` is not data — it is an opaque struct whose only member is `show()`, so projecting it would persist a promise that cannot be honoured once the session is gone), and the draft's claim that `RequiredAction` sits on the README's stable list is **false** — it is on neither list, which is now flagged as a README gap rather than propagated. ADR-001 **Accepted** (R-3 re-read: 34 tags, no drift); ADR-003's file-protection item closed by documentation. ⚠️ **F43 — the freeze's one real finding:** `cp -R dev frozen/0.1.0` is not the whole freeze. Five sweeps read the `.json` files one level too shallow, so the fixtures were on disk, every sweep was green, and nothing read them — `frozenFixturesAreIntact` passed on the empty corpus, which is how it was caught rather than argued. Fixed structurally (`frozenReleases` / `allDirectories`) so the next release inherits the sweeps, with a tripwire verified to fail on an empty corpus, catch a one-character edit, and survive `LEDGERKIT_RECORD=1`. ⚠️ **One item open at the tag and deliberately not quietly fixed: D72's CI selection loop**, still comparing SDK *major* with `-gt`. Not a tag blocker, but a mechanism that can report a verified run it did not perform — the owner's to land, because the deferral was theirs |
