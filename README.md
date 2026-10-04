@@ -273,9 +273,11 @@ is not.
 
 ## Testing with Understudy
 
-`Understudy` ships in this package as a **separate product**. It has no dependency
-on LedgerKit and is useful to any Foundation Models app, whether or not you use
-the rest of this library:
+`Understudy` ships in this package as a **separate product**. The module itself
+has no dependency on LedgerKit — SPM builds and links only `Understudy`, with no
+LedgerKit code and no GRDB — so it is useful to any Foundation Models app,
+whether or not you use the rest of this library. You do still name LedgerKit as
+the *package* you depend on:
 
 ```swift
 .product(name: "Understudy", package: "LedgerKit")

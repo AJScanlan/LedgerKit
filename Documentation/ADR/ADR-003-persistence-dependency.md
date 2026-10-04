@@ -10,7 +10,10 @@ verb returns `LoadedEvent`) · **ratified 2026-07-26 at M4 Phase 1, by wiring it
 
 §9 needs little from a database: three tables (`events`, `snapshots`, `conversations`),
 single-writer append transactions, suffix reads keyed on `(conversation_id, sequence)`,
-transactional multi-table delete, and change observation for the conversation list (G9).
+and transactional multi-table delete. ⚠️ **This list said "and change observation for the
+conversation list (G9)" until M9 Phase 4** — a third site carrying the claim the bullet
+below and §9 both retired, found by the sweep that rev 12 widened to cover `ADR/`. The
+index is fed by the store, not by the database; see "Settled at M7" below.
 The spec recommends GRDB but defers the decision to implementation, behind "a small
 protocol so this is swappable." This ADR records that decision and the seam's design
 rules; M4 ratifies it by wiring.
